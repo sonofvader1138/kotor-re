@@ -1,4 +1,4 @@
-// usage: node scripts/convert_all.js [models] [textures] [tga] [music] [movies]   (default: all)
+// usage: node scripts/convert_all.js [models] [textures] [tga] [music] [sounds] [movies]   (default: all)
 // Converts all supported game assets into ~/re/assets. Reports: ~/re/temp/reports.
 // Audio verified with ffprobe if installed. Textures verified with ImageMagick if installed.
 // Models UNVERIFIED (no independent loader yet). Movies require ffmpeg and are verified with ffprobe.
@@ -255,11 +255,16 @@ if (run("tga")) {
 	}
 }
 
-// Music: streammusic/*.wav -> assets/streammusic/*.mp3 | *.wav (PCM)
-if (run("music")) {
-	console.log("music...")
-	const src = path.join(kotor.GAME, "streammusic"),
-		out = path.join(A, "streammusic")
+// Stream audio: streammusic/*.wav and streamsounds/*.wav -> assets/<folder>/*.mp3 | *.wav (PCM).
+// Both folders use the layouts that kotorAudio.unwrap detects. adpcm2pcm.decode copies PCM unchanged.
+const AUDIO = [
+	["music", "streammusic"],
+	["sounds", "streamsounds"],
+].filter((a) => run(a[0]))
+for (const [stage, folder] of AUDIO) {
+	console.log(`${stage}...`)
+	const src = path.join(kotor.GAME, folder),
+		out = path.join(A, folder)
 	fs.mkdirSync(out, { recursive: true })
 	const lines = []
 	for (const f of fs
@@ -280,7 +285,7 @@ if (run("music")) {
 		lines.push(`${name} ${u.kind} ${info} ${err ? "FAIL: " + err : "PASS"}`)
 		if (!err) fs.writeFileSync(path.join(out, `${name}.${u.kind}`), data)
 	}
-	tally("music", lines)
+	tally(stage, lines)
 }
 
 // Movies: movies/*.bik -> assets/movies/*.mp4 (H.264 High profile, yuv420p; AAC LC audio).
@@ -426,8 +431,12 @@ else if (run("movies")) {
 const ffprobe = !childProcess.spawnSync("ffprobe", ["-version"], {
 	stdio: "ignore",
 }).error
-if (ffprobe && run("music")) {
-	const dir = path.join(A, "streammusic")
+for (const [stage, folder] of AUDIO) {
+	if (!ffprobe) {
+		summary.push(`ffprobe missing: ${stage} UNVERIFIED`)
+		continue
+	}
+	const dir = path.join(A, folder)
 	const lines = fs.readdirSync(dir).map((f) => {
 		const r = childProcess.spawnSync(
 			"ffprobe",
@@ -443,8 +452,8 @@ if (ffprobe && run("music")) {
 				.split("\n")[0]
 		}`
 	})
-	tally("ffprobe", lines)
-} else if (run("music")) summary.push("ffprobe missing: audio UNVERIFIED")
+	tally(`ffprobe_${stage}`, lines)
+}
 if (run("models")) summary.push("models UNVERIFIED (no independent loader)")
 
 console.log(summary.join("\n"))

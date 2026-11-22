@@ -524,7 +524,7 @@ In 51 of these files the MP3 stream begins with an ID3v2 tag and ends with a 128
 
 ## Layout B: WAV behind an MP3 stub
 
-The 50 ambient files, whose names begin with `al_`, and `mus_loadscreen.wav` begin with 470 bytes of MP3 data. These bytes form three MPEG-2 Layer III frames at 22,050 Hz and contain the encoder string "LAME3.93". A complete WAV file follows at offset 0x1D6 (470). The purpose of the stub is not known.
+The 50 ambient files, whose names begin with `al_`, and `mus_loadscreen.wav` begin with 470 bytes of MP3 data. These bytes form three MPEG-2 Layer III frames at 22,050 Hz and contain the encoder string "LAME3.93". A complete WAV file follows at offset 0x1D6 (470). The stub is byte-identical in all 51 of these files and in all 970 files of `streamsounds/`. ffmpeg decodes it to 1,728 samples of digital silence (every sample is 0). The purpose of the stub is not known. One plausible reason is that it lets a player that probes for MP3 open the file, but this is unverified.
 
 In 47 of the 51 embedded WAV files the audio is IMA ADPCM, a 4-bit compressed format, in stereo at 44,100 Hz. The other four contain uncompressed 16-bit PCM. Five files carry LIST or smpl metadata chunks after the audio. The chunks of every file end exactly at the end of the file.
 
@@ -535,6 +535,62 @@ The ADPCM data follows the standard WAV variant of IMA ADPCM. The decoder is `sc
 The audio is split into blocks of 2,048 bytes. Each block holds 2,041 samples per channel. A block begins with a 4-byte header for each channel: an s16 starting sample, a u8 step index, and a zero byte. The rest of the block alternates between channels in groups of 4 bytes, which hold 8 samples. Within each byte the low 4 bits come first. The "fact" chunk stores the total number of samples per channel.
 
 The decoder was checked as follows. Each block header stores the sample the encoder expected next. In all 47 files the difference between that sample and the last decoded sample of the previous block is about the same as the difference between any two neighbouring samples. When the order of the 4-bit values is swapped as a test, this difference grows 8 to 14 times.
+
+# Sound effects and voices: streamsounds/\*.wav
+
+The folder `streamsounds/` holds 970 files with the extension `.wav`. They are combat voice lines, creature sounds, ambient loops and a few music stingers that the game streams from disk instead of loading from the BIF archives. Every file uses Layout B from the music section: the same 470-byte MP3 stub, followed by a complete WAV file at offset 0x1D6 (470). No file uses Layout A, and none uses ADPCM. The converter `scripts/convert_all.js` (stage `sounds`) strips the stub and writes the embedded WAV unchanged to `assets/streamsounds/`.
+
+## Embedded WAV
+
+The following table lists the fields of the embedded WAV file. Offsets count from the "RIFF" tag at file offset 0x1D6.
+
+| Offset | Type    | Meaning                      | Evidence                                                                                                              | Confidence |
+| ------ | ------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | char[4] | "RIFF"                       | True in all 970 files.                                                                                                | high       |
+| 0x04   | u32     | RIFF size: file size - 478   | The chunk walk ends exactly at the end of all 970 files.                                                              | high       |
+| 0x08   | char[4] | "WAVE"                       | True in all 970 files.                                                                                                | high       |
+| 0x0C   | chunk   | "fmt " chunk, 16 or 18 bytes | 960 files use 16 bytes. 10 use 18 bytes, where the extra u16 is 0.                                                    | high       |
+| 0x14   | u16     | Format tag, always 1 (PCM)   | True in all 970 files.                                                                                                | high       |
+| 0x16   | u16     | Channel count                | 952 files are mono. The 18 `mus_sbat_*` files are stereo.                                                             | high       |
+| 0x18   | u32     | Sample rate                  | 966 files use 22,050 Hz. The four `N_DARKJEDIM_*` files use 44,100 Hz.                                                | high       |
+| 0x1C   | u32     | Bytes per second             | Equals rate × block align in all 970 files.                                                                           | high       |
+| 0x20   | u16     | Block align: 2 × channels    | True in all 970 files.                                                                                                | high       |
+| 0x22   | u16     | Bits per sample, always 16   | True in all 970 files.                                                                                                | high       |
+
+The chunks after "fmt " vary. The table below counts each chunk sequence.
+
+| Chunk sequence after "fmt "  | Files | Notes                                                                                 |
+| ---------------------------- | ----- | ------------------------------------------------------------------------------------- |
+| data                         | 932   | The plain case.                                                                       |
+| fact, data                   | 10    | These are the files with an 18-byte "fmt " chunk. "fact" equals the sample count.     |
+| data, LIST                   | 25    | LIST INFO metadata written by Sound Forge 6.0, with an engineer name and a 2003 date. |
+| data, LIST, smpl             | 1     | `cs_sfgenloop.wav`. The smpl chunk declares no loops.                                 |
+| data, smpl                   | 1     | `al_en_emptybar.wav`. The smpl chunk declares no loops.                               |
+| data, cue, LIST              | 1     | `al_nt_fountsmal.wav`. One cue point at sample 0, labelled "Loop 1-2".                |
+
+In all 10 files with a "fact" chunk, its value equals the data size divided by 2. Every data size is a whole number of blocks. The engine probably ignores the metadata chunks, because they occur in only 28 files, but this is unverified.
+
+## File names
+
+The names encode what the sound is for. The meanings of the prefixes are inferred from the names alone and are unverified.
+
+| Prefix | Files | Probable meaning                                                                                  |
+| ------ | ----- | ------------------------------------------------------------------------------------------------- |
+| P\_    | 419   | Party member voice sets, such as `P_CARTH_*` and `P_PLYERMW_*` (player, male).                     |
+| N\_    | 256   | Non-player character voice sets, such as `N_BITH_*`.                                              |
+| c\_    | 181   | Creature and droid sounds, such as `c_drdastro_*`.                                                |
+| al\_   | 69    | Ambient loops, such as `al_nt_ocean`.                                                             |
+| mus\_  | 18    | Battle music stingers, all named `mus_sbat_<area>`.                                               |
+| pl\_   | 14    | Placeable loops, such as `pl_lrgfountain`.                                                        |
+| mgs\_  | 7     | Minigame sounds, such as `mgs_engine_01l` and `mgs_bike_idle`.                                    |
+| cs\_   | 5     | Cutscene sounds, such as `cs_duelcrowd`.                                                          |
+| as\_   | 1     | `as_el_alert`. The meaning of this prefix is unknown.                                             |
+
+The suffix names the sound-set slot. Examples are ATK1 (attack), BAT1 (battle cry), HIT1 (hit), DEAD (death) and SLCT (selected). Party members have about 29 slots each, including CRIT, POIS, LOW, STLH (stealth) and SRCH (search). The prefixes appear in both upper and lower case. No two names collide when case is ignored.
+
+## Verification
+
+All 970 files pass the parser: the chunk walk of each embedded WAV ends exactly at the end of the file. ffprobe opens all 970 outputs. ffmpeg decodes every output without error, and each decode yields exactly the sample count implied by its data chunk.
 
 # Movies: movies/\*.bik
 
