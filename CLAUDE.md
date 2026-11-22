@@ -9,6 +9,7 @@
 
 The following tools are installed:
 
+- node
 - jq
 - perl
 - python3
