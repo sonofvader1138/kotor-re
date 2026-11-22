@@ -1,7 +1,11 @@
 // usage: node scripts/verify.js [models] [textures] [tga] [music] [sounds] [movies] [gui]   (default: all)
 // Checks the converted assets in ~/re/assets with independent tools and writes one report per check to
 // ~/re/temp/reports. Run scripts/convert.js first. A stage whose tool is missing is reported as UNVERIFIED.
-// Within a stage, the checks run in parallel, one external program per CPU at a time.
+// The checks are split across one shard process per CPU. Each shard takes every N-th job of every stage,
+// runs all stages at the same time and starts at most SHARD_JOBS jobs at once. The main process merges
+// the results in job order, writes the reports and prints the summary. Shards are processes, not worker
+// threads: starting a program copies the caller's memory map, and threads of one large process wait on
+// each other to do that.
 // models: assimp must load each OBJ with at least one mesh and the same face count as the file.
 // textures: ImageMagick's decoding of each PNG must equal the decoded TPC texture, and pngcheck must accept it.
 // tga: ImageMagick's decoding of each PNG must equal its decoding of the source TGA, and pngcheck must
@@ -21,14 +25,22 @@ const bink = require("./bink")
 
 const ASSETS = path.join(kotor.ROOT, "assets"),
 	REPORTS = path.join(kotor.ROOT, "temp", "reports")
-fs.mkdirSync(REPORTS, { recursive: true })
+const SHARDS = os.availableParallelism(),
+	SHARD_JOBS = 2
+// The main process has no VERIFY_SHARD variable. It runs no checks, so its shard number only matters to log.
+const isShard = process.env.VERIFY_SHARD !== undefined
+const shard = isShard ? Number(process.env.VERIFY_SHARD) : 0
+const log = (message) => {
+	if (shard === 0) {
+		console.log(message)
+	}
+}
 const want = new Set(process.argv.slice(2))
 const run = (stage) => want.size === 0 || want.has(stage)
-const summary = []
-const tally = (name, lines) => {
-	fs.writeFileSync(path.join(REPORTS, `${name}.txt`), lines.join("\n") + "\n")
-	const pass = lines.filter((line) => line.endsWith("PASS")).length
-	summary.push(`${name}: ${pass} pass, ${lines.length - pass} fail`)
+// Each stage pushes its summary items into its own list, so the summary keeps stage order. An item is
+// either a note string or a report: its name and this shard's [job index, result] pairs.
+const tally = (summary, name, entries) => {
+	summary.push({ name, entries })
 }
 // childProcess.spawnSync reports a missing program in its error field instead of throwing.
 const has = (program, flag = "-version") =>
@@ -55,21 +67,34 @@ const exec = (program, args, input) =>
 		child.on("error", (error) => finish(null, error))
 		child.on("close", (status) => finish(status))
 	})
-// Runs the jobs, each a function returning a promise, with one job per CPU at a time.
-// Resolves to their results in job order.
-const WORKERS = os.availableParallelism()
-const pool = async (jobs) => {
-	const results = new Array(jobs.length)
-	let next = 0
-	const worker = async () => {
-		while (next < jobs.length) {
-			const i = next++
-			results[i] = await jobs[i]()
-		}
-	}
-	await Promise.all(Array.from({ length: WORKERS }, worker))
-	return results
-}
+// Runs this shard's share of the jobs, each a function returning a promise: job i belongs to shard
+// i % SHARDS. All calls in a shard share SHARD_JOBS slots, and jobs start in the order they were queued.
+// Resolves to [job index, result] pairs.
+let activeJobs = 0
+const waiting = []
+const pool = (jobs) =>
+	Promise.all(
+		jobs
+			.map((job, i) => [job, i])
+			.filter(([, i]) => i % SHARDS === shard)
+			.map(async ([job, i]) => {
+				if (activeJobs < SHARD_JOBS) {
+					activeJobs++
+				} else {
+					await new Promise((resolve) => waiting.push(resolve))
+				}
+
+				const result = await job()
+
+				// A waiting job takes over the slot, so the count only drops when nobody waits.
+				if (waiting.length) {
+					waiting.shift()()
+				} else {
+					activeJobs--
+				}
+				return [i, result]
+			}),
+	)
 const firstLine = (result) =>
 	String(result.stderr || result.error || "")
 		.trim()
@@ -116,7 +141,7 @@ const pngCheck = async (name, file, width, height, rgba) => {
 		return `${name} ${decoded.size} FAIL: pixels differ`
 	return `${name} ${decoded.size} PASS`
 }
-// Runs pngcheck on every PNG in dir, 200 files per run. Resolves to one report line per file.
+// Runs pngcheck on every PNG in dir, 200 files per run. Each job's result holds one report line per file.
 const pngcheckDir = async (dir) => {
 	const names = files(dir, ".png"),
 		jobs = []
@@ -137,24 +162,37 @@ const pngcheckDir = async (dir) => {
 			)
 		})
 	}
-	return (await pool(jobs)).flat()
+	return pool(jobs)
 }
 const magick = has("convert"),
 	pngcheck = has("pngcheck", "-h")
-const imageChecks = async (name, dir, jobs) => {
-	if (magick) tally(`imagemagick_${name}`, await pool(jobs))
-	else summary.push(`ImageMagick missing: ${name} UNVERIFIED`)
-	if (pngcheck) tally(`pngcheck_${name}`, await pngcheckDir(dir))
-	else summary.push(`pngcheck missing: ${name} PNG structure unchecked`)
+// The pixel and structure checks of one directory run at the same time.
+const imageChecks = async (summary, name, dir, jobs) => {
+	const [pixelLines, structureLines] = await Promise.all([
+		magick ? pool(jobs) : null,
+		pngcheck ? pngcheckDir(dir) : null,
+	])
+
+	if (pixelLines) {
+		tally(summary, `imagemagick_${name}`, pixelLines)
+	} else {
+		summary.push(`ImageMagick missing: ${name} UNVERIFIED`)
+	}
+
+	if (structureLines) {
+		tally(summary, `pngcheck_${name}`, structureLines)
+	} else {
+		summary.push(`pngcheck missing: ${name} PNG structure unchecked`)
+	}
 }
 
 // Models: assets/data/models/*.obj
-const models = async () => {
+const models = async (summary) => {
 	if (!has("assimp", "version")) {
 		summary.push("assimp missing: models UNVERIFIED")
 		return
 	}
-	console.log("models...")
+	log("models...")
 	const dir = path.join(ASSETS, "data", "models")
 	const jobs = files(dir, ".obj").map((file) => async () => {
 		const objPath = path.join(dir, file)
@@ -177,14 +215,14 @@ const models = async () => {
 			(errs.length ? "FAIL: " + errs.join("; ") : "PASS")
 		)
 	})
-	tally("assimp_models", await pool(jobs))
+	tally(summary, "assimp_models", await pool(jobs))
 }
 
 // Textures: assets/TexturePacks/<pack>/*.png against the TPC textures in TexturePacks/<pack>.erf.
 // Each job decodes its TPC texture when it starts, so only one texture per worker is held in memory.
-const textures = async () => {
+const textures = async (summary) => {
 	for (const pack of ["swpc_tex_tpa", "swpc_tex_gui"]) {
-		console.log(`textures ${pack}...`)
+		log(`textures ${pack}...`)
 		const dir = path.join(ASSETS, "TexturePacks", pack)
 		const erf = kotor.readErf(
 			path.join(kotor.GAME, "TexturePacks", `${pack}.erf`),
@@ -204,7 +242,7 @@ const textures = async () => {
 					image.rgba,
 				)
 			})
-		await imageChecks(pack, dir, jobs)
+		await imageChecks(summary, pack, dir, jobs)
 	}
 }
 
@@ -214,12 +252,12 @@ const TGA_GROUPS = [
 	["textures", /^data\/textures\.bif$/],
 	["legacy", /^data\/legacy\.bif$/],
 ]
-const tgaImages = async () => {
+const tgaImages = async (summary) => {
 	const key = kotor.readKey()
 	for (const [group, pattern] of TGA_GROUPS) {
-		console.log(`tga ${group}...`)
+		log(`tga ${group}...`)
 		const dir = path.join(ASSETS, "data", group)
-		const txiLines = [],
+		const txiJobs = [],
 			jobs = [],
 			seen = new Set()
 		for (const bif of key.bifs.filter((name) => pattern.test(name))) {
@@ -231,7 +269,7 @@ const tgaImages = async () => {
 				if (seen.has(name)) continue
 				seen.add(name)
 				if (resource.ext === "txi") {
-					txiLines.push(
+					txiJobs.push(async () =>
 						!fs.existsSync(file)
 							? `${name} FAIL: output missing`
 							: Buffer.compare(fs.readFileSync(file), resource.data) !== 0
@@ -248,19 +286,19 @@ const tgaImages = async () => {
 				})
 			}
 		}
-		tally(`txi_${group}`, txiLines)
-		await imageChecks(group, dir, jobs)
+		tally(summary, `txi_${group}`, await pool(txiJobs))
+		await imageChecks(summary, group, dir, jobs)
 	}
 }
 
 // Stream audio: assets/streammusic and assets/streamsounds
 const ffprobe = has("ffprobe")
-const streamAudio = async (stage, folder) => {
+const streamAudio = async (summary, stage, folder) => {
 	if (!ffprobe) {
 		summary.push(`ffprobe missing: ${stage} UNVERIFIED`)
 		return
 	}
-	console.log(`${stage}...`)
+	log(`${stage}...`)
 	const dir = path.join(ASSETS, folder)
 	const jobs = files(dir, "").map((file) => async () => {
 		const result = await exec("ffprobe", ["-v", "error", path.join(dir, file)])
@@ -268,18 +306,18 @@ const streamAudio = async (stage, folder) => {
 			? `${file} PASS`
 			: `${file} FAIL: ${firstLine(result)}`
 	})
-	tally(`ffprobe_${stage}`, await pool(jobs))
+	tally(summary, `ffprobe_${stage}`, await pool(jobs))
 }
 
 // Movies: assets/movies/*.mp4 against movies/*.bik. The probe and the PSNR comparison of one movie run
 // at the same time.
 const MIN_PSNR = 40
-const movies = async () => {
+const movies = async (summary) => {
 	if (!(ffprobe && has("ffmpeg"))) {
 		summary.push("ffmpeg or ffprobe missing: movies UNVERIFIED")
 		return
 	}
-	console.log("movies...")
+	log("movies...")
 	const src = path.join(kotor.GAME, "movies"),
 		dir = path.join(ASSETS, "movies")
 	const jobs = files(src, ".bik").map((file) => async () => {
@@ -357,16 +395,16 @@ const movies = async () => {
 			(errs.length ? "FAIL: " + errs.join("; ") : "PASS")
 		)
 	})
-	tally("ffprobe_movies", await pool(jobs))
+	tally(summary, "ffprobe_movies", await pool(jobs))
 }
 
 // GUI: assets/data/gui/*.json and assets/patch/*.json
-const gui = async () => {
+const gui = async (summary) => {
 	if (!has("jq", "--version")) {
 		summary.push("jq missing: gui UNVERIFIED")
 		return
 	}
-	console.log("gui...")
+	log("gui...")
 	const jobs = ["data/gui", "patch"].flatMap((dir) =>
 		files(path.join(ASSETS, dir), ".json").map((file) => async () => {
 			const result = await exec("jq", ["empty", path.join(ASSETS, dir, file)])
@@ -375,17 +413,81 @@ const gui = async () => {
 				: `${dir}/${file} FAIL: jq: ${firstLine(result)}`
 		}),
 	)
-	tally("jq_gui", await pool(jobs))
+	tally(summary, "jq_gui", await pool(jobs))
 }
 
+// Movies queue their jobs first because each one takes longest, so short jobs fill the other CPUs.
+const STAGES = [
+	["movies", movies],
+	["models", models],
+	["textures", textures],
+	["tga", tgaImages],
+	["music", (summary) => streamAudio(summary, "music", "streammusic")],
+	["sounds", (summary) => streamAudio(summary, "sounds", "streamsounds")],
+	["gui", gui],
+]
+const REPORT_ORDER = ["models", "textures", "tga", "music", "sounds", "movies", "gui"]
+// Runs the stages in this shard and resolves to its summary items in report order.
+const checkShard = async () => {
+	const summaries = {}
+	await Promise.all(
+		STAGES.filter(([stage]) => run(stage)).map(([stage, check]) => {
+			summaries[stage] = []
+			return check(summaries[stage])
+		}),
+	)
+
+	return REPORT_ORDER.filter((stage) => summaries[stage]).flatMap(
+		(stage) => summaries[stage],
+	)
+}
+
+// Every shard yields the same sequence of items, so item k of each shard belongs to the same report.
+// A pngcheck job's result is a list of lines, which the merge flattens.
 const main = async () => {
-	if (run("models")) await models()
-	if (run("textures")) await textures()
-	if (run("tga")) await tgaImages()
-	if (run("music")) await streamAudio("music", "streammusic")
-	if (run("sounds")) await streamAudio("sounds", "streamsounds")
-	if (run("movies")) await movies()
-	if (run("gui")) await gui()
+	const shards = await Promise.all(
+		Array.from(
+			{ length: SHARDS },
+			(_, i) =>
+				new Promise((resolve) => {
+					const child = childProcess.fork(__filename, process.argv.slice(2), {
+						env: { ...process.env, VERIFY_SHARD: String(i) },
+					})
+					let items = null
+					child.on("message", (message) => {
+						items = message
+					})
+					child.on("exit", (status) =>
+						resolve(items ?? { error: `shard ${i} exited with status ${status}` }),
+					)
+				}),
+		),
+	)
+
+	const failed = shards.find((items) => items.error)
+	if (failed) {
+		kotor.fatal(failed.error)
+	}
+
+	fs.mkdirSync(REPORTS, { recursive: true })
+	const summary = shards[0].map((item, k) => {
+		if (typeof item === "string") {
+			return item
+		}
+
+		const lines = shards
+			.flatMap((items) => items[k].entries)
+			.sort((a, b) => a[0] - b[0])
+			.flatMap(([, result]) => result)
+		fs.writeFileSync(path.join(REPORTS, `${item.name}.txt`), lines.join("\n") + "\n")
+		const pass = lines.filter((line) => line.endsWith("PASS")).length
+		return `${item.name}: ${pass} pass, ${lines.length - pass} fail`
+	})
 	console.log(summary.join("\n"))
 }
-main()
+
+if (isShard) {
+	checkShard().then((items) => process.send(items, () => process.disconnect()))
+} else {
+	main()
+}
