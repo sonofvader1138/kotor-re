@@ -1,4 +1,4 @@
-// usage: node scripts/convert.js [models] [textures] [tga] [music] [sounds] [movies] [gui]   (default: all)
+// usage: node scripts/convert.js [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui]   (default: all)
 // Converts all supported game assets into ~/re/assets and writes each parser's report to ~/re/temp/reports.
 // It does not check the outputs with independent tools. scripts/verify.js does that.
 // Movies require ffmpeg.
@@ -38,9 +38,10 @@ const PACKS = ["swpc_tex_tpa", "swpc_tex_gui"]
 const packErf = (pack) =>
 	kotor.readErf(path.join(kotor.GAME, "TexturePacks", `${pack}.erf`))
 
-// Removes files with the given extensions from dir that were not written in this run.
+// Removes files with the given extensions from dir and its subfolders that were not written in this run.
+// keep holds paths relative to dir.
 const prune = (dir, keep, exts) => {
-	for (const file of fs.readdirSync(dir)) {
+	for (const file of fs.readdirSync(dir, { recursive: true })) {
 		if (exts.includes(path.extname(file)) && !keep.has(file)) {
 			fs.unlinkSync(path.join(dir, file))
 		}
@@ -228,17 +229,19 @@ const convertTga = () => {
 	}
 }
 
-// Stream audio: streammusic/*.wav and streamsounds/*.wav -> assets/<folder>/*.mp3 | *.wav (PCM).
-// Both folders use the layouts that audio.unwrap detects. adpcm2pcm.decode copies PCM unchanged.
+// Stream audio: streammusic/*.wav, streamsounds/*.wav and streamwaves/**/*.wav -> assets/<folder>/**/*.mp3 | *.wav (PCM).
+// All three folders use the layouts that audio.unwrap detects. adpcm2pcm.decode copies PCM unchanged.
+// streamwaves has one subfolder per module and dialog, which the output keeps.
 const convertAudio = (stage, folder) => {
 	console.log(`${stage}...`)
 	const src = path.join(kotor.GAME, folder),
 		out = path.join(ASSETS, folder)
 	fs.mkdirSync(out, { recursive: true })
 
-	const lines = []
+	const lines = [],
+		written = new Set()
 	for (const file of fs
-		.readdirSync(src)
+		.readdirSync(src, { recursive: true })
 		.filter((file) => /\.wav$/i.test(file))
 		.sort()) {
 		const name = file.replace(/\.wav$/i, ""),
@@ -258,10 +261,14 @@ const convertAudio = (stage, folder) => {
 			`${name} ${unwrapped.kind} ${info} ${err ? "FAIL: " + err : "PASS"}`,
 		)
 		if (!err) {
-			fs.writeFileSync(path.join(out, `${name}.${unwrapped.kind}`), data)
+			const outFile = `${name}.${unwrapped.kind}`
+			fs.mkdirSync(path.join(out, path.dirname(outFile)), { recursive: true })
+			fs.writeFileSync(path.join(out, outFile), data)
+			written.add(outFile)
 		}
 	}
 
+	prune(out, written, [".mp3", ".wav"])
 	tally(stage, lines)
 }
 
@@ -442,6 +449,7 @@ const STAGES = [
 	["tga", convertTga],
 	["music", () => convertAudio("music", "streammusic")],
 	["sounds", () => convertAudio("sounds", "streamsounds")],
+	["waves", () => convertAudio("waves", "streamwaves")],
 	["gui", convertGui],
 ]
 const REPORT_ORDER = [
@@ -450,6 +458,7 @@ const REPORT_ORDER = [
 	"tga",
 	"music",
 	"sounds",
+	"waves",
 	"movies",
 	"gui",
 ]

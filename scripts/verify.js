@@ -1,4 +1,4 @@
-// usage: node scripts/verify.js [models] [textures] [tga] [music] [sounds] [movies] [gui]   (default: all)
+// usage: node scripts/verify.js [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui]   (default: all)
 // Checks the converted assets in ~/re/assets with independent tools and writes one report per check to
 // ~/re/temp/reports. Run scripts/convert.js first. A stage whose tool is missing is reported as UNVERIFIED.
 // The checks are split across one shard process per CPU. Each shard takes every N-th job of every stage,
@@ -14,7 +14,7 @@
 // textures: ImageMagick's decoding of each PNG must equal the decoded TPC texture, and pngcheck must accept it.
 // tga: ImageMagick's decoding of each PNG must equal its decoding of the source TGA, and pngcheck must
 // accept the PNG. Each TXI must equal the source bytes.
-// music, sounds: ffprobe must read each file without error.
+// music, sounds, waves: ffprobe must read each file without error.
 // movies: ffprobe must report the Bink file's size, frame count, sample rate, channel count and audio
 // duration (within 0.1 s; ffmpeg's Bink audio decoder emits about 0.03 s more than the packets declare),
 // and every output frame must have a PSNR of at least 40 dB against the decoded Bink frame.
@@ -88,10 +88,11 @@ const firstLine = (result) =>
 		.trim()
 		.split("\n")[0]
 
-const files = (dir, ext) =>
+// Lists the files in dir whose names end in ext, as paths relative to dir. recursive includes subfolders.
+const files = (dir, ext, recursive = false) =>
 	fs.existsSync(dir)
 		? fs
-				.readdirSync(dir)
+				.readdirSync(dir, { recursive })
 				.filter((file) => file.endsWith(ext))
 				.sort()
 		: []
@@ -323,7 +324,7 @@ const tgaImages = async (summary) => {
 	}
 }
 
-// Stream audio: assets/streammusic and assets/streamsounds
+// Stream audio: assets/streammusic, assets/streamsounds and assets/streamwaves
 const ffprobe = has("ffprobe")
 const streamAudio = async (summary, stage, folder) => {
 	if (!ffprobe) {
@@ -333,7 +334,11 @@ const streamAudio = async (summary, stage, folder) => {
 
 	log(`${stage}...`)
 	const dir = path.join(ASSETS, folder)
-	const jobs = files(dir, "").map((file) => async () => {
+	const audioFiles = [
+		...files(dir, ".mp3", true),
+		...files(dir, ".wav", true),
+	].sort()
+	const jobs = audioFiles.map((file) => async () => {
 		const result = await kotor.exec("ffprobe", [
 			"-v",
 			"error",
@@ -485,6 +490,7 @@ const STAGES = [
 	["tga", tgaImages],
 	["music", (summary) => streamAudio(summary, "music", "streammusic")],
 	["sounds", (summary) => streamAudio(summary, "sounds", "streamsounds")],
+	["waves", (summary) => streamAudio(summary, "waves", "streamwaves")],
 	["gui", gui],
 ]
 const REPORT_ORDER = [
@@ -493,6 +499,7 @@ const REPORT_ORDER = [
 	"tga",
 	"music",
 	"sounds",
+	"waves",
 	"movies",
 	"gui",
 ]

@@ -592,6 +592,60 @@ The suffix names the sound-set slot. Examples are ATK1 (attack), BAT1 (battle cr
 
 All 970 files pass the parser: the chunk walk of each embedded WAV ends exactly at the end of the file. ffprobe opens all 970 outputs. ffmpeg decodes every output without error, and each decode yields exactly the sample count implied by its data chunk.
 
+# Voice-over: streamwaves/\*\*/\*.wav
+
+The folder `streamwaves/` holds the spoken dialog of the game: 13,799 files with the extension `.wav`, 552 MB in total. Every file uses Layout A from the music section: a 58-byte fake WAV header followed by an MP3 stream. No file uses Layout B. The converter `scripts/convert.js` (stage `waves`) strips the header and writes the MP3 stream unchanged to `assets/streamwaves/`, keeping the folder structure.
+
+## Fake header
+
+The 58-byte header is byte-identical in all 13,799 files and in the 68 Layout A files of `streammusic/`. The following table lists its fields. It describes a WAV file with no audio, so a player that trusts it plays nothing.
+
+| Offset | Type    | Meaning                                          | Evidence                                    | Confidence |
+| ------ | ------- | ------------------------------------------------ | ------------------------------------------- | ---------- |
+| 0x00   | char[4] | "RIFF"                                           | True in all 13,799 files.                   | high       |
+| 0x04   | u32     | RIFF size, always 50. It covers the header only. | True in all 13,799 files.                   | high       |
+| 0x08   | char[4] | "WAVE"                                           | True in all 13,799 files.                   | high       |
+| 0x0C   | chunk   | "fmt " chunk of 18 bytes                         | True in all 13,799 files.                   | high       |
+| 0x14   | u16     | Format tag 1 (PCM)                               | The claim is false: the audio is MP3.       | high       |
+| 0x16   | u16     | Channel count 1                                  | True of the MP3 stream.                     | high       |
+| 0x18   | u32     | Sample rate 22,050 Hz                            | The claim is false: the MP3 uses 32,000 Hz. | high       |
+| 0x1C   | u32     | Bytes per second 22,050                          | Consistent with the false format claim.     | high       |
+| 0x20   | u16     | Block align 1                                    | Consistent with the false format claim.     | high       |
+| 0x22   | u16     | Bits per sample 8                                | Consistent with the false format claim.     | high       |
+| 0x24   | u16     | Extra format size 0                              | True in all 13,799 files.                   | high       |
+| 0x26   | chunk   | "fact" chunk of 4 bytes with value 0             | True in all 13,799 files.                   | high       |
+| 0x32   | chunk   | "data" chunk header with size 0                  | True in all 13,799 files.                   | high       |
+| 0x3A   | bytes   | MP3 stream, which runs to the end of the file    | The frame walk ends exactly at end of file. | high       |
+
+## MP3 stream
+
+Every frame of every file has the same header, 0xFFFB38C4 (ignoring the padding bit): MPEG-1 Layer III, 48 kbit/s, 32,000 Hz, mono, no CRC. A frame is therefore 216 bytes, or 217 when the padding bit is set, and holds 1,152 samples (36 ms). The 13,799 files hold 2,533,955 frames in total, about 25.2 hours of speech.
+
+The first frame of every file is a LAME "Info" frame. It holds no audio and carries the encoder string "LAME3.93". Its frame count equals the number of frames after it in all 13,799 files. Its encoder delay is 576 samples in all files. In all 13,799 outputs, ffmpeg decodes exactly (frames - 1) × 1,152 - 576 - padding samples, so it applies the delay and padding values stored in this frame.
+
+Three files begin the MP3 stream with a 256-byte ID3v2.3 tag and end it with an empty 128-byte ID3v1 tag: `m01aa/c05001/nm01aac05001000_.wav`, `m01aa/tras02/NM01AATRAS02000_.wav` and `m35aa/sith13/NM35AASITH13002_.wav`. The ID3v2 tag holds two PRIV frames named "PeakValue" and "AverageLevel". These names match the volume-levelling frames that Windows Media Player writes, but this is unverified. The converter keeps both tags.
+
+## Folder structure and file names
+
+The folder has 489 files at the top level and 81 subfolders. 77 subfolders are named after modules, such as `m24aa`. The others are `globe`, `stn12`, `stn14` and `stn57`. Each of these holds one subfolder per conversation, such as `m24aa/droi01`, and 568 such conversation folders exist. Some conversation names, such as `bast01`, occur under more than one module.
+
+All 13,310 files in conversation folders are named N, then the module folder name, then the conversation folder name, then three digits, then one more character. In 13,297 files the last character is "\_". In 13 files it is "A" or "B", as in `NM11AAGADO02018A.wav` and `NM11AAGADO02018B.wav`, which appear to be two parts of one line. The three digits are probably the index of the dialog node that speaks the line. The name `nm24aadroi01000_` occurs in `modules/kas_m24aa_s.rim`, which suggests that dialog resources refer to these files by name. The meaning of the digits and the format of the dialog resources are unverified.
+
+The following table classifies the 489 top-level files by name.
+
+| Name pattern            | Files | Probable meaning                                                                                              |
+| ----------------------- | ----- | ------------------------------------------------------------------------------------------------------------- |
+| N_G\<speaker\>\_\<kind> | 421   | Generic lines of non-player characters, such as `N_GDUROS_COML1`. Names of this form occur in `dialog.tlk`.   |
+| N_M\<number\>...        | 59    | Dialog lines that follow the conversation-folder scheme but lie at the top level, such as `N_M1ANLEVE98003_`. |
+| BA, MA, MI              | 8     | Cutscene lines, such as `BA02CS001` and `MA18CS006A`.                                                         |
+| \_m40acdart03999\_      | 1     | A conversation-scheme name with a leading underscore instead of N.                                            |
+
+The prefixes appear in both upper and lower case. No two paths collide when case is ignored. The meanings in the table are inferred from the names and are unverified.
+
+## Verification
+
+All 13,799 files pass the parser in `scripts/audio.js`: the MP3 frame walk of each file ends exactly at the end of the file. ffprobe opens all 13,799 outputs without error. ffmpeg decodes every output without error, and each decode yields the sample count given above.
+
 # Movies: movies/\*.bik
 
 The game's 61 cutscenes and logo screens are in `movies/`. They are Bink video files, a format by RAD Game Tools that the game plays with `binkw32.dll`. All 61 files begin with the signature "BIKi", which `file` identifies as Bink Video revision i. The parser is `scripts/bink.js`, and the converter is the `movies` stage of `scripts/convert.js`. All 61 files pass the parser's check: the header size field matches the file size, the frame index ends exactly at the end of the file, the largest-frame field equals the largest frame, and every audio packet fits inside its frame.
