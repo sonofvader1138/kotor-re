@@ -12,7 +12,7 @@ const STEP = [
 	11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794,
 	32767,
 ]
-const IDX = [-1, -1, -1, -1, 2, 4, 6, 8]
+const STEP_INDEX_CHANGE = [-1, -1, -1, -1, 2, 4, 6, 8]
 
 function chunks(file) {
 	const found = {}
@@ -55,17 +55,17 @@ function decode(file) {
 	const tag = fmt.readUInt16LE(0),
 		channels = fmt.readUInt16LE(2),
 		rate = fmt.readUInt32LE(4),
-		ba = fmt.readUInt16LE(12)
+		blockAlign = fmt.readUInt16LE(12)
 	if (tag !== 0x11) return { out: file, info: `copied (fmt=${tag})`, err: "" }
-	const spb = fmt.readUInt16LE(18)
-	if (spb !== ((ba - 4 * channels) * 2) / channels + 1)
+	const samplesPerBlock = fmt.readUInt16LE(18)
+	if (samplesPerBlock !== ((blockAlign - 4 * channels) * 2) / channels + 1)
 		return {
 			out: null,
 			info: "",
-			err: `samples/block ${spb} vs blockalign ${ba}`,
+			err: `samples/block ${samplesPerBlock} vs blockalign ${blockAlign}`,
 		}
-	const blocks = Math.floor(data.length / ba),
-		total = blocks * spb
+	const blocks = Math.floor(data.length / blockAlign),
+		total = blocks * samplesPerBlock
 	const sampleCount = fact && fact <= total ? fact : total
 	const pcm = new Int16Array(total * channels)
 	let errSum = 0,
@@ -75,8 +75,8 @@ function decode(file) {
 	const last = new Array(channels).fill(null)
 
 	for (let block = 0; block < blocks; block++) {
-		const blockStart = block * ba,
-			firstSample = block * spb,
+		const blockStart = block * blockAlign,
+			firstSample = block * samplesPerBlock,
 			pred = [],
 			idx = []
 		for (let channel = 0; channel < channels; channel++) {
@@ -98,7 +98,7 @@ function decode(file) {
 		}
 		// after headers: 4-byte groups per channel, 8 samples each, low nibble first
 		let pos = blockStart + 4 * channels
-		for (let sample = 1; pos < blockStart + ba; sample += 8) {
+		for (let sample = 1; pos < blockStart + blockAlign; sample += 8) {
 			for (let channel = 0; channel < channels; channel++) {
 				for (let j = 0; j < 8; j++) {
 					const byte = data[pos + (j >> 1)],
@@ -118,7 +118,10 @@ function decode(file) {
 						clip++
 					}
 					pred[channel] = value
-					idx[channel] = Math.min(88, Math.max(0, idx[channel] + IDX[nib & 7]))
+					idx[channel] = Math.min(
+						88,
+						Math.max(0, idx[channel] + STEP_INDEX_CHANGE[nib & 7]),
+					)
 					pcm[(firstSample + sample + j) * channels + channel] = value
 				}
 				pos += 4
@@ -127,7 +130,7 @@ function decode(file) {
 		for (let channel = 0; channel < channels; channel++)
 			last[channel] = pred[channel]
 	}
-	const partial = data.length - blocks * ba
+	const partial = data.length - blocks * blockAlign
 	return {
 		out: pcmWav(pcm, channels, rate, sampleCount * channels * 2),
 		info: `blocks=${blocks} partial=${partial} samples=${sampleCount} boundary_err avg=${(errSum / errN).toFixed(2)} max=${maxErr} clips=${clip}`,

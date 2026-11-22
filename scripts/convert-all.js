@@ -362,7 +362,7 @@ else if (run("movies")) {
 			continue
 		}
 		const header = movie.header
-		const enc = childProcess.spawnSync(
+		const encodeResult = childProcess.spawnSync(
 			"ffmpeg",
 			[
 				"-v",
@@ -392,9 +392,11 @@ else if (run("movies")) {
 			],
 			{ encoding: "utf8" },
 		)
-		const encErr = String(enc.stderr || enc.error || "").trim()
-		if (enc.status !== 0 || encErr) {
-			lines.push(`${name}.mp4 FAIL: ffmpeg: ${encErr.split("\n")[0]}`)
+		const encodeError = String(
+			encodeResult.stderr || encodeResult.error || "",
+		).trim()
+		if (encodeResult.status !== 0 || encodeError) {
+			lines.push(`${name}.mp4 FAIL: ffmpeg: ${encodeError.split("\n")[0]}`)
 			continue
 		}
 		written.add(`${name}.mp4`)
@@ -443,7 +445,7 @@ else if (run("movies")) {
 				audioInfo = `${track.sampleRate}Hz ${channels}ch ${dur.toFixed(3)}s`
 			}
 		}
-		const cmp = childProcess.spawnSync(
+		const compareResult = childProcess.spawnSync(
 			"ffmpeg",
 			[
 				"-hide_banner",
@@ -460,7 +462,9 @@ else if (run("movies")) {
 			],
 			{ encoding: "utf8", maxBuffer: 1 << 26 },
 		)
-		const psnr = /PSNR .*average:(\S+) min:(\S+)/.exec(cmp.stderr || "")
+		const psnr = /PSNR .*average:(\S+) min:(\S+)/.exec(
+			compareResult.stderr || "",
+		)
 		const psnrMin = psnr ? Number(psnr[2].replace("inf", "Infinity")) : NaN
 		if (!(psnrMin >= MIN_PSNR))
 			errs.push(`minimum PSNR ${psnr ? psnr[2] : "not measured"}`)

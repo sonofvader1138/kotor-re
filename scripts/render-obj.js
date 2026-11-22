@@ -13,13 +13,13 @@ const positions = [],
 	texCoords = [],
 	triangles = [],
 	mats = new Map()
-let cur = null
+let currentMaterial = null
 const dir = path.dirname(inp)
 for (const line of fs.readFileSync(inp, "utf8").split("\n")) {
 	const tokens = line.trim().split(/\s+/)
 	if (tokens[0] === "v") positions.push(tokens.slice(1, 4).map(Number))
 	else if (tokens[0] === "vt") texCoords.push(tokens.slice(1, 3).map(Number))
-	else if (tokens[0] === "usemtl") cur = tokens[1]
+	else if (tokens[0] === "usemtl") currentMaterial = tokens[1]
 	else if (tokens[0] === "mtllib") {
 		const mtlFile = path.join(dir, tokens.slice(1).join(" "))
 		if (!fs.existsSync(mtlFile)) continue
@@ -44,7 +44,7 @@ for (const line of fs.readFileSync(inp, "utf8").split("\n")) {
 			triangles.push({
 				v: [ix[0][0], ix[i][0], ix[i + 1][0]],
 				vt: [ix[0][1], ix[i][1], ix[i + 1][1]],
-				material: cur,
+				material: currentMaterial,
 			})
 	}
 }
@@ -94,9 +94,9 @@ views.forEach((view, viewIndex) => {
 			edge1[2] * edge2[0] - edge1[0] * edge2[2],
 			edge1[0] * edge2[1] - edge1[1] * edge2[0],
 		]
-		const ln = Math.hypot(...normal)
-		if (!ln) continue
-		const facing = dot(normal, view.fwd) / ln
+		const normalLength = Math.hypot(...normal)
+		if (!normalLength) continue
+		const facing = dot(normal, view.fwd) / normalLength
 		if (facing <= 0) continue // back-face cull (CCW = front)
 		const shade = 0.25 + 0.75 * facing
 		const tex = mats.get(material),

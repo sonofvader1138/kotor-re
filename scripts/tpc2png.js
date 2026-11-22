@@ -139,7 +139,7 @@ function parse(file) {
 }
 
 // Expands a 16-bit RGB 5:6:5 color to 8 bits per channel.
-const c565 = (color) => [
+const expandRgb565 = (color) => [
 	((((color >> 11) & 31) * 255) / 31 + 0.5) | 0,
 	((((color >> 5) & 63) * 255) / 63 + 0.5) | 0,
 	(((color & 31) * 255) / 31 + 0.5) | 0,
@@ -189,8 +189,8 @@ function decodeImage(file, offset, kind, width, height) {
 			}
 			const raw0 = file.readUInt16LE(block),
 				raw1 = file.readUInt16LE(block + 2),
-				color0 = c565(raw0),
-				color1 = c565(raw1)
+				color0 = expandRgb565(raw0),
+				color1 = expandRgb565(raw1)
 			const palette = [color0, color1]
 			if (raw0 > raw1 || kind === "dxt5") {
 				palette.push(

@@ -6,9 +6,13 @@
 const fs = require("fs")
 const path = require("path")
 
-const BR1 = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320]
-const BR2 = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160]
-const SR = {
+const BITRATES_MPEG1 = [
+	0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
+]
+const BITRATES_MPEG2 = [
+	0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160,
+]
+const SAMPLE_RATES = {
 	3: [44100, 48000, 32000],
 	2: [22050, 24000, 16000],
 	0: [11025, 12000, 8000],
@@ -39,15 +43,23 @@ function mp3walk(mp3, pos = 0) {
 			return { end: pos, frames, err: `no sync at ${pos}` }
 		const ver = (header >>> 19) & 3,
 			lay = (header >>> 17) & 3,
-			bri = (header >>> 12) & 15,
-			sri = (header >>> 10) & 3,
+			bitrateIndex = (header >>> 12) & 15,
+			sampleRateIndex = (header >>> 10) & 3,
 			pad = (header >>> 9) & 1
-		if (lay !== 1 || ver === 1 || bri === 0 || bri === 15 || sri === 3)
+		if (
+			lay !== 1 ||
+			ver === 1 ||
+			bitrateIndex === 0 ||
+			bitrateIndex === 15 ||
+			sampleRateIndex === 3
+		)
 			return { end: pos, frames, err: `bad header at ${pos}` }
 		pos +=
 			Math.floor(
-				((ver === 3 ? 144 : 72) * (ver === 3 ? BR1 : BR2)[bri] * 1000) /
-					SR[ver][sri],
+				((ver === 3 ? 144 : 72) *
+					(ver === 3 ? BITRATES_MPEG1 : BITRATES_MPEG2)[bitrateIndex] *
+					1000) /
+					SAMPLE_RATES[ver][sampleRateIndex],
 			) + pad
 		frames++
 	}
