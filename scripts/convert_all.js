@@ -1,6 +1,6 @@
 // usage: node scripts/convert_all.js [models] [textures] [music]   (default: all)
 // Converts all supported game assets into ~/re/assets. Reports: ~/re/temp/reports.
-// Audio verified with ffprobe if installed. Textures verified with pngjs (temp/verify) if installed.
+// Audio verified with ffprobe if installed. Textures verified with ImageMagick if installed.
 // Models UNVERIFIED (no independent loader yet).
 const fs = require("fs")
 const path = require("path")
@@ -92,16 +92,36 @@ if (run("models")) {
 }
 
 // Textures: TexturePacks/<pack>.erf -> assets/TexturePacks/<pack>/*.png (+ *.txi when present)
-// Each PNG is decoded again with pngjs, if installed in temp/verify, and compared pixel for pixel.
-// pngjs throws on a malformed PNG. No handler is installed, so a malformed PNG ends the run.
-const PNGJS_DIR = path.join(
-	kotor.ROOT,
-	"temp",
-	"verify",
-	"node_modules",
-	"pngjs",
-)
-const pngjs = fs.existsSync(PNGJS_DIR) ? require(PNGJS_DIR).PNG : null
+// Each PNG is decoded again by ImageMagick, if installed, and compared with the encoded pixels.
+const magick = !childProcess.spawnSync("convert", ["-version"], {
+	stdio: "ignore",
+}).error
+// Decodes a PNG with ImageMagick. The size goes to stderr and 8-bit RGBA pixels to stdout.
+// Returns a report line that ends in PASS when size and pixels match the encoder input.
+const magickCheck = (name, file, w, h, rgba) => {
+	const r = childProcess.spawnSync(
+		"convert",
+		[
+			"png:-",
+			"-format",
+			"%w %h",
+			"-write",
+			"info:fd:2",
+			"-depth",
+			"8",
+			"rgba:-",
+		],
+		{ input: file, maxBuffer: 1 << 28 },
+	)
+	const err = String(r.stderr || r.error).trim()
+	if (r.status !== 0) return `${name} FAIL: ${err.split("\n")[0]}`
+	const size = err.split("\n").pop()
+	if (size !== `${w} ${h}`)
+		return `${name} FAIL: size ${size}, expected ${w} ${h}`
+	if (Buffer.compare(r.stdout, rgba) !== 0)
+		return `${name} ${size} FAIL: pixels differ`
+	return `${name} ${size} PASS`
+}
 if (run("textures")) {
 	for (const p of PACKS) {
 		console.log(`textures ${p}...`)
@@ -130,21 +150,13 @@ if (run("textures")) {
 				)
 				written.add(`${e.resref}.txi`)
 			}
-			if (pngjs) {
-				const v = pngjs.sync.read(file)
-				const ok =
-					v.width === d.w &&
-					v.height === d.h &&
-					Buffer.compare(v.data, d.rgba) === 0
-				checks.push(
-					`${e.resref}.png ${v.width}x${v.height} ${ok ? "PASS" : "FAIL: pixels differ"}`,
-				)
-			}
+			if (magick)
+				checks.push(magickCheck(`${e.resref}.png`, file, d.w, d.h, d.rgba))
 		}
 		prune(out, written, [".png", ".txi"])
 		tally(`textures_${p}`, lines)
-		if (pngjs) tally(`pngjs_${p}`, checks)
-		else summary.push(`pngjs missing: ${p} UNVERIFIED`)
+		if (magick) tally(`imagemagick_${p}`, checks)
+		else summary.push(`ImageMagick missing: ${p} UNVERIFIED`)
 	}
 }
 
