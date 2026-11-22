@@ -5,7 +5,7 @@
 // Lists become arrays of objects, vectors become 3-element arrays, f32 values use the shortest decimal that round-trips.
 const fs = require("fs")
 const path = require("path")
-const { GAME, bifResources, readErf, readGff } = require("./kotor")
+const kotor = require("./kotor")
 
 function f32(x) {
 	for (let p = 1; p <= 9; p++) {
@@ -38,10 +38,14 @@ if (!root) {
 	process.exit(1)
 }
 const sources = [
-	["data/gui", bifResources("data/gui.bif").filter((r) => r.type === 2047)],
+	[
+		"data/gui",
+		kotor.bifResources("data/gui.bif").filter((r) => r.type === 2047),
+	],
 	[
 		"patch",
-		readErf(path.join(GAME, "patch.erf"))
+		kotor
+			.readErf(path.join(kotor.GAME, "patch.erf"))
 			.entries.filter((e) => e.type === 2047)
 			.map((e) => ({ resref: e.resref, data: e.data() })),
 	],
@@ -50,9 +54,9 @@ for (const [dir, list] of sources) {
 	const out = path.join(root, dir)
 	fs.mkdirSync(out, { recursive: true })
 	for (const r of list) {
-		const g = readGff(r.data, r.resref)
+		const g = kotor.readGff(r.data, r.resref)
 		if (g.fileType !== "GUI " || g.version !== "V3.2")
-			throw new Error(`${r.resref}: unexpected ${g.fileType}${g.version}`)
+			kotor.fatal(`${r.resref}: unexpected ${g.fileType}${g.version}`)
 		fs.writeFileSync(
 			path.join(out, `${r.resref}.json`),
 			JSON.stringify(toJson(g.root), null, 1) + "\n",

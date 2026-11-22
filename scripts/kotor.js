@@ -6,13 +6,18 @@ const ROOT = path.resolve(__dirname, "..")
 const GAME = path.join(ROOT, "swkotor")
 const EXT = { 3: "tga", 2002: "mdl", 2022: "txi", 3007: "tpc", 3008: "mdx" }
 
+// Prints an error message and ends the process with exit status 1. Scripts use this for errors they cannot recover from.
+function fatal(message) {
+	console.error(message)
+	process.exit(1)
+}
+
 // KEY: header 8 magic, u32 bifCount, keyCount, bifTableOff, keyTableOff.
 // Bif entry 12 bytes: u32 size, u32 nameOff, u16 nameLen, u16 drives.
 // Key entry 22 bytes: char[16] resref, u16 type, u32 id (bif << 20 | index).
 function readKey(file = path.join(GAME, "chitin.key")) {
 	const b = fs.readFileSync(file)
-	if (b.toString("latin1", 0, 8) !== "KEY V1  ")
-		throw new Error(`${file}: not KEY V1`)
+	if (b.toString("latin1", 0, 8) !== "KEY V1  ") fatal(`${file}: not KEY V1`)
 	const nb = b.readUInt32LE(8),
 		nk = b.readUInt32LE(12),
 		ob = b.readUInt32LE(16),
@@ -51,8 +56,7 @@ function readKey(file = path.join(GAME, "chitin.key")) {
 // Var entry 16 bytes: u32 id, u32 offset, u32 size, u32 type.
 function readBif(file) {
 	const buf = fs.readFileSync(file)
-	if (buf.toString("latin1", 0, 8) !== "BIFFV1  ")
-		throw new Error(`${file}: not BIFFV1`)
+	if (buf.toString("latin1", 0, 8) !== "BIFFV1  ") fatal(`${file}: not BIFFV1`)
 	const nv = buf.readUInt32LE(8),
 		to = buf.readUInt32LE(16)
 	const entries = []
@@ -60,8 +64,7 @@ function readBif(file) {
 		const o = to + 16 * i,
 			offset = buf.readUInt32LE(o + 4),
 			size = buf.readUInt32LE(o + 8)
-		if (offset + size > buf.length)
-			throw new Error(`${file}: entry ${i} out of bounds`)
+		if (offset + size > buf.length) fatal(`${file}: entry ${i} out of bounds`)
 		entries.push({
 			id: buf.readUInt32LE(o),
 			offset,
@@ -75,7 +78,7 @@ function readBif(file) {
 // Resources of one BIF, named via KEY: [{resref, type, ext, data}]
 function bifResources(bifName, key = readKey()) {
 	const bi = key.bifs.indexOf(bifName)
-	if (bi < 0) throw new Error(`${bifName} not in chitin.key`)
+	if (bi < 0) fatal(`${bifName} not in chitin.key`)
 	const names = new Map()
 	for (const k of key.keys)
 		if (k.bif === bi) names.set(`${k.index}/${k.type}`, k.resref)
@@ -89,7 +92,7 @@ function bifResources(bifName, key = readKey()) {
 	}))
 }
 
-module.exports = { ROOT, GAME, EXT, readKey, readBif, bifResources }
+module.exports = { ROOT, GAME, EXT, fatal, readKey, readBif, bifResources }
 
 // ERF V1.0: 160-byte header. 0x10 u32 entryCount, 0x18 u32 keyListOff, 0x1C u32 resListOff.
 // Key entry 24 bytes: char[16] resref, u32 id, u16 type, u16 unused. Resource entry 8 bytes: u32 offset, u32 size.
@@ -100,8 +103,7 @@ function readErf(file) {
 		h = Buffer.alloc(160)
 	fs.readSync(fd, h, 0, 160, 0)
 	const sig = h.toString("latin1", 0, 8)
-	if (!/^(ERF |MOD |HAK |SAV )V1\.0$/.test(sig))
-		throw new Error(`${file}: not ERF V1.0`)
+	if (!/^(ERF |MOD |HAK |SAV )V1\.0$/.test(sig)) fatal(`${file}: not ERF V1.0`)
 	const n = h.readUInt32LE(0x10),
 		ko = h.readUInt32LE(0x18),
 		ro = h.readUInt32LE(0x1c)
@@ -113,8 +115,7 @@ function readErf(file) {
 	for (let i = 0; i < n; i++) {
 		const offset = r.readUInt32LE(8 * i),
 			len = r.readUInt32LE(8 * i + 4)
-		if (offset + len > size)
-			throw new Error(`${file}: entry ${i} out of bounds`)
+		if (offset + len > size) fatal(`${file}: entry ${i} out of bounds`)
 		const type = k.readUInt16LE(24 * i + 20)
 		entries.push({
 			resref: k
@@ -145,7 +146,7 @@ module.exports.readErf = readErf
 const GFF_INLINE = { 0: "u8", 4: "u32", 5: "i32", 8: "f32" }
 function readGff(b, name = "gff") {
 	const fail = (m) => {
-		throw new Error(`${name}: ${m}`)
+		fatal(`${name}: ${m}`)
 	}
 	if (b.length < 56) fail("short header")
 	const h = []

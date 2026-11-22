@@ -1,6 +1,7 @@
 // Minimal PNG codec. encode: 8-bit RGB or RGBA, filter 0. decode: 8-bit gray, RGB, gray+alpha, RGBA,
 // non-interlaced, all five filter types; always returns RGBA.
 const zlib = require("zlib")
+const kotor = require("./kotor")
 
 function encode(w, h, pix, channels = 4) {
 	const stride = w * channels,
@@ -43,7 +44,7 @@ function decode(b) {
 			h = d.readUInt32BE(4)
 			ct = d[9]
 			if (d[8] !== 8 || d[12] !== 0 || ![0, 2, 4, 6].includes(ct))
-				throw new Error("unsupported PNG")
+				kotor.fatal("unsupported PNG")
 		} else if (type === "IDAT") idat.push(d)
 		o += 12 + len
 	}

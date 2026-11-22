@@ -4,16 +4,16 @@
 // Models UNVERIFIED (no independent loader yet).
 const fs = require("fs")
 const path = require("path")
-const { execFileSync } = require("child_process")
-const { ROOT, GAME, bifResources, readErf } = require("./kotor")
+const childProcess = require("child_process")
+const kotor = require("./kotor")
 const tpc = require("./tpc2png")
 const PNG = require("./png")
-const { convert, report } = require("./mdl2obj")
-const { unwrap } = require("./kotor_audio")
-const { decode } = require("./adpcm2pcm")
+const mdl2obj = require("./mdl2obj")
+const kotorAudio = require("./kotor_audio")
+const adpcm2pcm = require("./adpcm2pcm")
 
-const A = path.join(ROOT, "assets"),
-	R = path.join(ROOT, "temp", "reports")
+const A = path.join(kotor.ROOT, "assets"),
+	R = path.join(kotor.ROOT, "temp", "reports")
 fs.mkdirSync(R, { recursive: true })
 const want = new Set(process.argv.slice(2))
 const run = (s) => want.size === 0 || want.has(s)
@@ -27,7 +27,8 @@ const tally = (name, lines) => {
 // Texture packs used for model materials, in priority order. tpb and tpc hold the same textures at
 // lower resolution and are not converted.
 const PACKS = ["swpc_tex_tpa", "swpc_tex_gui"]
-const packErf = (p) => readErf(path.join(GAME, "TexturePacks", `${p}.erf`))
+const packErf = (p) =>
+	kotor.readErf(path.join(kotor.GAME, "TexturePacks", `${p}.erf`))
 // Removes files with the given extensions from dir that were not written in this run.
 const prune = (dir, keep, exts) => {
 	for (const f of fs.readdirSync(dir))
@@ -45,7 +46,7 @@ if (run("models")) {
 		for (const e of packErf(p).entries)
 			if (e.ext === "tpc")
 				texPath.set(e.resref, `../../TexturePacks/${p}/${e.resref}.png`)
-	const res = bifResources("data/models.bif")
+	const res = kotor.bifResources("data/models.bif")
 	const mdx = new Map(
 		res.filter((r) => r.ext === "mdx").map((r) => [r.resref, r.data]),
 	)
@@ -55,13 +56,13 @@ if (run("models")) {
 	let skipped = 0,
 		hidden = 0
 	for (const r of res.filter((r) => r.ext === "mdl")) {
-		const c = convert(
+		const c = mdl2obj.convert(
 			r.data,
 			mdx.get(r.resref) ?? Buffer.alloc(0),
 			`${r.resref}.mdl`,
 			{ mtllib: `${r.resref}.mtl` },
 		)
-		lines.push(report(r.resref, c))
+		lines.push(mdl2obj.report(r.resref, c))
 		hidden += c.st.hidden
 		if (c.errors.length) continue
 		if (c.st.meshes === 0) {
@@ -92,12 +93,15 @@ if (run("models")) {
 
 // Textures: TexturePacks/<pack>.erf -> assets/TexturePacks/<pack>/*.png (+ *.txi when present)
 // Each PNG is decoded again with pngjs, if installed in temp/verify, and compared pixel for pixel.
-let pngjs = null
-try {
-	pngjs = require(
-		path.join(ROOT, "temp", "verify", "node_modules", "pngjs"),
-	).PNG
-} catch {}
+// pngjs throws on a malformed PNG. No handler is installed, so a malformed PNG ends the run.
+const PNGJS_DIR = path.join(
+	kotor.ROOT,
+	"temp",
+	"verify",
+	"node_modules",
+	"pngjs",
+)
+const pngjs = fs.existsSync(PNGJS_DIR) ? require(PNGJS_DIR).PNG : null
 if (run("textures")) {
 	for (const p of PACKS) {
 		console.log(`textures ${p}...`)
@@ -127,18 +131,14 @@ if (run("textures")) {
 				written.add(`${e.resref}.txi`)
 			}
 			if (pngjs) {
-				try {
-					const v = pngjs.sync.read(file)
-					const ok =
-						v.width === d.w &&
-						v.height === d.h &&
-						Buffer.compare(v.data, d.rgba) === 0
-					checks.push(
-						`${e.resref}.png ${v.width}x${v.height} ${ok ? "PASS" : "FAIL: pixels differ"}`,
-					)
-				} catch (err) {
-					checks.push(`${e.resref}.png FAIL: ${err.message}`)
-				}
+				const v = pngjs.sync.read(file)
+				const ok =
+					v.width === d.w &&
+					v.height === d.h &&
+					Buffer.compare(v.data, d.rgba) === 0
+				checks.push(
+					`${e.resref}.png ${v.width}x${v.height} ${ok ? "PASS" : "FAIL: pixels differ"}`,
+				)
 			}
 		}
 		prune(out, written, [".png", ".txi"])
@@ -151,7 +151,7 @@ if (run("textures")) {
 // Music: streammusic/*.wav -> assets/streammusic/*.mp3 | *.wav (PCM)
 if (run("music")) {
 	console.log("music...")
-	const src = path.join(GAME, "streammusic"),
+	const src = path.join(kotor.GAME, "streammusic"),
 		out = path.join(A, "streammusic")
 	fs.mkdirSync(out, { recursive: true })
 	const lines = []
@@ -160,12 +160,12 @@ if (run("music")) {
 		.filter((f) => /\.wav$/i.test(f))
 		.sort()) {
 		const name = f.replace(/\.wav$/i, ""),
-			u = unwrap(fs.readFileSync(path.join(src, f)))
+			u = kotorAudio.unwrap(fs.readFileSync(path.join(src, f)))
 		let data = u.payload,
 			err = u.err,
 			info = u.info
 		if (!err && u.kind === "wav") {
-			const d = decode(data)
+			const d = adpcm2pcm.decode(data)
 			data = d.out
 			err = d.err
 			info += " " + d.info
@@ -177,23 +177,26 @@ if (run("music")) {
 }
 
 // Independent verification (audio)
-let ffprobe = true
-try {
-	execFileSync("ffprobe", ["-version"], { stdio: "ignore" })
-} catch {
-	ffprobe = false
-}
+// childProcess.spawnSync reports a missing program in its error field instead of throwing.
+const ffprobe = !childProcess.spawnSync("ffprobe", ["-version"], {
+	stdio: "ignore",
+}).error
 if (ffprobe && run("music")) {
 	const dir = path.join(A, "streammusic")
 	const lines = fs.readdirSync(dir).map((f) => {
-		try {
-			execFileSync("ffprobe", ["-v", "error", path.join(dir, f)], {
-				stdio: "pipe",
-			})
-			return `${f} PASS`
-		} catch (e) {
-			return `${f} FAIL: ${String(e.stderr).trim().split("\n")[0]}`
-		}
+		const r = childProcess.spawnSync(
+			"ffprobe",
+			["-v", "error", path.join(dir, f)],
+			{
+				encoding: "utf8",
+			},
+		)
+		if (r.status === 0) return `${f} PASS`
+		return `${f} FAIL: ${
+			String(r.stderr || r.error)
+				.trim()
+				.split("\n")[0]
+		}`
 	})
 	tally("ffprobe", lines)
 } else if (run("music")) summary.push("ffprobe missing: audio UNVERIFIED")
