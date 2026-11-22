@@ -85,3 +85,66 @@ function readErf(file) {
 }
 
 module.exports.readErf = readErf;
+
+// Generic tree file ("GUI V3.2" and possibly others). 56-byte header: char[4] fileType, char[4] version,
+// then six u32 pairs: structs (off, count), fields (off, count), labels (off, count),
+// fieldData (off, bytes), fieldIndices (off, bytes), listIndices (off, bytes).
+// Struct 12 bytes: u32 type, u32 data, u32 fieldCount. Field 12 bytes: u32 type, u32 labelIndex, u32 value.
+// Strict: every byte of the three data regions, every field and every non-root struct must be used exactly once.
+const GFF_INLINE = { 0: 'u8', 4: 'u32', 5: 'i32', 8: 'f32' };
+function readGff(b, name = 'gff') {
+  const fail = m => { throw new Error(`${name}: ${m}`); };
+  if (b.length < 56) fail('short header');
+  const h = []; for (let i = 8; i < 56; i += 4) h.push(b.readUInt32LE(i));
+  const [so, sc, fo, fc, lo, lc, dO, dL, iO, iL, xO, xL] = h;
+  if (so !== 56 || fo !== so + 12 * sc || lo !== fo + 12 * fc || dO !== lo + 16 * lc ||
+      iO !== dO + dL || xO !== iO + iL || xO + xL !== b.length) fail('header regions do not chain to end of file');
+  const use = { data: new Uint8Array(dL), idx: new Uint8Array(iL), list: new Uint8Array(xL) };
+  const mark = (k, off, n, len) => { if (off + n > len) fail(`${k} range ${off}+${n} past ${len}`);
+    for (let i = off; i < off + n; i++) if (use[k][i]++) fail(`${k} byte ${i} used twice`); };
+  const fieldUsed = new Uint8Array(fc), structUsed = new Uint8Array(sc);
+  const labels = []; for (let i = 0; i < lc; i++) labels.push(b.toString('latin1', lo + 16 * i, lo + 16 * i + 16).replace(/\0.*$/s, ''));
+  const labelUsed = new Uint8Array(lc), types = {};
+
+  function field(fi) {
+    if (fi >= fc) fail(`field index ${fi} >= ${fc}`);
+    if (fieldUsed[fi]++) fail(`field ${fi} used twice`);
+    const o = fo + 12 * fi, t = b.readUInt32LE(o), li = b.readUInt32LE(o + 4), v = b.readUInt32LE(o + 8);
+    if (li >= lc) fail(`label index ${li} >= ${lc}`);
+    labelUsed[li] = 1; types[t] = (types[t] || 0) + 1;
+    let value;
+    switch (t) {
+      case 0: if (v > 0xff) fail(`u8 field ${fi} value ${v}`); value = v; break;
+      case 4: value = v; break;
+      case 5: value = b.readInt32LE(o + 8); break;
+      case 8: value = b.readFloatLE(o + 8); break;
+      case 10: { mark('data', v, 4, dL); const n = b.readUInt32LE(dO + v); mark('data', v + 4, n, dL);
+        value = b.toString('latin1', dO + v + 4, dO + v + 4 + n); break; }
+      case 11: { mark('data', v, 1, dL); const n = b[dO + v]; if (n > 16) fail(`resref length ${n}`);
+        mark('data', v + 1, n, dL); value = b.toString('latin1', dO + v + 1, dO + v + 1 + n); break; }
+      case 14: value = struct(v); break;
+      case 15: { mark('list', v, 4, xL); const n = b.readUInt32LE(xO + v); mark('list', v + 4, 4 * n, xL);
+        value = []; for (let k = 0; k < n; k++) value.push(struct(b.readUInt32LE(xO + v + 4 + 4 * k))); break; }
+      case 17: mark('data', v, 12, dL); value = [0, 4, 8].map(k => b.readFloatLE(dO + v + k)); break;
+      default: fail(`unknown field type ${t} (field ${fi})`);
+    }
+    return { label: labels[li], type: t, value };
+  }
+  function struct(si, root = false) {
+    if (si >= sc) fail(`struct index ${si} >= ${sc}`);
+    if (structUsed[si]++ ) fail(`struct ${si} used twice`);
+    const o = so + 12 * si, type = b.readUInt32LE(o), d = b.readUInt32LE(o + 4), n = b.readUInt32LE(o + 8);
+    let ids = [];
+    if (n === 1) ids = [d];
+    else if (n > 1) { mark('idx', d, 4 * n, iL); for (let k = 0; k < n; k++) ids.push(b.readUInt32LE(iO + d + 4 * k)); }
+    return { structType: type, fields: ids.map(field) };
+  }
+  const root = struct(0, true);
+  for (const [k, a] of Object.entries(use)) { const i = a.indexOf(0); if (i >= 0) fail(`${k} byte ${i} never used`); }
+  if (fieldUsed.indexOf(0) >= 0) fail(`field ${fieldUsed.indexOf(0)} never used`);
+  if (structUsed.indexOf(0) >= 0) fail(`struct ${structUsed.indexOf(0)} never used`);
+  return { fileType: b.toString('latin1', 0, 4), version: b.toString('latin1', 4, 8), root,
+    counts: { structs: sc, fields: fc, labels: lc, labelsUnused: labelUsed.length - labelUsed.reduce((a, x) => a + x, 0), types } };
+}
+
+module.exports.readGff = readGff;

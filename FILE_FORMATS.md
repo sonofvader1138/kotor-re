@@ -70,7 +70,7 @@ The entry table has one 16-byte entry per resource.
 
 Resource data follows the entry table directly. The resources are stored in order, without gaps or overlaps, and the last one ends exactly at the end of the file. This holds for all 26 archives. The data is not compressed.
 
-The archives contain 29 resource types. Only two are identified: 2002 is an MDL model and 3008 is its MDX vertex data. Type 3007 (TPC texture) does not occur in the BIF archives; it occurs in the ERF texture packs. The others are UNKNOWN. The number of resources of each type is listed below.
+The archives contain 29 resource types. Three are identified: 2002 is an MDL model, 3008 is its MDX vertex data, and 2047 is a GUI layout. Type 3007 (TPC texture) does not occur in the BIF archives; it occurs in the ERF texture packs. The others are UNKNOWN. The number of resources of each type is listed below.
 
 | Type | Count | Type | Count | Type | Count | Type | Count |
 | ---- | ----- | ---- | ----- | ---- | ----- | ---- | ----- |
@@ -85,7 +85,7 @@ The archives contain 29 resource types. Only two are identified: 2002 is an MDL 
 
 ## ERF archive
 
-An ERF archive is a self-contained archive: unlike a BIF archive, it stores the name of each resource itself. The four texture packs in `TexturePacks/` are ERF archives. The reader is `readErf` in `scripts/kotor.js`. The ERF files in `modules/`, `rims/` and `patch.erf` have not been examined.
+An ERF archive is a self-contained archive: unlike a BIF archive, it stores the name of each resource itself. The four texture packs in `TexturePacks/` are ERF archives. The reader is `readErf` in `scripts/kotor.js`. `patch.erf` is also an ERF archive, and `readErf` reads its tables without error. Only its GUI resources have been examined. The files in `modules/` and `rims/` are not ERF archives (see the RIM section below).
 
 An ERF archive begins with a 160-byte header.
 
@@ -131,6 +131,33 @@ The contents of the texture packs are listed below.
 | swpc_tex_gui.erf | 1,571     | 1,570 TPC textures for the user interface and one resource of type 2022.                     |
 
 The tpb and tpc packs are likely the lower texture quality settings. Only tpa and gui are converted, because tpb and tpc hold no additional images.
+
+## RIM archive
+
+A RIM archive is a self-contained archive like ERF, with a simpler header and a single table. All 246 files in `modules/` and `rims/` begin with "RIM V1.0". They hold 22,511 resources in total. The layout below was established only to search them for GUI resources. There is no reader in `scripts/kotor.js` yet, and the resources themselves have not been examined.
+
+A RIM archive begins with a 120-byte header.
+
+| Offset | Type     | Meaning                         | Evidence                                                                                 | Confidence |
+| ------ | -------- | ------------------------------- | ---------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | char[8]  | Signature "RIM V1.0"            | Present in all 246 files.                                                                | high       |
+| 0x08   | u32      | UNKNOWN, always 0               | The value is 0 in all 246 files.                                                         | low        |
+| 0x0C   | u32      | Number of resources             | The table parses consistently in all 246 files. Four files have 0 resources.             | high       |
+| 0x10   | u32      | Offset of the resource table    | The value is 120 in all 246 files.                                                       | high       |
+| 0x14   | u32      | UNKNOWN flag                    | The value is 1 in the six files whose names end in "dx", such as `globaldx.rim`, and 0 in the other 240. | low        |
+| 0x18   | u8[96]   | Padding                         | All bytes are 0 in all 246 files.                                                        | medium     |
+
+The resource table has one 32-byte entry per resource.
+
+| Offset | Type     | Meaning                            | Evidence                                                   | Confidence |
+| ------ | -------- | ---------------------------------- | ---------------------------------------------------------- | ---------- |
+| 0x00   | char[16] | Resref, NUL-padded                 | Names are readable, for example "acbonus" and "aiscripts". | high       |
+| 0x10   | u32      | Resource type                      | Values such as 2017 occur. Type 2047 (GUI) does not occur. | medium     |
+| 0x14   | u32      | Resource ID                        | Equals the entry's index for all 22,511 entries.           | high       |
+| 0x18   | u32      | Offset of the resource data        | Every resource lies inside its archive.                    | high       |
+| 0x1C   | u32      | Size of the resource data in bytes | Every resource lies inside its archive.                    | high       |
+
+In all 242 nonempty files, the last resource is followed by exactly 10 zero bytes before the end of the file. The purpose of these bytes is UNKNOWN. Whether resources are stored without gaps has not been checked.
 
 # 3D models: MDL and MDX
 
@@ -304,6 +331,115 @@ The TXI trailer is ASCII text with one "keyword value" pair per line, separated 
 Each converted model has an MTL (material library) file beside its OBJ file. The MTL file defines one material per texture name, and each material points at the PNG in `assets/TexturePacks/swpc_tex_tpa/`, or in `swpc_tex_gui/` if the name is only found there. Texture names are compared without regard to case. Of the 1,401 distinct texture names that rendered meshes refer to, 1,364 are found. The remaining 37 are listed in `temp/reports` and are not in the texture packs or in `textures.bif`. They may be in the module archives, which have not been examined.
 
 The PNG files keep their alpha channel, but the MTL files do not declare it as transparency. In KotOR the alpha channel of some textures appears to hold other data, such as an environment map mask, rather than transparency. This has not been verified.
+
+# User interface layouts: GUI
+
+A GUI file (resource type 2047) describes one screen or panel of the user interface. It lists the screen's controls, such as buttons, labels and list boxes, with their position, size, textures, font and text. The game contains 91 GUI resources. 84 are in `data/gui.bif`, which holds nothing else, and 7 are in `patch.erf`. No other archive holds one: `chitin.key` lists type 2047 only for `gui.bif`, the 246 RIM files hold none, and the signature "GUI V3.2" occurs in no other file. The reader is `readGff` in `scripts/kotor.js`, and the converter is `scripts/gui2json.js`. The converter writes one JSON file per resource, to `assets/data/gui/` for `gui.bif` and to `assets/patch/` for `patch.erf`.
+
+## Resources in patch.erf
+
+Five of the seven `patch.erf` resources have the same name as a `gui.bif` resource but different content. These are `abilities`, `character`, `equip`, `inventory` and `mainmenu`. The game probably uses the `patch.erf` version, because the archive's name suggests an update, but this has not been confirmed. The other two, `mipc212x10` and `tooltip12x10`, exist only in `patch.erf`. Both are 1280x1024 panels, a resolution that no `gui.bif` file has.
+
+The changes are small. `abilities`, `character`, `equip` and `inventory` each gain two buttons, BTN_CHARLEFT and BTN_CHARRIGHT, which are 28x28 pixels at the same positions in all four files. The names suggest buttons that step between party members. The patched `mainmenu` has the same 13 controls, with BTN_WARP and BTN_EXIT in swapped order, and its panel is 800x600 instead of 640x480.
+
+The file is a generic tree container. The layout data is not fixed; each value is a field that carries its own type and its own label. The first four bytes of the file name the content type ("GUI "). This suggests that other resource types use the same container with a different content type. That has not been examined.
+
+The parser passes on all 91 files. In every file the six regions chain from offset 56 and the last one ends exactly at the end of the file. Every byte of the field data, field index and list index regions is used exactly once. Every field is used exactly once, and every struct except the root is referenced exactly once. Every label is referenced.
+
+The JSON output is verified with two independent tools. jq parses all 91 JSON files without error. `temp/verify_gui.py` is a separate decoder written in Python. It reads the KEY, BIF and ERF tables and each GUI file itself, without using `scripts/kotor.js`, and loads the JSON with Python's own parser. For all 91 resources, the JSON has the same keys in the same order as the binary fields, equal integers and strings, and f32 values that convert back to the identical 4 bytes.
+
+The JSON does not record the binary field type. Types 0, 4 and 5 all become numbers, and types 10 and 11 both become strings. The type can still be recovered, because in all 91 files each of the 55 combinations of label and JSON value kind occurs with only one binary type. Strings are decoded as Latin-1. The only byte above 0x7F is 0xB1 in six strings, which is "±" in both Latin-1 and Windows-1252, so the choice of code page does not change the output.
+
+The counts in the sections below were measured on the 84 `gui.bif` files and do not include `patch.erf`. The seven `patch.erf` files use the same header, struct, field and label layout, and they parse with the same strict checks.
+
+## Container header
+
+A GUI file begins with a 56-byte header. After the signature, it consists of six pairs of u32 values, and each pair locates one region of the file.
+
+| Offset | Type    | Meaning                                    | Evidence                                                                 | Confidence |
+| ------ | ------- | ------------------------------------------ | ------------------------------------------------------------------------ | ---------- |
+| 0x00   | char[4] | Content type, "GUI "                       | Present in all 84 files.                                                 | high       |
+| 0x04   | char[4] | Version, "V3.2"                            | Present in all 84 files.                                                 | high       |
+| 0x08   | u32     | Offset of the struct table (always 56)     | The value is 56 in all 84 files.                                         | high       |
+| 0x0C   | u32     | Number of structs                          | The next region starts at this offset plus 12 bytes per struct.          | high       |
+| 0x10   | u32     | Offset of the field table                  | Equals the struct table offset plus 12 times the struct count.           | high       |
+| 0x14   | u32     | Number of fields                           | The next region starts at this offset plus 12 bytes per field.           | high       |
+| 0x18   | u32     | Offset of the label table                  | Equals the field table offset plus 12 times the field count.             | high       |
+| 0x1C   | u32     | Number of labels                           | The next region starts at this offset plus 16 bytes per label.           | high       |
+| 0x20   | u32     | Offset of the field data region            | Equals the label table offset plus 16 times the label count.             | high       |
+| 0x24   | u32     | Size of the field data region in bytes     | The next region starts at its end.                                       | high       |
+| 0x28   | u32     | Offset of the field index region           | Directly follows the field data region.                                  | high       |
+| 0x2C   | u32     | Size of the field index region in bytes    | Equals 4 times the field count in all 84 files.                          | high       |
+| 0x30   | u32     | Offset of the list index region            | Directly follows the field index region.                                 | high       |
+| 0x34   | u32     | Size of the list index region in bytes     | The region ends exactly at the end of all 84 files.                      | high       |
+
+## Struct, field and label tables
+
+A struct is a group of fields. Struct 0 is the root of the tree. Each entry of the struct table is 12 bytes.
+
+| Offset | Type | Meaning                                                    | Evidence                                                                                                        | Confidence |
+| ------ | ---- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | u32  | Struct type                                                | 0xFFFFFFFF on all 84 roots, 14 on 17 structs in `debug.gui`, and 0 on all 10,950 others. The meaning of the value is UNKNOWN. | low        |
+| 0x04   | u32  | Byte offset into the field index region                    | The region holds the struct's field indices at this offset, and all structs together cover it exactly.          | high       |
+| 0x08   | u32  | Number of fields                                           | Every struct has between 4 and 14 fields, and the indices it reads are all valid.                              | high       |
+
+No struct in these files has fewer than 4 fields. The encoding of a struct with one or zero fields is therefore UNKNOWN. The parser assumes that a struct with one field stores the field index directly at 0x04, but no file tests this assumption.
+
+Each entry of the field table is 12 bytes.
+
+| Offset | Type | Meaning                                                      | Evidence                                                        | Confidence |
+| ------ | ---- | ------------------------------------------------------------ | --------------------------------------------------------------- | ---------- |
+| 0x00   | u32  | Field type (see below)                                       | Nine values occur. Each decodes consistently across all files.  | high       |
+| 0x04   | u32  | Index into the label table                                   | Every index is valid, and every label is used.                  | high       |
+| 0x08   | u32  | The value itself, or an offset or index, depending on type   | See the field type table.                                       | high       |
+
+Each entry of the label table is a 16-byte name, padded with NUL bytes, for example "EXTENT". No struct contains the same label twice. A label does not determine the field type: "TEXT" is a string in 1,631 fields and a struct in 2,016 fields.
+
+## Field types
+
+The nine field types that occur are listed below. Types 0, 4, 5 and 8 store their value in the field entry itself. The others store an offset or an index there.
+
+| Type | Count  | Value                                                                                           | Evidence                                                                                   | Confidence |
+| ---- | ------ | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------- |
+| 0    | 8,002  | u8 stored in the field entry                                                                    | Values are only 0, 1 and 2. The labels are flags such as PULSING and Obj_Locked.          | medium     |
+| 4    | 2,016  | u32 stored in the field entry                                                                   | Used only by STRREF. Values range up to 49,116, and 0xFFFFFFFF marks no string.            | medium     |
+| 5    | 32,222 | s32 stored in the field entry                                                                   | Coordinates such as LEFT and WIDTH are plausible, and Obj_ParentID uses -1.                | high       |
+| 8    | 250    | f32 stored in the field entry                                                                   | ALPHA is always 1.0 and ROTATE is always 0.0.                                              | medium     |
+| 10   | 6,235  | String: offset into field data, where a u32 length is followed by that many characters          | Decodes to tags and text such as "LBL_BARKTEXT". The data region is covered exactly.      | high       |
+| 11   | 12,484 | Resref: offset into field data, where a u8 length (at most 16) is followed by that many characters | Decodes to texture and font names that exist in the game files (see below).               | high       |
+| 14   | 8,868  | Index into the struct table                                                                     | Every non-root struct is referenced exactly once by a type 14 or type 15 field.            | high       |
+| 15   | 84     | List: offset into the list index region, where a u32 count is followed by that many struct indices | Used only by CONTROLS. The list index region is covered exactly.                           | high       |
+| 17   | 5,549  | Vector: offset into field data, where three f32 values are stored                               | Used only by COLOR. Components lie between 0 and 1, except the value (-1, -1, -1).         | high       |
+
+The type numbers between 0 and 17 that do not occur (1, 2, 3, 6, 7, 9, 12, 13 and 16) are UNKNOWN.
+
+## GUI layout content
+
+The root struct describes the panel itself. It has the fields CONTROLTYPE (always 2), TAG, EXTENT, BORDER, COLOR, ALPHA and CONTROLS. CONTROLS is a list of control structs. No control has its own CONTROLS list. Nesting is instead expressed by Obj_ParentID and Obj_Parent. In all 208 controls where Obj_ParentID is not -1, it equals the ID of another control in the same list, and Obj_Parent equals that control's TAG. A value of -1 appears to mean that the parent is the panel itself.
+
+EXTENT is a struct with LEFT, TOP, WIDTH and HEIGHT in pixels. The root EXTENT of full-screen panels matches the resolution that the file name encodes. For example, the `8x6` files are 800x600, the `10x7` files are 1024x768, and the `16x12` files are 1600x1200. The exceptions are `mainmenu10x7`, `mainmenu12x9` and `mainmenu16x12`, which are all 800x600. The reason is UNKNOWN. Forty-nine screens without a suffix are 640x480.
+
+The control kind is given by CONTROLTYPE. The correspondence below comes from the prefixes of the controls' TAG names and from where each kind appears. It has not been confirmed in the running game.
+
+| CONTROLTYPE | Count | Probable kind     | Evidence                                                               | Confidence |
+| ----------- | ----- | ----------------- | ---------------------------------------------------------------------- | ---------- |
+| 2           | 84    | Panel             | Occurs only on the root struct of every file.                          | high       |
+| 4           | 1,155 | Label             | 1,033 tags begin with "LBL_".                                          | medium     |
+| 5           | 77    | UNKNOWN           | Tags begin with "LBH_", "LBL_" or "LBLH_". The kind is UNKNOWN.        | low        |
+| 6           | 711   | Button            | 589 tags begin with "BTN_".                                            | medium     |
+| 7           | 73    | Toggle or check box | Tags begin with "TB_", "CB_" or "BTN_".                              | low        |
+| 8           | 7     | Slider            | Tags begin with "SLD_" or "SLI_".                                      | medium     |
+| 9           | 81    | Scroll bar        | Occurs only in the 81 SCROLLBAR structs.                               | high       |
+| 10          | 75    | Progress bar      | All 75 tags begin with "PB_".                                          | medium     |
+| 11          | 81    | List box          | 78 tags begin with "LB_". Only these controls have SCROLLBAR or PROTOITEM structs. | medium     |
+
+All 81 list boxes have a SCROLLBAR struct. Eighty of them also have a PROTOITEM struct, which is probably the template control for one row. The exception is LB_DESC in `upgrade.gui`. The SCROLLBAR holds DIR and THUMB structs that describe its arrow and thumb images.
+
+BORDER, HILIGHT, SELECTED and HILIGHTSELECTED describe a frame and its fill. Each holds the resrefs CORNER, EDGE and FILL, together with FILLSTYLE, DIMENSION, INNEROFFSET, COLOR and PULSING. TEXT is a struct with TEXT (a string), STRREF, FONT, ALIGNMENT, COLOR and PULSING. The text of a control comes either from the TEXT string or from STRREF, a string number. The largest STRREF value, 49,116, is below 49,265, which is the u32 at offset 0x0C of `dialog.tlk`. That value is probably the string count, but the TLK format has not been examined.
+
+Resrefs name textures and fonts. All 2,016 FONT values name a known resource. Of the CORNER, EDGE, FILL and IMAGE values that are not empty, all name a texture in the texture packs or a resource in `chitin.key`, except nine FILL names, for example `po_mzaalbar` and `georgem`. Those nine may be in archives that have not been examined.
+
+The meanings of FILLSTYLE (0, 1 or 2), DIMENSION, INNEROFFSET, PULSING, DRAWSTYLE and FLIPSTYLE are UNKNOWN. ALIGNMENT takes only the values 9, 10, 12, 17, 18, 20 and 34. These values fit a bit field in which 1, 2 and 4 select the horizontal position and 8, 16 and 32 select the vertical position. This is a hypothesis that has not been tested. The meaning of COLOR (-1, -1, -1) is UNKNOWN. It may mean that no color is set.
 
 # Music: streammusic/\*.wav
 
