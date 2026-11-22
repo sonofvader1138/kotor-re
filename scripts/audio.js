@@ -12,18 +12,48 @@ const BITRATES_MPEG1 = [
 const BITRATES_MPEG2 = [
 	0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160,
 ]
+
+// MPEG audio version codes from the frame header. Code 1 is reserved.
+const MPEG_VERSION = { mpeg25: 0, reserved: 1, mpeg2: 2, mpeg1: 3 }
 const SAMPLE_RATES = {
-	3: [44100, 48000, 32000],
-	2: [22050, 24000, 16000],
-	0: [11025, 12000, 8000],
+	[MPEG_VERSION.mpeg1]: [44100, 48000, 32000],
+	[MPEG_VERSION.mpeg2]: [22050, 24000, 16000],
+	[MPEG_VERSION.mpeg25]: [11025, 12000, 8000],
 }
+
+// Layer code 1 is Layer III. Bitrate index 0 means free format and 15 is invalid. Sample rate index 3 is reserved.
+const LAYER_III = 1
+const BITRATE_FREE = 0
+const BITRATE_INVALID = 15
+const SAMPLE_RATE_RESERVED = 3
+
+// Every frame header starts with 11 set bits.
+const FRAME_SYNC = 0x7ff
+
+// A Layer III frame holds 1152 samples in MPEG-1 and 576 in MPEG-2 and 2.5. Its byte length is
+// samples / 8 * bitrate / sample rate, which gives these coefficients.
+const FRAME_COEFFICIENT_MPEG1 = 144
+const FRAME_COEFFICIENT_MPEG2 = 72
+
+const ID3V2_HEADER_SIZE = 10
+const ID3V1_TAG_SIZE = 128
+
+// RIFF: 4-byte id, u32 size of the rest of the file, 4-byte form type, then chunks of
+// 4-byte id, u32 size, data padded to an even length.
+const RIFF_HEADER_SIZE = 12
+const CHUNK_HEADER_SIZE = 8
+
+// Layout A: a 58-byte WAV header whose RIFF size field is 50 and whose data chunk size, at offset 54, is 0.
+const FAKE_HEADER_SIZE = 58
+const FAKE_RIFF_SIZE = 50
+const FAKE_DATA_SIZE_OFFSET = 54
 
 // Walk MP3 frames from pos. Returns {end, frames, err}; err 'riff' = stopped at embedded RIFF.
 function mp3walk(mp3, pos = 0) {
 	let frames = 0
 	if (mp3.toString("latin1", pos, pos + 3) === "ID3") {
 		pos +=
-			10 +
+			ID3V2_HEADER_SIZE +
 			((mp3[pos + 6] << 21) |
 				(mp3[pos + 7] << 14) |
 				(mp3[pos + 8] << 7) |
@@ -32,10 +62,10 @@ function mp3walk(mp3, pos = 0) {
 
 	while (pos < mp3.length) {
 		if (
-			mp3.length - pos === 128 &&
+			mp3.length - pos === ID3V1_TAG_SIZE &&
 			mp3.toString("latin1", pos, pos + 3) === "TAG"
 		) {
-			return { end: pos + 128, frames, err: "" }
+			return { end: pos + ID3V1_TAG_SIZE, frames, err: "" }
 		}
 		if (mp3.toString("latin1", pos, pos + 4) === "RIFF") {
 			return { end: pos, frames, err: "riff" }
@@ -45,7 +75,7 @@ function mp3walk(mp3, pos = 0) {
 		}
 
 		const header = mp3.readUInt32BE(pos)
-		if (header >>> 21 !== 0x7ff) {
+		if (header >>> 21 !== FRAME_SYNC) {
 			return { end: pos, frames, err: `no sync at ${pos}` }
 		}
 
@@ -55,19 +85,21 @@ function mp3walk(mp3, pos = 0) {
 			sampleRateIndex = (header >>> 10) & 3,
 			pad = (header >>> 9) & 1
 		if (
-			lay !== 1 ||
-			ver === 1 ||
-			bitrateIndex === 0 ||
-			bitrateIndex === 15 ||
-			sampleRateIndex === 3
+			lay !== LAYER_III ||
+			ver === MPEG_VERSION.reserved ||
+			bitrateIndex === BITRATE_FREE ||
+			bitrateIndex === BITRATE_INVALID ||
+			sampleRateIndex === SAMPLE_RATE_RESERVED
 		) {
 			return { end: pos, frames, err: `bad header at ${pos}` }
 		}
 
+		const mpeg1 = ver === MPEG_VERSION.mpeg1,
+			bitrateKbps = (mpeg1 ? BITRATES_MPEG1 : BITRATES_MPEG2)[bitrateIndex]
 		pos +=
 			Math.floor(
-				((ver === 3 ? 144 : 72) *
-					(ver === 3 ? BITRATES_MPEG1 : BITRATES_MPEG2)[bitrateIndex] *
+				((mpeg1 ? FRAME_COEFFICIENT_MPEG1 : FRAME_COEFFICIENT_MPEG2) *
+					bitrateKbps *
 					1000) /
 					SAMPLE_RATES[ver][sampleRateIndex],
 			) + pad
@@ -78,16 +110,16 @@ function mp3walk(mp3, pos = 0) {
 }
 
 function riffwalk(riff) {
-	if (riff.readUInt32LE(4) !== riff.length - 8) {
+	if (riff.readUInt32LE(4) !== riff.length - CHUNK_HEADER_SIZE) {
 		return "bad RIFF size"
 	}
 
-	let pos = 12
+	let pos = RIFF_HEADER_SIZE
 	const ids = []
-	while (pos + 8 <= riff.length) {
+	while (pos + CHUNK_HEADER_SIZE <= riff.length) {
 		const chunkSize = riff.readUInt32LE(pos + 4)
 		ids.push(riff.toString("latin1", pos, pos + 4))
-		pos += 8 + chunkSize + (chunkSize & 1)
+		pos += CHUNK_HEADER_SIZE + chunkSize + (chunkSize & 1)
 	}
 
 	if (pos !== riff.length) {
@@ -100,10 +132,10 @@ function riffwalk(riff) {
 function unwrap(file) {
 	if (
 		file.toString("latin1", 0, 4) === "RIFF" &&
-		file.readUInt32LE(4) === 50 &&
-		file.readUInt32LE(54) === 0
+		file.readUInt32LE(4) === FAKE_RIFF_SIZE &&
+		file.readUInt32LE(FAKE_DATA_SIZE_OFFSET) === 0
 	) {
-		const payload = file.subarray(58),
+		const payload = file.subarray(FAKE_HEADER_SIZE),
 			walk = mp3walk(payload)
 		return {
 			kind: "mp3",
@@ -156,4 +188,10 @@ if (require.main === module) {
 	}
 }
 
-module.exports = { unwrap, mp3walk, riffwalk }
+module.exports = {
+	RIFF_HEADER_SIZE,
+	CHUNK_HEADER_SIZE,
+	unwrap,
+	mp3walk,
+	riffwalk,
+}

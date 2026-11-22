@@ -4,6 +4,35 @@ const fs = require("fs")
 
 const NONE = 0xffffffff
 
+// The first 12 bytes of an MDL file are a file header. All offsets count from the end of it.
+const FILE_HEADER_SIZE = 12
+
+// A node starts with an 80-byte header. Bit 5 of its flags marks a mesh node, whose mesh header follows.
+const NODE_HEADER_SIZE = 80
+const NODE_FLAG_MESH = 0x20
+const NAME_LENGTH = 64
+const TEXTURE_NAME_LENGTH = 32
+
+// A face is 32 bytes. It starts with the f32[3] face normal and ends with the u16[3] vertex indices at 0x1A.
+const FACE_SIZE = 32
+const FACE_VERTICES_OFFSET = 26
+const VERTEX_SIZE = 12
+
+// Offset of the render byte in the mesh header. A mesh whose render byte is 0 is not drawn.
+const MESH_RENDER_OFFSET = 0x139
+
+// Deeper node trees are treated as corrupt.
+const MAX_NODE_DEPTH = 200
+
+// The MDX copy of a vertex position must match the MDL copy within this distance.
+const POSITION_TOLERANCE = 1e-5
+
+// Faces with a smaller cross product are degenerate and their normal is not checked.
+const MIN_CROSS_LENGTH = 1e-9
+
+// A stored face normal agrees with the winding when the cosine between them exceeds this value.
+const MIN_NORMAL_COSINE = 0.99
+
 // Quaternions are [w, x, y, z]. qrot rotates a vector by a unit quaternion; qmul multiplies two quaternions.
 function qrot([w, x, y, z], [vx, vy, vz]) {
 	const tx = 2 * (y * vz - z * vy),
@@ -28,9 +57,9 @@ function qmul([aw, ax, ay, az], [bw, bx, by, bz]) {
 const formatNumber = (value) => value.toFixed(6)
 
 // opts.mtllib: material library file name written at the top of the OBJ.
-// Meshes whose render byte (mesh header 0x139) is 0 are skipped; the game does not appear to draw them.
+// Meshes whose render byte is 0 are skipped; the game does not appear to draw them.
 function convert(mdl, mdx, label = "", opts = {}) {
-	const base = 12,
+	const base = FILE_HEADER_SIZE,
 		len = mdl.length - base,
 		errors = []
 	const stats = {
@@ -74,7 +103,7 @@ function convert(mdl, mdx, label = "", opts = {}) {
 		nameCount = u32(0xc0)
 	const names = []
 	for (let i = 0; i < nameCount; i++) {
-		names.push(readString(u32(nameTableOffset + 4 * i), 64))
+		names.push(readString(u32(nameTableOffset + 4 * i), NAME_LENGTH))
 	}
 
 	const out = [`# converted from ${label}`]
@@ -89,7 +118,7 @@ function convert(mdl, mdx, label = "", opts = {}) {
 	function mesh(header, name, rotation, position) {
 		const faceOffset = u32(header + 0x08),
 			faceCount = u32(header + 0x0c)
-		const tex = readString(header + 0x58, 32)
+		const tex = readString(header + 0x58, TEXTURE_NAME_LENGTH)
 		const stride = u32(header + 0xfc),
 			positionOffset = u32(header + 0x104),
 			uvOffset = u32(header + 0x110)
@@ -100,15 +129,15 @@ function convert(mdl, mdx, label = "", opts = {}) {
 			return
 		}
 
-		inBounds(faceOffset, 32 * faceCount, `faces ${name}`)
-		inBounds(vertexOffset, 12 * vertexCount, `verts ${name}`)
+		inBounds(faceOffset, FACE_SIZE * faceCount, `faces ${name}`)
+		inBounds(vertexOffset, VERTEX_SIZE * vertexCount, `verts ${name}`)
 
 		let hasmdx = stride > 0 && vertexCount > 0 && mdx.length > 0
 		if (hasmdx && mdxoff + stride * vertexCount > mdx.length) {
 			errors.push(`mdx range ${name}`)
 			hasmdx = false
 		}
-		if (u8(header + 0x139) === 0) {
+		if (u8(header + MESH_RENDER_OFFSET) === 0) {
 			stats.hidden++
 			return
 		}
@@ -126,7 +155,7 @@ function convert(mdl, mdx, label = "", opts = {}) {
 
 		const verts = []
 		for (let i = 0; i < vertexCount; i++) {
-			const vertex = f32(vertexOffset + 12 * i, 3)
+			const vertex = f32(vertexOffset + VERTEX_SIZE * i, 3)
 			verts.push(vertex)
 
 			if (hasmdx && positionOffset !== NONE) {
@@ -135,7 +164,7 @@ function convert(mdl, mdx, label = "", opts = {}) {
 					[0, 1, 2].some(
 						(axis) =>
 							Math.abs(vertex[axis] - mdx.readFloatLE(mdxPos + 4 * axis)) >
-							1e-5,
+							POSITION_TOLERANCE,
 					)
 				) {
 					stats.mismatch++
@@ -158,8 +187,13 @@ function convert(mdl, mdx, label = "", opts = {}) {
 		}
 
 		for (let face = 0; face < faceCount; face++) {
-			const faceEntry = faceOffset + 32 * face
-			const ix = [u16(faceEntry + 26), u16(faceEntry + 28), u16(faceEntry + 30)]
+			const faceEntry = faceOffset + FACE_SIZE * face,
+				vertexIndices = faceEntry + FACE_VERTICES_OFFSET
+			const ix = [
+				u16(vertexIndices),
+				u16(vertexIndices + 2),
+				u16(vertexIndices + 4),
+			]
 			if (ix.some((index) => !(index < vertexCount))) {
 				errors.push(`face index >= ${vertexCount} in ${name}`)
 				continue
@@ -176,12 +210,12 @@ function convert(mdl, mdx, label = "", opts = {}) {
 				edge1[0] * edge2[1] - edge1[1] * edge2[0],
 			]
 			const length = Math.hypot(...cross)
-			if (length > 1e-9) {
+			if (length > MIN_CROSS_LENGTH) {
 				stats.normalsChecked++
 				if (
 					(cross[0] * normal[0] + cross[1] * normal[1] + cross[2] * normal[2]) /
 						length >
-					0.99
+					MIN_NORMAL_COSINE
 				) {
 					stats.normalsMatching++
 				}
@@ -199,7 +233,7 @@ function convert(mdl, mdx, label = "", opts = {}) {
 		if (seen.has(offset)) {
 			return errors.push(`node loop at ${offset}`)
 		}
-		if (depth > 200) {
+		if (depth > MAX_NODE_DEPTH) {
 			return errors.push("depth")
 		}
 
@@ -224,8 +258,8 @@ function convert(mdl, mdx, label = "", opts = {}) {
 				rotated[2] + parentPosition[2],
 			]
 		const name = names[nameIndex] ?? `node${offset}`
-		if (flags & 0x20) {
-			mesh(offset + 80, name, worldRotation, worldPosition)
+		if (flags & NODE_FLAG_MESH) {
+			mesh(offset + NODE_HEADER_SIZE, name, worldRotation, worldPosition)
 		}
 
 		for (let i = 0; i < childCount; i++) {

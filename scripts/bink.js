@@ -7,9 +7,26 @@ const fs = require("fs")
 const path = require("path")
 
 // Header 44 bytes, then 12 bytes per audio track (three arrays of 4 bytes each), then the frame index.
+const HEADER_SIZE = 44
+const TRACK_SIZE = 12
+const SIGNATURE = /^BIK[a-z]$/
+
+// The size field holds the file size minus 8.
+const SIZE_FIELD_BIAS = 8
+
+// Frame index entries are u32. Bit 0 marks a keyframe.
+const INDEX_ENTRY_SIZE = 4
+const KEYFRAME_BIT = 1
+
+// Audio packets start with a u32 size. A packet's decoded size is also a u32.
+const PACKET_SIZE_FIELD = 4
+
+// Bit 13 of a track's flags probably marks stereo audio. All files have it set, so this is not confirmed.
+const TRACK_STEREO = 0x2000
+
 function parse(file) {
 	const errors = []
-	if (file.length < 44) {
+	if (file.length < HEADER_SIZE) {
 		return { errors: ["shorter than header"] }
 	}
 
@@ -27,27 +44,32 @@ function parse(file) {
 		audioTracks: file.readUInt32LE(40),
 		tracks: [],
 	}
-	if (!/^BIK[a-z]$/.test(header.signature)) {
+	if (!SIGNATURE.test(header.signature)) {
 		errors.push(`signature ${header.signature}`)
 	}
-	if (header.sizeMinus8 + 8 !== file.length) {
+	if (header.sizeMinus8 + SIZE_FIELD_BIAS !== file.length) {
 		errors.push(
-			`size field ${header.sizeMinus8 + 8} != file size ${file.length}`,
+			`size field ${header.sizeMinus8 + SIZE_FIELD_BIAS} != file size ${file.length}`,
 		)
 	}
 
 	const trackCount = header.audioTracks
-	const tableAt = 44 + 12 * trackCount
-	if (tableAt + 4 * (header.frames + 1) > file.length) {
+	const tableAt = HEADER_SIZE + TRACK_SIZE * trackCount
+	const headerEnd = tableAt + INDEX_ENTRY_SIZE * (header.frames + 1)
+	if (headerEnd > file.length) {
 		return { header, errors: [...errors, "frame index past end of file"] }
 	}
 
+	// The three track arrays follow each other; each holds 4 bytes per track.
 	for (let track = 0; track < trackCount; track++) {
+		const maxDecoded = HEADER_SIZE + 4 * track,
+			rateAndFlags = maxDecoded + 4 * trackCount,
+			id = rateAndFlags + 4 * trackCount
 		header.tracks.push({
-			maxDecoded: file.readUInt32LE(44 + 4 * track),
-			sampleRate: file.readUInt16LE(44 + 4 * trackCount + 4 * track),
-			flags: file.readUInt16LE(46 + 4 * trackCount + 4 * track),
-			id: file.readUInt32LE(44 + 8 * trackCount + 4 * track),
+			maxDecoded: file.readUInt32LE(maxDecoded),
+			sampleRate: file.readUInt16LE(rateAndFlags),
+			flags: file.readUInt16LE(rateAndFlags + 2),
+			id: file.readUInt32LE(id),
 		})
 	}
 
@@ -56,12 +78,11 @@ function parse(file) {
 	const offs = [],
 		keys = []
 	for (let i = 0; i <= header.frames; i++) {
-		const entry = file.readUInt32LE(tableAt + 4 * i)
-		offs.push(entry & ~1)
-		keys.push(entry & 1)
+		const entry = file.readUInt32LE(tableAt + INDEX_ENTRY_SIZE * i)
+		offs.push(entry & ~KEYFRAME_BIT)
+		keys.push(entry & KEYFRAME_BIT)
 	}
 
-	const headerEnd = tableAt + 4 * (header.frames + 1)
 	if (offs[0] !== headerEnd) {
 		errors.push(`first frame at ${offs[0]}, header ends at ${headerEnd}`)
 	}
@@ -92,21 +113,21 @@ function parse(file) {
 		let packet = start
 		for (let track = 0; track < trackCount; track++) {
 			const size = file.readUInt32LE(packet)
-			if (packet + 4 + size > end) {
+			if (packet + PACKET_SIZE_FIELD + size > end) {
 				errors.push(
 					`frame ${i} track ${track} audio packet ${size} past frame end`,
 				)
 				break
 			}
 
-			if (size >= 4) {
-				const decoded = file.readUInt32LE(packet + 4)
+			if (size >= PACKET_SIZE_FIELD) {
+				const decoded = file.readUInt32LE(packet + PACKET_SIZE_FIELD)
 				maxPacketDecoded[track] = Math.max(maxPacketDecoded[track], decoded)
 				decodedBytes[track] += decoded
 			}
 
 			audioBytes += size
-			packet += 4 + size
+			packet += PACKET_SIZE_FIELD + size
 		}
 	}
 
@@ -152,10 +173,10 @@ function report(name, result) {
 	)
 }
 
-module.exports = { parse, report }
-
 if (require.main === module) {
 	for (const file of process.argv.slice(2)) {
 		console.log(report(path.basename(file), parse(fs.readFileSync(file))))
 	}
 }
+
+module.exports = { TRACK_STEREO, parse, report }

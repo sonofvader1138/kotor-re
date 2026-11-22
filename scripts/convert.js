@@ -17,8 +17,8 @@ const audio = require("./audio")
 const adpcm2pcm = require("./adpcm2pcm")
 const bink = require("./bink")
 
-const ASSETS = path.join(kotor.ROOT, "assets"),
-	REPORTS = path.join(kotor.ROOT, "temp", "reports")
+const ASSETS = kotor.ASSETS,
+	REPORTS = kotor.REPORTS
 fs.mkdirSync(REPORTS, { recursive: true })
 
 const want = new Set(process.argv.slice(2))
@@ -32,9 +32,6 @@ const tally = (name, lines) => {
 	summary.push(`${name}: ${pass} pass, ${lines.length - pass} fail`)
 }
 
-// Texture packs used for model materials, in priority order. tpb and tpc hold the same textures at
-// lower resolution and are not converted.
-const PACKS = ["swpc_tex_tpa", "swpc_tex_gui"]
 const packErf = (pack) =>
 	kotor.readErf(path.join(kotor.GAME, "TexturePacks", `${pack}.erf`))
 
@@ -55,7 +52,7 @@ const convertModels = () => {
 	fs.mkdirSync(out, { recursive: true })
 
 	const texPath = new Map()
-	for (const pack of [...PACKS].reverse()) {
+	for (const pack of [...kotor.TEXTURE_PACKS].reverse()) {
 		for (const entry of packErf(pack).entries) {
 			if (entry.ext === "tpc") {
 				texPath.set(
@@ -127,7 +124,7 @@ const convertModels = () => {
 
 // Textures: TexturePacks/<pack>.erf -> assets/TexturePacks/<pack>/*.png (+ *.txi when present)
 const convertTextures = () => {
-	for (const pack of PACKS) {
+	for (const pack of kotor.TEXTURE_PACKS) {
 		console.log(`textures ${pack}...`)
 		const out = path.join(ASSETS, "TexturePacks", pack)
 		fs.mkdirSync(out, { recursive: true })
@@ -172,14 +169,9 @@ const convertTextures = () => {
 // data/lightmaps*.bif -> assets/data/lightmaps, data/textures.bif -> assets/data/textures,
 // data/legacy.bif -> assets/data/legacy. Images become 8-bit PNG with the TGA's channels (gray, RGB or
 // RGBA), top row first. The TGA parser must consume each file exactly.
-const TGA_GROUPS = [
-	["lightmaps", /^data\/lightmaps\d*\.bif$/],
-	["textures", /^data\/textures\.bif$/],
-	["legacy", /^data\/legacy\.bif$/],
-]
 const convertTga = () => {
 	const key = kotor.readKey()
-	for (const [group, pattern] of TGA_GROUPS) {
+	for (const [group, pattern] of kotor.TGA_GROUPS) {
 		console.log(`tga ${group}...`)
 		const out = path.join(ASSETS, "data", group)
 		fs.mkdirSync(out, { recursive: true })
@@ -275,9 +267,17 @@ const convertAudio = (stage, folder) => {
 // Movies: movies/*.bik -> assets/movies/*.mp4 (H.264 High profile, yuv420p; AAC LC audio).
 // Requires ffmpeg, which decodes Bink. One ffmpeg process does not keep all CPUs busy at this resolution,
 // so MOVIE_JOBS of them run at once, largest movie first, so that the last ones to finish are short.
-// CRF 12 keeps every frame of every movie at 40 dB PSNR or more against the Bink frame, which verify.js
-// requires. At CRF 18, frames in 12 movies fell as low as 36.5 dB. CRF 12 makes files about 1.7 times larger.
-const MOVIE_JOBS = Math.max(1, Math.floor(os.availableParallelism() / 3))
+// One job per CPUS_PER_MOVIE CPUs keeps all CPUs busy.
+// CRF (constant rate factor) 12 keeps every frame of every movie at 40 dB PSNR or more against the Bink
+// frame, which verify.js requires. At CRF 18, frames in 12 movies fell as low as 36.5 dB. CRF 12 makes
+// files about 1.7 times larger.
+const CPUS_PER_MOVIE = 3
+const MOVIE_JOBS = Math.max(
+	1,
+	Math.floor(os.availableParallelism() / CPUS_PER_MOVIE),
+)
+const MOVIE_CRF = 12
+const MOVIE_AUDIO_BITRATE = "192k"
 const convertMovies = async () => {
 	if (
 		childProcess.spawnSync("ffmpeg", ["-version"], { stdio: "ignore" }).error
@@ -321,13 +321,13 @@ const convertMovies = async () => {
 			"-preset",
 			"slow",
 			"-crf",
-			"12",
+			String(MOVIE_CRF),
 			"-pix_fmt",
 			"yuv420p",
 			"-c:a",
 			"aac",
 			"-b:a",
-			"192k",
+			MOVIE_AUDIO_BITRATE,
 			"-movflags",
 			"+faststart",
 			outFile,
@@ -362,9 +362,10 @@ const convertMovies = async () => {
 // Five patch.erf resources replace gui.bif resources of the same name.
 // A struct becomes an object keyed by field label, in file order. A struct type other than 0 is kept as
 // "__struct_type". Lists become arrays of objects, vectors become 3-element arrays, and f32 values use the
-// shortest decimal that round-trips.
+// shortest decimal that round-trips. Nine significant digits always round-trip an f32.
+const F32_MAX_DIGITS = 9
 const f32 = (value) => {
-	for (let digits = 1; digits <= 9; digits++) {
+	for (let digits = 1; digits <= F32_MAX_DIGITS; digits++) {
 		const shortest = +value.toPrecision(digits)
 		if (Math.fround(shortest) === value) {
 			return shortest
@@ -381,13 +382,13 @@ const guiJson = (struct) => {
 
 	for (const field of struct.fields) {
 		object[field.label] =
-			field.type === 14
+			field.type === kotor.GFF_TYPE.struct
 				? guiJson(field.value)
-				: field.type === 15
+				: field.type === kotor.GFF_TYPE.list
 					? field.value.map(guiJson)
-					: field.type === 8
+					: field.type === kotor.GFF_TYPE.f32
 						? f32(field.value)
-						: field.type === 17
+						: field.type === kotor.GFF_TYPE.vector
 							? field.value.map(f32)
 							: field.value
 	}
@@ -401,13 +402,13 @@ const convertGui = () => {
 			"data/gui",
 			kotor
 				.bifResources("data/gui.bif")
-				.filter((resource) => resource.type === 2047),
+				.filter((resource) => resource.type === kotor.RESOURCE_TYPE.gui),
 		],
 		[
 			"patch",
 			kotor
 				.readErf(path.join(kotor.GAME, "patch.erf"))
-				.entries.filter((entry) => entry.type === 2047)
+				.entries.filter((entry) => entry.type === kotor.RESOURCE_TYPE.gui)
 				.map((entry) => ({ resref: entry.resref, data: entry.data() })),
 		],
 	]
@@ -452,16 +453,6 @@ const STAGES = [
 	["waves", () => convertAudio("waves", "streamwaves")],
 	["gui", convertGui],
 ]
-const REPORT_ORDER = [
-	"models",
-	"textures",
-	"tga",
-	"music",
-	"sounds",
-	"waves",
-	"movies",
-	"gui",
-]
 
 // Starts one process per selected stage and prints their summary lines in report order.
 const main = async () => {
@@ -484,7 +475,7 @@ const main = async () => {
 		),
 	)
 
-	const lines = REPORT_ORDER.filter((stage) => results[stage]).flatMap(
+	const lines = kotor.REPORT_ORDER.filter((stage) => results[stage]).flatMap(
 		(stage) => results[stage],
 	)
 	console.log(lines.join("\n"))

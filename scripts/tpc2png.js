@@ -7,20 +7,45 @@
 const fs = require("fs")
 const png = require("./png")
 
+const HEADER_SIZE = 128
+
+// Storage kind for each encoding byte. Uncompressed files have dataSize 0.
+const UNCOMPRESSED_KIND = { 1: "gray", 2: "rgb", 4: "rgba" }
+const COMPRESSED_KIND = { 2: "dxt1", 4: "dxt5" }
+const BYTES_PER_PIXEL = { gray: 1, rgb: 3, rgba: 4 }
+
+// DXT compresses blocks of 4 x 4 pixels. A DXT1 block is 8 bytes. A DXT5 block is 8 bytes of alpha,
+// then a DXT1-style 8-byte color block.
+const BLOCK_PIXELS = 4
+const DXT1_BLOCK_SIZE = 8
+const DXT5_BLOCK_SIZE = 16
+const BLOCK_TEXELS = BLOCK_PIXELS * BLOCK_PIXELS
+
+const CUBE_FACES = 6
+const OPAQUE = 255
+
+// Bytes allowed in the TXI trailer: NUL, tab, line feed, carriage return and printable ASCII.
+const TXI_CONTROL_BYTES = [0, 9, 10, 13]
+const PRINTABLE_FIRST = 32
+const PRINTABLE_LAST = 126
+
+const blocksAcross = (pixels) => Math.max(1, Math.ceil(pixels / BLOCK_PIXELS))
+
 // Byte size of one image of width x height pixels for a given storage kind.
 function levelSize(kind, width, height) {
-	if (kind === "dxt1") {
-		return Math.max(1, (width + 3) >> 2) * Math.max(1, (height + 3) >> 2) * 8
+	if (kind === "dxt1" || kind === "dxt5") {
+		return (
+			blocksAcross(width) *
+			blocksAcross(height) *
+			(kind === "dxt1" ? DXT1_BLOCK_SIZE : DXT5_BLOCK_SIZE)
+		)
 	}
-	if (kind === "dxt5") {
-		return Math.max(1, (width + 3) >> 2) * Math.max(1, (height + 3) >> 2) * 16
-	}
-	return width * height * { gray: 1, rgb: 3, rgba: 4 }[kind]
+	return width * height * BYTES_PER_PIXEL[kind]
 }
 
 function parse(file) {
 	const errors = []
-	if (file.length < 128) {
+	if (file.length < HEADER_SIZE) {
 		return { errors: ["shorter than header"] }
 	}
 
@@ -30,16 +55,11 @@ function parse(file) {
 		height = file.readUInt16LE(10),
 		enc = file[12],
 		mips = file[13]
-	if (file.subarray(14, 128).some((byte) => byte)) {
+	if (file.subarray(14, HEADER_SIZE).some((byte) => byte)) {
 		errors.push("header padding not zero")
 	}
 
-	let kind
-	if (dataSize === 0) {
-		kind = { 1: "gray", 2: "rgb", 4: "rgba" }[enc]
-	} else {
-		kind = { 2: "dxt1", 4: "dxt5" }[enc]
-	}
+	const kind = (dataSize === 0 ? UNCOMPRESSED_KIND : COMPRESSED_KIND)[enc]
 	if (!kind) {
 		return {
 			errors: [...errors, `unknown encoding ${enc} with dataSize ${dataSize}`],
@@ -66,9 +86,9 @@ function parse(file) {
 
 	let layout = "plain",
 		images = [{ x: 0, y: 0, width, height, levels: mips }]
-	if (width > 0 && height === 6 * width) {
+	if (width > 0 && height === CUBE_FACES * width) {
 		layout = "cube"
-		images = Array.from({ length: 6 }, (_, face) => ({
+		images = Array.from({ length: CUBE_FACES }, (_, face) => ({
 			x: 0,
 			y: face * width,
 			width,
@@ -78,9 +98,9 @@ function parse(file) {
 	} else if (
 		dataSize &&
 		dataSize !== levelSize(kind, width, height) &&
-		128 + dataSize <= file.length
+		HEADER_SIZE + dataSize <= file.length
 	) {
-		const txiText = file.toString("latin1", 128 + dataSize)
+		const txiText = file.toString("latin1", HEADER_SIZE + dataSize)
 		const columns = +(/^\s*numx\s+(\d+)/im.exec(txiText) || [])[1],
 			rows = +(/^\s*numy\s+(\d+)/im.exec(txiText) || [])[1]
 		if (
@@ -113,7 +133,7 @@ function parse(file) {
 	if (
 		dataSize &&
 		dataSize !== top &&
-		!(dataSize === 16 && top === 8) &&
+		!(dataSize === DXT5_BLOCK_SIZE && top === DXT1_BLOCK_SIZE) &&
 		layout !== "flipbook"
 	) {
 		errors.push(`dataSize ${dataSize} matches no known layout`)
@@ -121,14 +141,14 @@ function parse(file) {
 
 	let pixels = 0
 	for (const image of images) {
-		image.offset = 128 + pixels
+		image.offset = HEADER_SIZE + pixels
 		pixels += chain(image.width, image.height, image.levels)
 	}
 	if (layout === "flipbook" && pixels !== dataSize) {
 		errors.push(`flipbook frames total ${pixels}, dataSize ${dataSize}`)
 	}
 
-	const end = 128 + pixels
+	const end = HEADER_SIZE + pixels
 	if (end > file.length) {
 		errors.push(`pixel data ends at ${end}, past end of file ${file.length}`)
 	}
@@ -137,11 +157,8 @@ function parse(file) {
 	if (
 		txi.some(
 			(byte) =>
-				byte !== 0 &&
-				byte !== 9 &&
-				byte !== 10 &&
-				byte !== 13 &&
-				(byte < 32 || byte > 126),
+				!TXI_CONTROL_BYTES.includes(byte) &&
+				(byte < PRINTABLE_FIRST || byte > PRINTABLE_LAST),
 		)
 	) {
 		errors.push("trailer not ASCII")
@@ -173,31 +190,31 @@ const expandRgb565 = (color) => [
 // Decode one image (width x height) of the given kind at file[offset] into RGBA, top row first.
 function decodeImage(file, offset, kind, width, height) {
 	const out = Buffer.alloc(width * height * 4)
-	if (kind === "gray" || kind === "rgb" || kind === "rgba") {
-		const channels = { gray: 1, rgb: 3, rgba: 4 }[kind]
+	const channels = BYTES_PER_PIXEL[kind]
+	if (channels) {
 		for (let i = 0; i < width * height; i++) {
 			const src = offset + i * channels
 			if (channels === 1) {
 				out.fill(file[src], 4 * i, 4 * i + 3)
-				out[4 * i + 3] = 255
+				out[4 * i + 3] = OPAQUE
 			} else {
 				out[4 * i] = file[src]
 				out[4 * i + 1] = file[src + 1]
 				out[4 * i + 2] = file[src + 2]
-				out[4 * i + 3] = channels === 4 ? file[src + 3] : 255
+				out[4 * i + 3] = channels === 4 ? file[src + 3] : OPAQUE
 			}
 		}
 		return out
 	}
 
-	const blockSize = kind === "dxt1" ? 8 : 16,
-		blocksWide = Math.max(1, (width + 3) >> 2),
-		blocksHigh = Math.max(1, (height + 3) >> 2)
+	const blockSize = kind === "dxt1" ? DXT1_BLOCK_SIZE : DXT5_BLOCK_SIZE,
+		blocksWide = blocksAcross(width),
+		blocksHigh = blocksAcross(height)
 	for (let blockY = 0; blockY < blocksHigh; blockY++) {
 		for (let blockX = 0; blockX < blocksWide; blockX++) {
 			let block = offset + (blockY * blocksWide + blockX) * blockSize
 
-			const alphas = new Array(16).fill(255)
+			const alphas = new Array(BLOCK_TEXELS).fill(OPAQUE)
 			if (kind === "dxt5") {
 				const alpha0 = file[block],
 					alpha1 = file[block + 1],
@@ -210,14 +227,14 @@ function decodeImage(file, offset, kind, width, height) {
 					for (let i = 1; i < 5; i++) {
 						alphaTable.push((((5 - i) * alpha0 + i * alpha1) / 5 + 0.5) | 0)
 					}
-					alphaTable.push(0, 255)
+					alphaTable.push(0, OPAQUE)
 				}
 
 				const bits = file.readUIntLE(block + 2, 6)
-				for (let i = 0; i < 16; i++) {
+				for (let i = 0; i < BLOCK_TEXELS; i++) {
 					alphas[i] = alphaTable[Math.floor(bits / 2 ** (3 * i)) & 7]
 				}
-				block += 8
+				block += DXT1_BLOCK_SIZE
 			}
 
 			const raw0 = file.readUInt16LE(block),
@@ -238,9 +255,9 @@ function decodeImage(file, offset, kind, width, height) {
 			}
 
 			const indices = file.readUInt32LE(block + 4)
-			for (let i = 0; i < 16; i++) {
-				const x = blockX * 4 + (i & 3),
-					y = blockY * 4 + (i >> 2)
+			for (let i = 0; i < BLOCK_TEXELS; i++) {
+				const x = blockX * BLOCK_PIXELS + (i % BLOCK_PIXELS),
+					y = blockY * BLOCK_PIXELS + Math.floor(i / BLOCK_PIXELS)
 				if (x >= width || y >= height) {
 					continue
 				}

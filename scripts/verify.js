@@ -27,8 +27,8 @@ const kotor = require("./kotor")
 const tpc = require("./tpc2png")
 const bink = require("./bink")
 
-const ASSETS = path.join(kotor.ROOT, "assets"),
-	REPORTS = path.join(kotor.ROOT, "temp", "reports")
+const ASSETS = kotor.ASSETS,
+	REPORTS = kotor.REPORTS
 const SHARDS = os.availableParallelism(),
 	SHARD_JOBS = 2
 
@@ -143,12 +143,14 @@ const pngCheck = async (name, file, width, height, rgba) => {
 	return `${name} ${decoded.size} PASS`
 }
 
-// Runs pngcheck on every PNG in dir, 200 files per run. Each job's result holds one report line per file.
+// Runs pngcheck on every PNG in dir, PNGCHECK_BATCH files per run. Each job's result holds one report
+// line per file.
+const PNGCHECK_BATCH = 200
 const pngcheckDir = async (dir) => {
 	const names = files(dir, ".png"),
 		jobs = []
-	for (let i = 0; i < names.length; i += 200) {
-		const chunk = names.slice(i, i + 200)
+	for (let i = 0; i < names.length; i += PNGCHECK_BATCH) {
+		const chunk = names.slice(i, i + PNGCHECK_BATCH)
 		jobs.push(async () => {
 			const result = await kotor.exec(
 				"pngcheck",
@@ -237,7 +239,7 @@ const models = async (summary) => {
 // Textures: assets/TexturePacks/<pack>/*.png against the TPC textures in TexturePacks/<pack>.erf.
 // Each job decodes its TPC texture when it starts, so only one texture per worker is held in memory.
 const textures = async (summary) => {
-	for (const pack of ["swpc_tex_tpa", "swpc_tex_gui"]) {
+	for (const pack of kotor.TEXTURE_PACKS) {
 		log(`textures ${pack}...`)
 		const dir = path.join(ASSETS, "TexturePacks", pack)
 		const erf = kotor.readErf(
@@ -267,14 +269,9 @@ const textures = async (summary) => {
 }
 
 // TGA images: assets/data/<group>/*.png and *.txi against the BIF archives they came from
-const TGA_GROUPS = [
-	["lightmaps", /^data\/lightmaps\d*\.bif$/],
-	["textures", /^data\/textures\.bif$/],
-	["legacy", /^data\/legacy\.bif$/],
-]
 const tgaImages = async (summary) => {
 	const key = kotor.readKey()
-	for (const [group, pattern] of TGA_GROUPS) {
+	for (const [group, pattern] of kotor.TGA_GROUPS) {
 		log(`tga ${group}...`)
 		const dir = path.join(ASSETS, "data", group)
 
@@ -354,6 +351,12 @@ const streamAudio = async (summary, stage, folder) => {
 // Movies: assets/movies/*.mp4 against movies/*.bik. The probe and the PSNR comparison of one movie run
 // at the same time.
 const MIN_PSNR = 40
+
+// ffmpeg's Bink audio decoder emits about 0.03 s more than the packets declare.
+const AUDIO_DURATION_TOLERANCE_S = 0.1
+
+// Bink audio is 16-bit.
+const BINK_BYTES_PER_SAMPLE = 2
 const movies = async (summary) => {
 	if (!(ffprobe && has("ffmpeg"))) {
 		summary.push("ffmpeg or ffprobe missing: movies UNVERIFIED")
@@ -427,8 +430,10 @@ const movies = async (summary) => {
 		}
 		if (header.audioTracks > 0) {
 			const track = header.tracks[0],
-				channels = track.flags & 0x2000 ? 2 : 1,
-				durationS = movie.decodedBytes[0] / (2 * channels * track.sampleRate)
+				channels = track.flags & bink.TRACK_STEREO ? 2 : 1,
+				durationS =
+					movie.decodedBytes[0] /
+					(BINK_BYTES_PER_SAMPLE * channels * track.sampleRate)
 			if (!sound || sound.codec_name !== "aac") {
 				errs.push("no AAC audio stream")
 			} else {
@@ -438,7 +443,10 @@ const movies = async (summary) => {
 				if (sound.channels !== channels) {
 					errs.push(`${sound.channels} channels, Bink ${channels}`)
 				}
-				if (Math.abs(Number(sound.duration) - durationS) > 0.1) {
+				if (
+					Math.abs(Number(sound.duration) - durationS) >
+					AUDIO_DURATION_TOLERANCE_S
+				) {
 					errs.push(`audio ${sound.duration} s, Bink ${durationS.toFixed(3)} s`)
 				}
 				audioInfo = `${track.sampleRate}Hz ${channels}ch ${durationS.toFixed(3)}s`
@@ -493,16 +501,6 @@ const STAGES = [
 	["waves", (summary) => streamAudio(summary, "waves", "streamwaves")],
 	["gui", gui],
 ]
-const REPORT_ORDER = [
-	"models",
-	"textures",
-	"tga",
-	"music",
-	"sounds",
-	"waves",
-	"movies",
-	"gui",
-]
 
 // Runs the stages in this shard and resolves to its summary items in report order.
 const checkShard = async () => {
@@ -514,7 +512,7 @@ const checkShard = async () => {
 		}),
 	)
 
-	return REPORT_ORDER.filter((stage) => summaries[stage]).flatMap(
+	return kotor.REPORT_ORDER.filter((stage) => summaries[stage]).flatMap(
 		(stage) => summaries[stage],
 	)
 }

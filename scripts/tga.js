@@ -7,14 +7,34 @@
 const fs = require("fs")
 const png = require("./png")
 
-const FOOTER = "TRUEVISION-XFILE.\0"
+const HEADER_SIZE = 18
+
+// The 26-byte footer holds u32 extension area offset, u32 developer area offset and this 18-byte signature.
+const FOOTER_SIZE = 26
+const FOOTER_SIGNATURE = "TRUEVISION-XFILE.\0"
+
+const IMAGE_TYPE = { trueColor: 2, grayscale: 3 }
+
+// "image type/bits per pixel" pairs that occur in the game.
+const SUPPORTED_KINDS = [
+	`${IMAGE_TYPE.trueColor}/24`,
+	`${IMAGE_TYPE.trueColor}/32`,
+	`${IMAGE_TYPE.grayscale}/8`,
+]
+
+// Image descriptor bits: alpha bit count in bits 0 to 3, right-to-left order in bit 4, top-down order in bit 5.
+const DESCRIPTOR_ALPHA_BITS = 0x0f
+const DESCRIPTOR_RIGHT_TO_LEFT = 0x10
+const DESCRIPTOR_TOP_DOWN = 0x20
+
+const OPAQUE = 255
 
 // Reads the header and checks that the header, pixels and optional trailer consume the file exactly.
 function parse(file) {
 	const header = { errors: [] }
-	if (file.length < 18) {
+	if (file.length < HEADER_SIZE) {
 		header.errors.push(
-			`file is ${file.length} bytes, shorter than the 18-byte header`,
+			`file is ${file.length} bytes, shorter than the ${HEADER_SIZE}-byte header`,
 		)
 		return header
 	}
@@ -26,15 +46,15 @@ function parse(file) {
 	header.height = file.readUInt16LE(14)
 	header.bpp = file[16]
 	header.descriptor = file[17]
-	header.alphaBits = header.descriptor & 15
-	header.topDown = (header.descriptor & 0x20) !== 0
-	header.rightToLeft = (header.descriptor & 0x10) !== 0
+	header.alphaBits = header.descriptor & DESCRIPTOR_ALPHA_BITS
+	header.topDown = (header.descriptor & DESCRIPTOR_TOP_DOWN) !== 0
+	header.rightToLeft = (header.descriptor & DESCRIPTOR_RIGHT_TO_LEFT) !== 0
 
 	const kind = `${header.imageType}/${header.bpp}`
 	if (header.colorMapType !== 0) {
 		header.errors.push(`color map type ${header.colorMapType}`)
 	}
-	if (!["2/24", "2/32", "3/8"].includes(kind)) {
+	if (!SUPPORTED_KINDS.includes(kind)) {
 		header.errors.push(
 			`image type ${header.imageType} at ${header.bpp} bits per pixel`,
 		)
@@ -47,7 +67,7 @@ function parse(file) {
 	}
 
 	header.channels = header.bpp / 8
-	header.pixelOffset = 18 + header.idLength
+	header.pixelOffset = HEADER_SIZE + header.idLength
 	header.pixelEnd =
 		header.pixelOffset + header.width * header.height * header.channels
 	header.trailer = "none"
@@ -62,19 +82,24 @@ function parse(file) {
 	if (rest === 0) {
 		return header
 	}
-	if (rest < 26 || file.toString("latin1", file.length - 18) !== FOOTER) {
+	if (
+		rest < FOOTER_SIZE ||
+		file.toString("latin1", file.length - FOOTER_SIGNATURE.length) !==
+			FOOTER_SIGNATURE
+	) {
 		header.errors.push(
 			`${rest} bytes after the pixels without a TGA 2.0 footer`,
 		)
 		return header
 	}
 
-	const extOffset = file.readUInt32LE(file.length - 26),
-		devOffset = file.readUInt32LE(file.length - 22)
+	const footer = file.length - FOOTER_SIZE,
+		extOffset = file.readUInt32LE(footer),
+		devOffset = file.readUInt32LE(footer + 4)
 	if (devOffset !== 0) {
 		header.errors.push(`developer area at ${devOffset}`)
 	}
-	if (rest === 26) {
+	if (rest === FOOTER_SIZE) {
 		header.trailer = "footer"
 		if (extOffset !== 0) {
 			header.errors.push(`extension area at ${extOffset}, but no room for one`)
@@ -83,7 +108,7 @@ function parse(file) {
 	}
 
 	header.trailer = "extension+footer"
-	header.extSize = file.length - 26 - header.pixelEnd
+	header.extSize = footer - header.pixelEnd
 	header.extSizeField = file.readUInt16LE(header.pixelEnd)
 	if (extOffset !== header.pixelEnd) {
 		header.errors.push(
@@ -118,7 +143,7 @@ function decode(file, header = parse(file)) {
 			if (channels === 1) {
 				pix[dst] = file[src]
 				rgba[dstRgba] = rgba[dstRgba + 1] = rgba[dstRgba + 2] = file[src]
-				rgba[dstRgba + 3] = 255
+				rgba[dstRgba + 3] = OPAQUE
 				continue
 			}
 
@@ -126,7 +151,7 @@ function decode(file, header = parse(file)) {
 			pix[dst] = rgba[dstRgba] = file[src + 2]
 			pix[dst + 1] = rgba[dstRgba + 1] = file[src + 1]
 			pix[dst + 2] = rgba[dstRgba + 2] = file[src]
-			rgba[dstRgba + 3] = channels === 4 ? file[src + 3] : 255
+			rgba[dstRgba + 3] = channels === 4 ? file[src + 3] : OPAQUE
 			if (channels === 4) {
 				pix[dst + 3] = file[src + 3]
 			}
