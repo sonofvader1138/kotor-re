@@ -4,6 +4,7 @@ const fs = require("fs")
 
 const NONE = 0xffffffff
 
+// Quaternions are [w, x, y, z]. qrot rotates a vector by a unit quaternion; qmul multiplies two quaternions.
 function qrot([w, x, y, z], [vx, vy, vz]) {
 	const tx = 2 * (y * vz - z * vy),
 		ty = 2 * (z * vx - x * vz),
@@ -22,15 +23,15 @@ function qmul([aw, ax, ay, az], [bw, bx, by, bz]) {
 		aw * bz + ax * by - ay * bx + az * bw,
 	]
 }
-const f6 = (v) => v.toFixed(6)
+const f6 = (value) => value.toFixed(6)
 
 // opts.mtllib: material library file name written at the top of the OBJ.
 // Meshes whose render byte (mesh header 0x139) is 0 are skipped; the game does not appear to draw them.
 function convert(mdl, mdx, label = "", opts = {}) {
-	const B = 12,
-		len = mdl.length - B,
+	const base = 12,
+		len = mdl.length - base,
 		errors = []
-	const st = {
+	const stats = {
 		nodes: 0,
 		hidden: 0,
 		meshes: 0,
@@ -40,22 +41,28 @@ function convert(mdl, mdx, label = "", opts = {}) {
 		nok: 0,
 		nchk: 0,
 	}
-	const inb = (o, n, what) => {
-		if (o < 0 || o + n > len) {
-			errors.push(`${what} out of bounds (${o}+${n}>${len})`)
+	const inb = (offset, count, what) => {
+		if (offset < 0 || offset + count > len) {
+			errors.push(`${what} out of bounds (${offset}+${count}>${len})`)
 			return false
 		}
 		return true
 	}
-	const u32 = (o) => (inb(o, 4, "u32") ? mdl.readUInt32LE(B + o) : undefined)
-	const u16 = (o) => (inb(o, 2, "u16") ? mdl.readUInt16LE(B + o) : undefined)
-	const u8 = (o) => (inb(o, 1, "u8") ? mdl[B + o] : undefined)
-	const f32 = (o, n) =>
-		inb(o, 4 * n, "f32")
-			? Array.from({ length: n }, (_, i) => mdl.readFloatLE(B + o + 4 * i))
+	const u32 = (offset) =>
+		inb(offset, 4, "u32") ? mdl.readUInt32LE(base + offset) : undefined
+	const u16 = (offset) =>
+		inb(offset, 2, "u16") ? mdl.readUInt16LE(base + offset) : undefined
+	const u8 = (offset) => (inb(offset, 1, "u8") ? mdl[base + offset] : undefined)
+	const f32 = (offset, count) =>
+		inb(offset, 4 * count, "f32")
+			? Array.from({ length: count }, (_, i) =>
+					mdl.readFloatLE(base + offset + 4 * i),
+				)
 			: undefined
-	const cstr = (o, n) =>
-		mdl.toString("latin1", B + o, B + o + n).replace(/\0.*$/s, "")
+	const cstr = (offset, count) =>
+		mdl
+			.toString("latin1", base + offset, base + offset + count)
+			.replace(/\0.*$/s, "")
 
 	const root = u32(0x28),
 		hdrNodes = u32(0x2c)
@@ -70,136 +77,152 @@ function convert(mdl, mdx, label = "", opts = {}) {
 	let vbase = 1
 	const seen = new Set()
 
-	function mesh(m, name, q, p) {
-		const foff = u32(m + 0x08),
-			fcnt = u32(m + 0x0c)
-		const tex = cstr(m + 0x58, 32)
-		const stride = u32(m + 0xfc),
-			opos = u32(m + 0x104),
-			ouv = u32(m + 0x110)
-		const vcnt = u16(m + 0x130)
-		const mdxoff = u32(m + 0x144),
-			vcoff = u32(m + 0x148)
+	function mesh(header, name, rotation, position) {
+		const foff = u32(header + 0x08),
+			fcnt = u32(header + 0x0c)
+		const tex = cstr(header + 0x58, 32)
+		const stride = u32(header + 0xfc),
+			opos = u32(header + 0x104),
+			ouv = u32(header + 0x110)
+		const vertexCount = u16(header + 0x130)
+		const mdxoff = u32(header + 0x144),
+			vcoff = u32(header + 0x148)
 		if (vcoff === undefined) return
 		inb(foff, 32 * fcnt, `faces ${name}`)
-		inb(vcoff, 12 * vcnt, `verts ${name}`)
-		let hasmdx = stride > 0 && vcnt > 0 && mdx.length > 0
-		if (hasmdx && mdxoff + stride * vcnt > mdx.length) {
+		inb(vcoff, 12 * vertexCount, `verts ${name}`)
+		let hasmdx = stride > 0 && vertexCount > 0 && mdx.length > 0
+		if (hasmdx && mdxoff + stride * vertexCount > mdx.length) {
 			errors.push(`mdx range ${name}`)
 			hasmdx = false
 		}
-		if (u8(m + 0x139) === 0) {
-			st.hidden++
+		if (u8(header + 0x139) === 0) {
+			stats.hidden++
 			return
 		}
 		const hasuv = hasmdx && ouv !== NONE
-		st.meshes++
-		st.verts += vcnt
-		st.faces += fcnt
+		stats.meshes++
+		stats.verts += vertexCount
+		stats.faces += fcnt
 		out.push(`o ${name}`)
 		if (tex && tex.toLowerCase() !== "null") {
 			out.push(`usemtl ${tex.toLowerCase()}`)
 			textures.add(tex.toLowerCase())
 		}
 		const verts = []
-		for (let i = 0; i < vcnt; i++) {
-			const v = f32(vcoff + 12 * i, 3)
-			verts.push(v)
+		for (let i = 0; i < vertexCount; i++) {
+			const vertex = f32(vcoff + 12 * i, 3)
+			verts.push(vertex)
 			if (hasmdx && opos !== NONE) {
-				const o = mdxoff + stride * i + opos
+				const mdxPos = mdxoff + stride * i + opos
 				if (
 					[0, 1, 2].some(
-						(k) => Math.abs(v[k] - mdx.readFloatLE(o + 4 * k)) > 1e-5,
+						(axis) =>
+							Math.abs(vertex[axis] - mdx.readFloatLE(mdxPos + 4 * axis)) >
+							1e-5,
 					)
 				)
-					st.mismatch++
+					stats.mismatch++
 			}
-			const w = qrot(q, v)
-			out.push(`v ${f6(w[0] + p[0])} ${f6(w[1] + p[1])} ${f6(w[2] + p[2])}`)
+			const world = qrot(rotation, vertex)
+			out.push(
+				`v ${f6(world[0] + position[0])} ${f6(world[1] + position[1])} ${f6(world[2] + position[2])}`,
+			)
 			// vt for every vertex keeps v/vt indices aligned
-			const t = hasuv
+			const uv = hasuv
 				? [
 						mdx.readFloatLE(mdxoff + stride * i + ouv),
 						mdx.readFloatLE(mdxoff + stride * i + ouv + 4),
 					]
 				: [0, 0]
-			out.push(`vt ${f6(t[0])} ${f6(t[1])}`)
+			out.push(`vt ${f6(uv[0])} ${f6(uv[1])}`)
 		}
-		for (let f = 0; f < fcnt; f++) {
-			const fo = foff + 32 * f
+		for (let face = 0; face < fcnt; face++) {
+			const fo = foff + 32 * face
 			const ix = [u16(fo + 26), u16(fo + 28), u16(fo + 30)]
-			if (ix.some((i) => !(i < vcnt))) {
-				errors.push(`face index >= ${vcnt} in ${name}`)
+			if (ix.some((index) => !(index < vertexCount))) {
+				errors.push(`face index >= ${vertexCount} in ${name}`)
 				continue
 			}
 			// stored normal must match winding
-			const n = f32(fo, 3),
-				[a, b, c] = ix.map((i) => verts[i])
-			const u = [0, 1, 2].map((k) => b[k] - a[k]),
-				w = [0, 1, 2].map((k) => c[k] - a[k])
-			const x = [
-				u[1] * w[2] - u[2] * w[1],
-				u[2] * w[0] - u[0] * w[2],
-				u[0] * w[1] - u[1] * w[0],
+			const normal = f32(fo, 3),
+				[corner0, corner1, corner2] = ix.map((index) => verts[index])
+			const edge1 = [0, 1, 2].map((axis) => corner1[axis] - corner0[axis]),
+				edge2 = [0, 1, 2].map((axis) => corner2[axis] - corner0[axis])
+			const cross = [
+				edge1[1] * edge2[2] - edge1[2] * edge2[1],
+				edge1[2] * edge2[0] - edge1[0] * edge2[2],
+				edge1[0] * edge2[1] - edge1[1] * edge2[0],
 			]
-			const l = Math.hypot(...x)
-			if (l > 1e-9) {
-				st.nchk++
-				if ((x[0] * n[0] + x[1] * n[1] + x[2] * n[2]) / l > 0.99) st.nok++
+			const length = Math.hypot(...cross)
+			if (length > 1e-9) {
+				stats.nchk++
+				if (
+					(cross[0] * normal[0] + cross[1] * normal[1] + cross[2] * normal[2]) /
+						length >
+					0.99
+				)
+					stats.nok++
 			}
-			out.push("f " + ix.map((i) => `${i + vbase}/${i + vbase}`).join(" "))
+			out.push(
+				"f " + ix.map((index) => `${index + vbase}/${index + vbase}`).join(" "),
+			)
 		}
-		vbase += vcnt
+		vbase += vertexCount
 	}
 
-	function node(o, pq, pp, depth) {
-		if (seen.has(o)) return errors.push(`node loop at ${o}`)
+	function node(offset, parentRotation, parentPosition, depth) {
+		if (seen.has(offset)) return errors.push(`node loop at ${offset}`)
 		if (depth > 200) return errors.push("depth")
-		seen.add(o)
-		st.nodes++
-		const flags = u16(o) ?? 0,
-			nidx = u16(o + 4) ?? 0
-		const pos = f32(o + 0x10, 3),
-			q = f32(o + 0x1c, 4)
-		const coff = u32(o + 0x2c),
-			ccnt = u32(o + 0x30) ?? 0
-		if (!pos || !q) return
-		const wq = qmul(pq, q),
-			r = qrot(pq, pos),
-			wp = [r[0] + pp[0], r[1] + pp[1], r[2] + pp[2]]
-		const name = names[nidx] ?? `node${o}`
-		if (flags & 0x20) mesh(o + 80, name, wq, wp)
+		seen.add(offset)
+		stats.nodes++
+		const flags = u16(offset) ?? 0,
+			nidx = u16(offset + 4) ?? 0
+		const pos = f32(offset + 0x10, 3),
+			rotation = f32(offset + 0x1c, 4)
+		const coff = u32(offset + 0x2c),
+			ccnt = u32(offset + 0x30) ?? 0
+		if (!pos || !rotation) return
+		const worldRotation = qmul(parentRotation, rotation),
+			rotated = qrot(parentRotation, pos),
+			worldPosition = [
+				rotated[0] + parentPosition[0],
+				rotated[1] + parentPosition[1],
+				rotated[2] + parentPosition[2],
+			]
+		const name = names[nidx] ?? `node${offset}`
+		if (flags & 0x20) mesh(offset + 80, name, worldRotation, worldPosition)
 		for (let i = 0; i < ccnt; i++) {
-			const c = u32(coff + 4 * i)
-			if (c !== undefined) node(c, wq, wp, depth + 1)
+			const child = u32(coff + 4 * i)
+			if (child !== undefined)
+				node(child, worldRotation, worldPosition, depth + 1)
 		}
 	}
 
 	node(root, [1, 0, 0, 0], [0, 0, 0], 0)
 	return {
 		obj: out.join("\n") + "\n",
-		st: { ...st, hdrNodes },
+		stats: { ...stats, hdrNodes },
 		textures,
 		errors,
 	}
 }
 
-function report(label, { st, errors }) {
+function report(label, { stats, errors }) {
 	return (
-		`${label} nodes=${st.nodes} meshes=${st.meshes} hidden=${st.hidden} verts=${st.verts} faces=${st.faces} ` +
-		`mdl/mdx_mismatch=${st.mismatch} hdrnodes=${st.hdrNodes} normals_ok=${st.nok}/${st.nchk} ` +
+		`${label} nodes=${stats.nodes} meshes=${stats.meshes} hidden=${stats.hidden} verts=${stats.verts} faces=${stats.faces} ` +
+		`mdl/mdx_mismatch=${stats.mismatch} hdrnodes=${stats.hdrNodes} normals_ok=${stats.nok}/${stats.nchk} ` +
 		(errors.length ? "FAIL: " + errors.slice(0, 5).join("; ") : "PASS")
 	)
 }
 
 if (require.main === module) {
 	const [fmdl, fmdx, fout] = process.argv.slice(2)
-	const r = convert(
+	const result = convert(
 		fs.readFileSync(fmdl),
 		fs.existsSync(fmdx) ? fs.readFileSync(fmdx) : Buffer.alloc(0),
 		fmdl,
 	)
-	fs.writeFileSync(fout, r.obj)
-	console.log(report(fmdl, r))
+	fs.writeFileSync(fout, result.obj)
+	console.log(report(fmdl, result))
 }
 module.exports = { convert, report }

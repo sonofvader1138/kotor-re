@@ -3,22 +3,22 @@
 const zlib = require("zlib")
 const kotor = require("./kotor")
 
-function encode(w, h, pix, channels = 4) {
-	const stride = w * channels,
-		raw = Buffer.alloc((stride + 1) * h)
-	for (let y = 0; y < h; y++)
+function encode(width, height, pix, channels = 4) {
+	const stride = width * channels,
+		raw = Buffer.alloc((stride + 1) * height)
+	for (let y = 0; y < height; y++)
 		pix.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride)
 	const chunk = (type, data) => {
 		const len = Buffer.alloc(4),
 			crc = Buffer.alloc(4),
-			td = Buffer.concat([Buffer.from(type, "latin1"), data])
+			typeAndData = Buffer.concat([Buffer.from(type, "latin1"), data])
 		len.writeUInt32BE(data.length)
-		crc.writeUInt32BE(zlib.crc32(td))
-		return Buffer.concat([len, td, crc])
+		crc.writeUInt32BE(zlib.crc32(typeAndData))
+		return Buffer.concat([len, typeAndData, crc])
 	}
 	const ihdr = Buffer.alloc(13)
-	ihdr.writeUInt32BE(w, 0)
-	ihdr.writeUInt32BE(h, 4)
+	ihdr.writeUInt32BE(width, 0)
+	ihdr.writeUInt32BE(height, 4)
 	ihdr[8] = 8
 	ihdr[9] = { 1: 0, 3: 2, 4: 6 }[channels]
 	return Buffer.concat([
@@ -29,63 +29,68 @@ function encode(w, h, pix, channels = 4) {
 	])
 }
 
-function decode(b) {
-	let o = 8,
-		w,
-		h,
-		ct,
+function decode(file) {
+	let offset = 8,
+		width,
+		height,
+		colorType,
 		idat = []
-	while (o < b.length) {
-		const len = b.readUInt32BE(o),
-			type = b.toString("latin1", o + 4, o + 8),
-			d = b.subarray(o + 8, o + 8 + len)
+	while (offset < file.length) {
+		const len = file.readUInt32BE(offset),
+			type = file.toString("latin1", offset + 4, offset + 8),
+			data = file.subarray(offset + 8, offset + 8 + len)
 		if (type === "IHDR") {
-			w = d.readUInt32BE(0)
-			h = d.readUInt32BE(4)
-			ct = d[9]
-			if (d[8] !== 8 || d[12] !== 0 || ![0, 2, 4, 6].includes(ct))
+			width = data.readUInt32BE(0)
+			height = data.readUInt32BE(4)
+			colorType = data[9]
+			if (data[8] !== 8 || data[12] !== 0 || ![0, 2, 4, 6].includes(colorType))
 				kotor.fatal("unsupported PNG")
-		} else if (type === "IDAT") idat.push(d)
-		o += 12 + len
+		} else if (type === "IDAT") idat.push(data)
+		offset += 12 + len
 	}
-	const n = { 0: 1, 2: 3, 4: 2, 6: 4 }[ct],
-		stride = w * n,
+	const channels = { 0: 1, 2: 3, 4: 2, 6: 4 }[colorType],
+		stride = width * channels,
 		raw = zlib.inflateSync(Buffer.concat(idat))
-	const px = Buffer.alloc(stride * h)
-	for (let y = 0; y < h; y++) {
-		const f = raw[y * (stride + 1)],
+	const pix = Buffer.alloc(stride * height)
+	for (let y = 0; y < height; y++) {
+		const filter = raw[y * (stride + 1)],
 			src = y * (stride + 1) + 1,
 			dst = y * stride
 		for (let x = 0; x < stride; x++) {
-			const a = x >= n ? px[dst + x - n] : 0,
-				up = y ? px[dst - stride + x] : 0,
-				c = y && x >= n ? px[dst - stride + x - n] : 0
-			const p = a + up - c,
-				pa = Math.abs(p - a),
-				pb = Math.abs(p - up),
-				pc = Math.abs(p - c)
+			// The PNG specification names the left, upper and upper-left neighbors a, b and c.
+			const left = x >= channels ? pix[dst + x - channels] : 0,
+				up = y ? pix[dst - stride + x] : 0,
+				upLeft = y && x >= channels ? pix[dst - stride + x - channels] : 0
+			const paeth = left + up - upLeft,
+				distLeft = Math.abs(paeth - left),
+				distUp = Math.abs(paeth - up),
+				distUpLeft = Math.abs(paeth - upLeft)
 			const pred = [
 				0,
-				a,
+				left,
 				up,
-				(a + up) >> 1,
-				pa <= pb && pa <= pc ? a : pb <= pc ? up : c,
-			][f]
-			px[dst + x] = (raw[src + x] + pred) & 255
+				(left + up) >> 1,
+				distLeft <= distUp && distLeft <= distUpLeft
+					? left
+					: distUp <= distUpLeft
+						? up
+						: upLeft,
+			][filter]
+			pix[dst + x] = (raw[src + x] + pred) & 255
 		}
 	}
-	const rgba = Buffer.alloc(w * h * 4)
-	for (let i = 0; i < w * h; i++) {
-		const s = i * n
-		if (n <= 2)
-			(rgba.fill(px[s], 4 * i, 4 * i + 3),
-				(rgba[4 * i + 3] = n === 2 ? px[s + 1] : 255))
+	const rgba = Buffer.alloc(width * height * 4)
+	for (let i = 0; i < width * height; i++) {
+		const src = i * channels
+		if (channels <= 2)
+			(rgba.fill(pix[src], 4 * i, 4 * i + 3),
+				(rgba[4 * i + 3] = channels === 2 ? pix[src + 1] : 255))
 		else {
-			px.copy(rgba, 4 * i, s, s + 3)
-			rgba[4 * i + 3] = n === 4 ? px[s + 3] : 255
+			pix.copy(rgba, 4 * i, src, src + 3)
+			rgba[4 * i + 3] = channels === 4 ? pix[src + 3] : 255
 		}
 	}
-	return { w, h, rgba }
+	return { width, height, rgba }
 }
 
 module.exports = { encode, decode }

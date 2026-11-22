@@ -7,29 +7,29 @@ const fs = require("fs")
 const path = require("path")
 const kotor = require("./kotor")
 
-function f32(x) {
-	for (let p = 1; p <= 9; p++) {
-		const s = +x.toPrecision(p)
-		if (Math.fround(s) === x) return s
+function f32(value) {
+	for (let digits = 1; digits <= 9; digits++) {
+		const shortest = +value.toPrecision(digits)
+		if (Math.fround(shortest) === value) return shortest
 	}
-	return x
+	return value
 }
-function toJson(s) {
-	const o = {}
-	if (s.structType !== 0) o.__struct_type = s.structType
-	for (const f of s.fields) {
-		o[f.label] =
-			f.type === 14
-				? toJson(f.value)
-				: f.type === 15
-					? f.value.map(toJson)
-					: f.type === 8
-						? f32(f.value)
-						: f.type === 17
-							? f.value.map(f32)
-							: f.value
+function toJson(struct) {
+	const object = {}
+	if (struct.structType !== 0) object.__struct_type = struct.structType
+	for (const field of struct.fields) {
+		object[field.label] =
+			field.type === 14
+				? toJson(field.value)
+				: field.type === 15
+					? field.value.map(toJson)
+					: field.type === 8
+						? f32(field.value)
+						: field.type === 17
+							? field.value.map(f32)
+							: field.value
 	}
-	return o
+	return object
 }
 
 const root = process.argv[2]
@@ -40,26 +40,30 @@ if (!root) {
 const sources = [
 	[
 		"data/gui",
-		kotor.bifResources("data/gui.bif").filter((r) => r.type === 2047),
+		kotor
+			.bifResources("data/gui.bif")
+			.filter((resource) => resource.type === 2047),
 	],
 	[
 		"patch",
 		kotor
 			.readErf(path.join(kotor.GAME, "patch.erf"))
-			.entries.filter((e) => e.type === 2047)
-			.map((e) => ({ resref: e.resref, data: e.data() })),
+			.entries.filter((entry) => entry.type === 2047)
+			.map((entry) => ({ resref: entry.resref, data: entry.data() })),
 	],
 ]
 for (const [dir, list] of sources) {
 	const out = path.join(root, dir)
 	fs.mkdirSync(out, { recursive: true })
-	for (const r of list) {
-		const g = kotor.readGff(r.data, r.resref)
-		if (g.fileType !== "GUI " || g.version !== "V3.2")
-			kotor.fatal(`${r.resref}: unexpected ${g.fileType}${g.version}`)
+	for (const resource of list) {
+		const gff = kotor.readGff(resource.data, resource.resref)
+		if (gff.fileType !== "GUI " || gff.version !== "V3.2")
+			kotor.fatal(
+				`${resource.resref}: unexpected ${gff.fileType}${gff.version}`,
+			)
 		fs.writeFileSync(
-			path.join(out, `${r.resref}.json`),
-			JSON.stringify(toJson(g.root), null, 1) + "\n",
+			path.join(out, `${resource.resref}.json`),
+			JSON.stringify(toJson(gff.root), null, 1) + "\n",
 		)
 	}
 	console.log(`${list.length} GUI files written to ${out}`)

@@ -5,12 +5,15 @@ const path = require("path")
 const kotor = require("./kotor")
 
 const [bif, out, ...want] = process.argv.slice(2)
-const w = new Set(want.map((s) => s.toLowerCase()))
+const wanted = new Set(want.map((resref) => resref.toLowerCase()))
 fs.mkdirSync(out, { recursive: true })
-let n = 0
-for (const r of kotor.bifResources(bif)) {
-	if (w.size && !w.has(r.resref)) continue
-	fs.writeFileSync(path.join(out, `${r.resref}.${r.ext}`), r.data)
-	n++
+let count = 0
+for (const resource of kotor.bifResources(bif)) {
+	if (wanted.size && !wanted.has(resource.resref)) continue
+	fs.writeFileSync(
+		path.join(out, `${resource.resref}.${resource.ext}`),
+		resource.data,
+	)
+	count++
 }
-console.log(`${n} resources written to ${out}`)
+console.log(`${count} resources written to ${out}`)

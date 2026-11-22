@@ -5,114 +5,135 @@
 // An 18-byte header and an optional image ID precede the pixels. An optional TGA 2.0 extension area
 // and 26-byte footer follow them.
 const fs = require("fs")
-const PNG = require("./png")
+const png = require("./png")
 
 const FOOTER = "TRUEVISION-XFILE.\0"
 
 // Reads the header and checks that the header, pixels and optional trailer consume the file exactly.
-function parse(b) {
-	const t = { errors: [] }
-	if (b.length < 18) {
-		t.errors.push(`file is ${b.length} bytes, shorter than the 18-byte header`)
-		return t
+function parse(file) {
+	const header = { errors: [] }
+	if (file.length < 18) {
+		header.errors.push(
+			`file is ${file.length} bytes, shorter than the 18-byte header`,
+		)
+		return header
 	}
-	t.idLength = b[0]
-	t.colorMapType = b[1]
-	t.imageType = b[2]
-	t.width = b.readUInt16LE(12)
-	t.height = b.readUInt16LE(14)
-	t.bpp = b[16]
-	t.descriptor = b[17]
-	t.alphaBits = t.descriptor & 15
-	t.topDown = (t.descriptor & 0x20) !== 0
-	t.rightToLeft = (t.descriptor & 0x10) !== 0
-	const kind = `${t.imageType}/${t.bpp}`
-	if (t.colorMapType !== 0) t.errors.push(`color map type ${t.colorMapType}`)
+	header.idLength = file[0]
+	header.colorMapType = file[1]
+	header.imageType = file[2]
+	header.width = file.readUInt16LE(12)
+	header.height = file.readUInt16LE(14)
+	header.bpp = file[16]
+	header.descriptor = file[17]
+	header.alphaBits = header.descriptor & 15
+	header.topDown = (header.descriptor & 0x20) !== 0
+	header.rightToLeft = (header.descriptor & 0x10) !== 0
+	const kind = `${header.imageType}/${header.bpp}`
+	if (header.colorMapType !== 0)
+		header.errors.push(`color map type ${header.colorMapType}`)
 	if (!["2/24", "2/32", "3/8"].includes(kind))
-		t.errors.push(`image type ${t.imageType} at ${t.bpp} bits per pixel`)
-	if (t.rightToLeft) t.errors.push("right-to-left pixel order")
-	if (t.width === 0 || t.height === 0) t.errors.push("zero width or height")
-	t.channels = t.bpp / 8
-	t.pixelOffset = 18 + t.idLength
-	t.pixelEnd = t.pixelOffset + t.width * t.height * t.channels
-	t.trailer = "none"
-	if (t.pixelEnd > b.length) {
-		t.errors.push(`pixels end at ${t.pixelEnd}, past end of file ${b.length}`)
-		return t
+		header.errors.push(
+			`image type ${header.imageType} at ${header.bpp} bits per pixel`,
+		)
+	if (header.rightToLeft) header.errors.push("right-to-left pixel order")
+	if (header.width === 0 || header.height === 0)
+		header.errors.push("zero width or height")
+	header.channels = header.bpp / 8
+	header.pixelOffset = 18 + header.idLength
+	header.pixelEnd =
+		header.pixelOffset + header.width * header.height * header.channels
+	header.trailer = "none"
+	if (header.pixelEnd > file.length) {
+		header.errors.push(
+			`pixels end at ${header.pixelEnd}, past end of file ${file.length}`,
+		)
+		return header
 	}
-	const rest = b.length - t.pixelEnd
-	if (rest === 0) return t
-	if (rest < 26 || b.toString("latin1", b.length - 18) !== FOOTER) {
-		t.errors.push(`${rest} bytes after the pixels without a TGA 2.0 footer`)
-		return t
+	const rest = file.length - header.pixelEnd
+	if (rest === 0) return header
+	if (rest < 26 || file.toString("latin1", file.length - 18) !== FOOTER) {
+		header.errors.push(
+			`${rest} bytes after the pixels without a TGA 2.0 footer`,
+		)
+		return header
 	}
-	const extOffset = b.readUInt32LE(b.length - 26),
-		devOffset = b.readUInt32LE(b.length - 22)
-	if (devOffset !== 0) t.errors.push(`developer area at ${devOffset}`)
+	const extOffset = file.readUInt32LE(file.length - 26),
+		devOffset = file.readUInt32LE(file.length - 22)
+	if (devOffset !== 0) header.errors.push(`developer area at ${devOffset}`)
 	if (rest === 26) {
-		t.trailer = "footer"
+		header.trailer = "footer"
 		if (extOffset !== 0)
-			t.errors.push(`extension area at ${extOffset}, but no room for one`)
-		return t
+			header.errors.push(`extension area at ${extOffset}, but no room for one`)
+		return header
 	}
-	t.trailer = "extension+footer"
-	t.extSize = b.length - 26 - t.pixelEnd
-	t.extSizeField = b.readUInt16LE(t.pixelEnd)
-	if (extOffset !== t.pixelEnd)
-		t.errors.push(`extension area at ${extOffset}, pixels end at ${t.pixelEnd}`)
-	return t
+	header.trailer = "extension+footer"
+	header.extSize = file.length - 26 - header.pixelEnd
+	header.extSizeField = file.readUInt16LE(header.pixelEnd)
+	if (extOffset !== header.pixelEnd)
+		header.errors.push(
+			`extension area at ${extOffset}, pixels end at ${header.pixelEnd}`,
+		)
+	return header
 }
 
-// Returns the pixels top row first. pix has t.channels bytes per pixel in PNG order: gray, RGB or RGBA.
+// Returns the pixels top row first. pix has header.channels bytes per pixel in PNG order: gray, RGB or RGBA.
 // rgba is the same image expanded to RGBA with alpha 255 where the file has no alpha channel.
-function decode(b, t = parse(b)) {
-	if (t.errors.length) return null
-	const w = t.width,
-		h = t.height,
-		n = t.channels,
-		stride = w * n
-	const pix = Buffer.alloc(stride * h),
-		rgba = Buffer.alloc(w * h * 4)
-	for (let y = 0; y < h; y++) {
-		const srcRow = t.pixelOffset + (t.topDown ? y : h - 1 - y) * stride
-		for (let x = 0; x < w; x++) {
-			const s = srcRow + x * n,
-				d = y * stride + x * n,
-				q = (y * w + x) * 4
-			if (n === 1) {
-				pix[d] = b[s]
-				rgba[q] = rgba[q + 1] = rgba[q + 2] = b[s]
-				rgba[q + 3] = 255
+function decode(file, header = parse(file)) {
+	if (header.errors.length) return null
+	const width = header.width,
+		height = header.height,
+		channels = header.channels,
+		stride = width * channels
+	const pix = Buffer.alloc(stride * height),
+		rgba = Buffer.alloc(width * height * 4)
+	for (let y = 0; y < height; y++) {
+		const srcRow =
+			header.pixelOffset + (header.topDown ? y : height - 1 - y) * stride
+		for (let x = 0; x < width; x++) {
+			const src = srcRow + x * channels,
+				dst = y * stride + x * channels,
+				dstRgba = (y * width + x) * 4
+			if (channels === 1) {
+				pix[dst] = file[src]
+				rgba[dstRgba] = rgba[dstRgba + 1] = rgba[dstRgba + 2] = file[src]
+				rgba[dstRgba + 3] = 255
 				continue
 			}
 			// TGA stores true color pixels as blue, green, red and, at 32 bits, alpha.
-			pix[d] = rgba[q] = b[s + 2]
-			pix[d + 1] = rgba[q + 1] = b[s + 1]
-			pix[d + 2] = rgba[q + 2] = b[s]
-			rgba[q + 3] = n === 4 ? b[s + 3] : 255
-			if (n === 4) pix[d + 3] = b[s + 3]
+			pix[dst] = rgba[dstRgba] = file[src + 2]
+			pix[dst + 1] = rgba[dstRgba + 1] = file[src + 1]
+			pix[dst + 2] = rgba[dstRgba + 2] = file[src]
+			rgba[dstRgba + 3] = channels === 4 ? file[src + 3] : 255
+			if (channels === 4) pix[dst + 3] = file[src + 3]
 		}
 	}
-	return { w, h, channels: n, pix, rgba }
+	return { width, height, channels, pix, rgba }
 }
 
-function report(label, t) {
-	if (t.width === undefined) return `${label} FAIL: ${t.errors.join("; ")}`
+function report(label, header) {
+	if (header.width === undefined)
+		return `${label} FAIL: ${header.errors.join("; ")}`
 	return (
-		`${label} ${t.width}x${t.height} type=${t.imageType} bpp=${t.bpp} alphaBits=${t.alphaBits} ` +
-		`origin=${t.topDown ? "top" : "bottom"} trailer=${t.trailer}` +
-		(t.extSize !== undefined ? ` ext=${t.extSize}/${t.extSizeField}` : "") +
+		`${label} ${header.width}x${header.height} type=${header.imageType} bpp=${header.bpp} alphaBits=${header.alphaBits} ` +
+		`origin=${header.topDown ? "top" : "bottom"} trailer=${header.trailer}` +
+		(header.extSize !== undefined
+			? ` ext=${header.extSize}/${header.extSizeField}`
+			: "") +
 		" " +
-		(t.errors.length ? "FAIL: " + t.errors.join("; ") : "PASS")
+		(header.errors.length ? "FAIL: " + header.errors.join("; ") : "PASS")
 	)
 }
 
 if (require.main === module) {
 	const [fin, fout] = process.argv.slice(2)
-	const b = fs.readFileSync(fin),
-		t = parse(b),
-		d = decode(b, t)
-	console.log(report(fin, t))
-	if (d) fs.writeFileSync(fout, PNG.encode(d.w, d.h, d.pix, d.channels))
+	const file = fs.readFileSync(fin),
+		header = parse(file),
+		image = decode(file, header)
+	console.log(report(fin, header))
+	if (image)
+		fs.writeFileSync(
+			fout,
+			png.encode(image.width, image.height, image.pix, image.channels),
+		)
 }
 module.exports = { parse, decode, report }

@@ -334,7 +334,7 @@ The PNG files keep their alpha channel, but the MTL files do not declare it as t
 
 # Images: TGA in the BIF archives
 
-Resource type 3 is a TGA image, the uncompressed image format defined by Truevision. The BIF archives hold 5,601 of them. They matter because 5,586 of them are lightmaps, the precomputed lighting that the game blends over area textures. The converter is `scripts/tga.js`, called by the `tga` stage of `scripts/convert_all.js`. It writes 8-bit PNG files with the same channels as the TGA.
+Resource type 3 is a TGA image, the uncompressed image format defined by Truevision. The BIF archives hold 5,601 of them. They matter because 5,586 of them are lightmaps, the precomputed lighting that the game blends over area textures. The converter is `scripts/tga.js`, called by the `tga` stage of `scripts/convert-all.js`. It writes 8-bit PNG files with the same channels as the TGA.
 
 The images are in three groups. The table below lists each group, its archives and its output directory.
 
@@ -506,7 +506,7 @@ The meanings of FILLSTYLE (0, 1 or 2), DIMENSION, INNEROFFSET, PULSING, DRAWSTYL
 
 # Music: streammusic/\*.wav
 
-The game's music is in `streammusic/`, which holds 119 files. All of them have the extension `.wav`, but none can be played as stored. They use two layouts, each of which hides a standard audio file behind extra bytes. The converter is `scripts/kotor_audio.js`. All 119 files pass its check: walking the MP3 frames or WAV chunks of each file ends exactly at the end of the file.
+The game's music is in `streammusic/`, which holds 119 files. All of them have the extension `.wav`, but none can be played as stored. They use two layouts, each of which hides a standard audio file behind extra bytes. The converter is `scripts/audio.js`. All 119 files pass its check: walking the MP3 frames or WAV chunks of each file ends exactly at the end of the file.
 
 ## Layout A: MP3 behind a fake WAV header
 
@@ -538,7 +538,7 @@ The decoder was checked as follows. Each block header stores the sample the enco
 
 # Sound effects and voices: streamsounds/\*.wav
 
-The folder `streamsounds/` holds 970 files with the extension `.wav`. They are combat voice lines, creature sounds, ambient loops and a few music stingers that the game streams from disk instead of loading from the BIF archives. Every file uses Layout B from the music section: the same 470-byte MP3 stub, followed by a complete WAV file at offset 0x1D6 (470). No file uses Layout A, and none uses ADPCM. The converter `scripts/convert_all.js` (stage `sounds`) strips the stub and writes the embedded WAV unchanged to `assets/streamsounds/`.
+The folder `streamsounds/` holds 970 files with the extension `.wav`. They are combat voice lines, creature sounds, ambient loops and a few music stingers that the game streams from disk instead of loading from the BIF archives. Every file uses Layout B from the music section: the same 470-byte MP3 stub, followed by a complete WAV file at offset 0x1D6 (470). No file uses Layout A, and none uses ADPCM. The converter `scripts/convert-all.js` (stage `sounds`) strips the stub and writes the embedded WAV unchanged to `assets/streamsounds/`.
 
 ## Embedded WAV
 
@@ -594,7 +594,7 @@ All 970 files pass the parser: the chunk walk of each embedded WAV ends exactly 
 
 # Movies: movies/\*.bik
 
-The game's 61 cutscenes and logo screens are in `movies/`. They are Bink video files, a format by RAD Game Tools that the game plays with `binkw32.dll`. All 61 files begin with the signature "BIKi", which `file` identifies as Bink Video revision i. The parser is `scripts/bink.js`, and the converter is the `movies` stage of `scripts/convert_all.js`. All 61 files pass the parser's check: the header size field matches the file size, the frame index ends exactly at the end of the file, the largest-frame field equals the largest frame, and every audio packet fits inside its frame.
+The game's 61 cutscenes and logo screens are in `movies/`. They are Bink video files, a format by RAD Game Tools that the game plays with `binkw32.dll`. All 61 files begin with the signature "BIKi", which `file` identifies as Bink Video revision i. The parser is `scripts/bink.js`, and the converter is the `movies` stage of `scripts/convert-all.js`. All 61 files pass the parser's check: the header size field matches the file size, the frame index ends exactly at the end of the file, the largest-frame field equals the largest frame, and every audio packet fits inside its frame.
 
 The video and audio compression schemes are not documented here. The conversion uses ffmpeg's decoders, `binkvideo` and `binkaudio_dct`, which decode all 61 files.
 
