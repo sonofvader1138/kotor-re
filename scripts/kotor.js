@@ -1,6 +1,7 @@
 // Shared readers: KEY V1, BIFFV1, ERF V1.0.
 const fs = require("fs")
 const path = require("path")
+const childProcess = require("child_process")
 
 const ROOT = path.resolve(__dirname, "..")
 const GAME = path.join(ROOT, "swkotor")
@@ -317,3 +318,31 @@ function readGff(data, name = "gff") {
 }
 
 module.exports.readGff = readGff
+
+// Runs a program without blocking and resolves to { status, stdout (Buffer), stderr (string), error }.
+// A missing program resolves with error set, like childProcess.spawnSync.
+function exec(program, args, input) {
+	return new Promise((resolve) => {
+		const child = childProcess.spawn(program, args)
+		const stdout = [],
+			stderr = []
+		child.stdout.on("data", (chunk) => stdout.push(chunk))
+		child.stderr.on("data", (chunk) => stderr.push(chunk))
+
+		// A program that exits before reading all of its input closes the pipe. The exit status reports that.
+		child.stdin.on("error", () => {})
+		child.stdin.end(input)
+
+		const finish = (status, error) =>
+			resolve({
+				status,
+				error,
+				stdout: Buffer.concat(stdout),
+				stderr: Buffer.concat(stderr).toString(),
+			})
+		child.on("error", (error) => finish(null, error))
+		child.on("close", (status) => finish(status))
+	})
+}
+
+module.exports.exec = exec

@@ -6,7 +6,11 @@
 // the results in job order, writes the reports and prints the summary. Shards are processes, not worker
 // threads: starting a program copies the caller's memory map, and threads of one large process wait on
 // each other to do that.
-// models: assimp must load each OBJ with at least one mesh and the same face count as the file.
+// models: assimp must load each OBJ with at least one mesh and the same face count as the file. The import
+// is raw (-r): assimp's default post-processing merges meshes with identical geometry into one, and some
+// models repeat a mesh at the same place, so the default import reports fewer faces than the file has.
+// The raw import also skips assimp's validation of its own data structures. The OBJ parser still runs and
+// still rejects faces whose vertex index is out of range.
 // textures: ImageMagick's decoding of each PNG must equal the decoded TPC texture, and pngcheck must accept it.
 // tga: ImageMagick's decoding of each PNG must equal its decoding of the source TGA, and pngcheck must
 // accept the PNG. Each TXI must equal the source bytes.
@@ -45,28 +49,6 @@ const tally = (summary, name, entries) => {
 // childProcess.spawnSync reports a missing program in its error field instead of throwing.
 const has = (program, flag = "-version") =>
 	!childProcess.spawnSync(program, [flag], { stdio: "ignore" }).error
-// Runs a program without blocking and resolves to { status, stdout (Buffer), stderr (string), error }.
-// A missing program resolves with error set, like childProcess.spawnSync.
-const exec = (program, args, input) =>
-	new Promise((resolve) => {
-		const child = childProcess.spawn(program, args)
-		const stdout = [],
-			stderr = []
-		child.stdout.on("data", (chunk) => stdout.push(chunk))
-		child.stderr.on("data", (chunk) => stderr.push(chunk))
-		// A program that exits before reading all of its input closes the pipe. The exit status reports that.
-		child.stdin.on("error", () => {})
-		child.stdin.end(input)
-		const finish = (status, error) =>
-			resolve({
-				status,
-				error,
-				stdout: Buffer.concat(stdout),
-				stderr: Buffer.concat(stderr).toString(),
-			})
-		child.on("error", (error) => finish(null, error))
-		child.on("close", (status) => finish(status))
-	})
 // Runs this shard's share of the jobs, each a function returning a promise: job i belongs to shard
 // i % SHARDS. All calls in a shard share SHARD_JOBS slots, and jobs start in the order they were queued.
 // Resolves to [job index, result] pairs.
@@ -109,7 +91,7 @@ const files = (dir, ext) =>
 
 // Decodes an image with ImageMagick into 8-bit RGBA, top row first. The size goes to stderr.
 const magickDecode = async (format, data) => {
-	const result = await exec(
+	const result = await kotor.exec(
 		"convert",
 		[
 			`${format}:-`,
@@ -148,7 +130,7 @@ const pngcheckDir = async (dir) => {
 	for (let i = 0; i < names.length; i += 200) {
 		const chunk = names.slice(i, i + 200)
 		jobs.push(async () => {
-			const result = await exec(
+			const result = await kotor.exec(
 				"pngcheck",
 				chunk.map((file) => path.join(dir, file)),
 			)
@@ -200,7 +182,7 @@ const models = async (summary) => {
 			.readFileSync(objPath, "latin1")
 			.split("\n")
 			.filter((line) => line.startsWith("f ")).length
-		const result = await exec("assimp", ["info", objPath])
+		const result = await kotor.exec("assimp", ["info", objPath, "-r"])
 		const stdout = result.stdout.toString()
 		const meshes = /^Meshes:\s+(\d+)/m.exec(stdout),
 			loaded = /^Faces:\s+(\d+)/m.exec(stdout)
@@ -301,7 +283,7 @@ const streamAudio = async (summary, stage, folder) => {
 	log(`${stage}...`)
 	const dir = path.join(ASSETS, folder)
 	const jobs = files(dir, "").map((file) => async () => {
-		const result = await exec("ffprobe", ["-v", "error", path.join(dir, file)])
+		const result = await kotor.exec("ffprobe", ["-v", "error", path.join(dir, file)])
 		return result.status === 0 && !result.stderr.trim()
 			? `${file} PASS`
 			: `${file} FAIL: ${firstLine(result)}`
@@ -329,7 +311,7 @@ const movies = async (summary) => {
 		if (!fs.existsSync(outFile)) return `${name}.mp4 FAIL: output missing`
 		const header = movie.header
 		const [probe, compare] = await Promise.all([
-			exec("ffprobe", [
+			kotor.exec("ffprobe", [
 				"-v",
 				"error",
 				"-count_frames",
@@ -339,7 +321,7 @@ const movies = async (summary) => {
 				"stream=codec_type,codec_name,width,height,nb_read_frames,sample_rate,channels,duration",
 				outFile,
 			]),
-			exec("ffmpeg", [
+			kotor.exec("ffmpeg", [
 				"-hide_banner",
 				"-nostats",
 				"-i",
@@ -407,7 +389,7 @@ const gui = async (summary) => {
 	log("gui...")
 	const jobs = ["data/gui", "patch"].flatMap((dir) =>
 		files(path.join(ASSETS, dir), ".json").map((file) => async () => {
-			const result = await exec("jq", ["empty", path.join(ASSETS, dir, file)])
+			const result = await kotor.exec("jq", ["empty", path.join(ASSETS, dir, file)])
 			return result.status === 0
 				? `${dir}/${file} PASS`
 				: `${dir}/${file} FAIL: jq: ${firstLine(result)}`

@@ -2,9 +2,12 @@
 // Converts all supported game assets into ~/re/assets and writes each parser's report to ~/re/temp/reports.
 // It does not check the outputs with independent tools. scripts/verify.js does that.
 // Movies require ffmpeg.
+// Each stage runs in its own process, and all stages run at the same time. Each stage writes its own
+// outputs and reports and sends its summary lines to the main process, which prints them in stage order.
 const fs = require("fs")
 const path = require("path")
 const childProcess = require("child_process")
+const os = require("os")
 const kotor = require("./kotor")
 const tpc = require("./tpc2png")
 const tga = require("./tga")
@@ -19,6 +22,7 @@ const ASSETS = path.join(kotor.ROOT, "assets"),
 fs.mkdirSync(REPORTS, { recursive: true })
 const want = new Set(process.argv.slice(2))
 const run = (stage) => want.size === 0 || want.has(stage)
+// A stage process holds the summary lines of its own stage only.
 const summary = []
 const tally = (name, lines) => {
 	fs.writeFileSync(path.join(REPORTS, `${name}.txt`), lines.join("\n") + "\n")
@@ -39,7 +43,7 @@ const prune = (dir, keep, exts) => {
 }
 
 // Models: data/models.bif -> assets/data/models/*.obj + *.mtl (passing, with geometry)
-if (run("models")) {
+const convertModels = () => {
 	console.log("models...")
 	const out = path.join(ASSETS, "data", "models")
 	fs.mkdirSync(out, { recursive: true })
@@ -104,7 +108,7 @@ if (run("models")) {
 }
 
 // Textures: TexturePacks/<pack>.erf -> assets/TexturePacks/<pack>/*.png (+ *.txi when present)
-if (run("textures")) {
+const convertTextures = () => {
 	for (const pack of PACKS) {
 		console.log(`textures ${pack}...`)
 		const out = path.join(ASSETS, "TexturePacks", pack)
@@ -148,7 +152,7 @@ const TGA_GROUPS = [
 	["textures", /^data\/textures\.bif$/],
 	["legacy", /^data\/legacy\.bif$/],
 ]
-if (run("tga")) {
+const convertTga = () => {
 	const key = kotor.readKey()
 	for (const [group, pattern] of TGA_GROUPS) {
 		console.log(`tga ${group}...`)
@@ -194,11 +198,7 @@ if (run("tga")) {
 
 // Stream audio: streammusic/*.wav and streamsounds/*.wav -> assets/<folder>/*.mp3 | *.wav (PCM).
 // Both folders use the layouts that audio.unwrap detects. adpcm2pcm.decode copies PCM unchanged.
-const AUDIO = [
-	["music", "streammusic"],
-	["sounds", "streamsounds"],
-]
-for (const [stage, folder] of AUDIO.filter(([stage]) => run(stage))) {
+const convertAudio = (stage, folder) => {
 	console.log(`${stage}...`)
 	const src = path.join(kotor.GAME, folder),
 		out = path.join(ASSETS, folder)
@@ -229,69 +229,87 @@ for (const [stage, folder] of AUDIO.filter(([stage]) => run(stage))) {
 }
 
 // Movies: movies/*.bik -> assets/movies/*.mp4 (H.264 High profile, yuv420p; AAC LC audio).
-// Requires ffmpeg, which decodes Bink.
-const hasFfmpeg = !childProcess.spawnSync("ffmpeg", ["-version"], {
-	stdio: "ignore",
-}).error
-if (run("movies") && !hasFfmpeg)
-	summary.push("ffmpeg missing: movies not converted")
-else if (run("movies")) {
+// Requires ffmpeg, which decodes Bink. One ffmpeg process does not keep all CPUs busy at this resolution,
+// so MOVIE_JOBS of them run at once, largest movie first, so that the last ones to finish are short.
+// CRF 12 keeps every frame of every movie at 40 dB PSNR or more against the Bink frame, which verify.js
+// requires. At CRF 18, frames in 12 movies fell as low as 36.5 dB. CRF 12 makes files about 1.7 times larger.
+const MOVIE_JOBS = Math.max(1, Math.floor(os.availableParallelism() / 3))
+const convertMovies = async () => {
+	if (
+		childProcess.spawnSync("ffmpeg", ["-version"], { stdio: "ignore" }).error
+	) {
+		summary.push("ffmpeg missing: movies not converted")
+		return
+	}
+
 	console.log("movies...")
 	const src = path.join(kotor.GAME, "movies"),
 		out = path.join(ASSETS, "movies")
 	fs.mkdirSync(out, { recursive: true })
-	const lines = [],
-		written = new Set()
-	for (const file of fs
+	const files = fs
 		.readdirSync(src)
 		.filter((file) => /\.bik$/i.test(file))
-		.sort()) {
+		.sort()
+
+	// Resolves to the movie's report line, and adds the output to written when ffmpeg succeeds.
+	const written = new Set()
+	const convertMovie = async (file) => {
 		const name = file.replace(/\.bik$/i, ""),
 			inFile = path.join(src, file),
 			outFile = path.join(out, `${name}.mp4`)
 		const movie = bink.parse(fs.readFileSync(inFile))
 		if (movie.errors.length) {
-			lines.push(bink.report(file, movie))
-			continue
+			return bink.report(file, movie)
 		}
-		const result = childProcess.spawnSync(
-			"ffmpeg",
-			[
-				"-v",
-				"error",
-				"-y",
-				"-i",
-				inFile,
-				"-map",
-				"0:v",
-				"-map",
-				"0:a?",
-				"-c:v",
-				"libx264",
-				"-preset",
-				"slow",
-				"-crf",
-				"18",
-				"-pix_fmt",
-				"yuv420p",
-				"-c:a",
-				"aac",
-				"-b:a",
-				"192k",
-				"-movflags",
-				"+faststart",
-				outFile,
-			],
-			{ encoding: "utf8" },
-		)
+
+		const result = await kotor.exec("ffmpeg", [
+			"-v",
+			"error",
+			"-y",
+			"-i",
+			inFile,
+			"-map",
+			"0:v",
+			"-map",
+			"0:a?",
+			"-c:v",
+			"libx264",
+			"-preset",
+			"slow",
+			"-crf",
+			"12",
+			"-pix_fmt",
+			"yuv420p",
+			"-c:a",
+			"aac",
+			"-b:a",
+			"192k",
+			"-movflags",
+			"+faststart",
+			outFile,
+		])
 		const err = String(result.stderr || result.error || "").trim()
 		if (result.status !== 0 || err) {
-			lines.push(`${name}.mp4 FAIL: ffmpeg: ${err.split("\n")[0]}`)
-			continue
+			return `${name}.mp4 FAIL: ffmpeg: ${err.split("\n")[0]}`
 		}
+
 		written.add(`${name}.mp4`)
-		lines.push(bink.report(file, movie))
+		return bink.report(file, movie)
 	}
+
+	const sizes = files.map((file) => fs.statSync(path.join(src, file)).size)
+	const order = files.map((_, i) => i).sort((a, b) => sizes[b] - sizes[a])
+	const lines = new Array(files.length)
+	let next = 0
+	await Promise.all(
+		Array.from({ length: MOVIE_JOBS }, async () => {
+			while (next < order.length) {
+				const i = order[next++]
+				lines[i] = await convertMovie(files[i])
+			}
+		}),
+	)
+
 	prune(out, written, [".mp4"])
 	tally("movies", lines)
 }
@@ -324,7 +342,8 @@ const guiJson = (struct) => {
 							: field.value
 	return object
 }
-if (run("gui")) {
+
+const convertGui = () => {
 	console.log("gui...")
 	const sources = [
 		[
@@ -366,4 +385,59 @@ if (run("gui")) {
 	tally("gui", lines)
 }
 
-console.log(summary.join("\n"))
+// Movies start first because they take longest.
+const STAGES = [
+	["movies", convertMovies],
+	["models", convertModels],
+	["textures", convertTextures],
+	["tga", convertTga],
+	["music", () => convertAudio("music", "streammusic")],
+	["sounds", () => convertAudio("sounds", "streamsounds")],
+	["gui", convertGui],
+]
+const REPORT_ORDER = [
+	"models",
+	"textures",
+	"tga",
+	"music",
+	"sounds",
+	"movies",
+	"gui",
+]
+
+// Starts one process per selected stage and prints their summary lines in report order.
+const main = async () => {
+	const results = {}
+	await Promise.all(
+		STAGES.filter(([stage]) => run(stage)).map(
+			([stage]) =>
+				new Promise((resolve) => {
+					const child = childProcess.fork(__filename, [], {
+						env: { ...process.env, CONVERT_STAGE: stage },
+					})
+					child.on("message", (lines) => {
+						results[stage] = lines
+					})
+					child.on("exit", (status) => {
+						results[stage] ??= [`${stage}: stage exited with status ${status}`]
+						resolve()
+					})
+				}),
+		),
+	)
+
+	const lines = REPORT_ORDER.filter((stage) => results[stage]).flatMap(
+		(stage) => results[stage],
+	)
+	console.log(lines.join("\n"))
+}
+
+const stageName = process.env.CONVERT_STAGE
+if (stageName === undefined) {
+	main()
+} else {
+	const convertStage = STAGES.find(([stage]) => stage === stageName)[1]
+	Promise.resolve(convertStage()).then(() =>
+		process.send(summary, () => process.disconnect()),
+	)
+}
