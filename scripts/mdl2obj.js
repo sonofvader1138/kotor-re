@@ -15,6 +15,7 @@ function qrot([w, x, y, z], [vx, vy, vz]) {
 		vz + w * tz + x * ty - y * tx,
 	]
 }
+
 function qmul([aw, ax, ay, az], [bw, bx, by, bz]) {
 	return [
 		aw * bw - ax * bx - ay * by - az * bz,
@@ -23,6 +24,7 @@ function qmul([aw, ax, ay, az], [bw, bx, by, bz]) {
 		aw * bz + ax * by - ay * bx + az * bw,
 	]
 }
+
 const formatNumber = (value) => value.toFixed(6)
 
 // opts.mtllib: material library file name written at the top of the OBJ.
@@ -41,6 +43,7 @@ function convert(mdl, mdx, label = "", opts = {}) {
 		normalsMatching: 0,
 		normalsChecked: 0,
 	}
+
 	const inBounds = (offset, count, what) => {
 		if (offset < 0 || offset + count > len) {
 			errors.push(`${what} out of bounds (${offset}+${count}>${len})`)
@@ -70,11 +73,15 @@ function convert(mdl, mdx, label = "", opts = {}) {
 	const nameTableOffset = u32(0xb8),
 		nameCount = u32(0xc0)
 	const names = []
-	for (let i = 0; i < nameCount; i++)
+	for (let i = 0; i < nameCount; i++) {
 		names.push(readString(u32(nameTableOffset + 4 * i), 64))
+	}
 
 	const out = [`# converted from ${label}`]
-	if (opts.mtllib) out.push(`mtllib ${opts.mtllib}`)
+	if (opts.mtllib) {
+		out.push(`mtllib ${opts.mtllib}`)
+	}
+
 	const textures = new Set()
 	let vbase = 1
 	const seen = new Set()
@@ -89,9 +96,13 @@ function convert(mdl, mdx, label = "", opts = {}) {
 		const vertexCount = u16(header + 0x130)
 		const mdxoff = u32(header + 0x144),
 			vertexOffset = u32(header + 0x148)
-		if (vertexOffset === undefined) return
+		if (vertexOffset === undefined) {
+			return
+		}
+
 		inBounds(faceOffset, 32 * faceCount, `faces ${name}`)
 		inBounds(vertexOffset, 12 * vertexCount, `verts ${name}`)
+
 		let hasmdx = stride > 0 && vertexCount > 0 && mdx.length > 0
 		if (hasmdx && mdxoff + stride * vertexCount > mdx.length) {
 			errors.push(`mdx range ${name}`)
@@ -101,19 +112,23 @@ function convert(mdl, mdx, label = "", opts = {}) {
 			stats.hidden++
 			return
 		}
+
 		const hasuv = hasmdx && uvOffset !== NONE
 		stats.meshes++
 		stats.verts += vertexCount
 		stats.faces += faceCount
+
 		out.push(`o ${name}`)
 		if (tex && tex.toLowerCase() !== "null") {
 			out.push(`usemtl ${tex.toLowerCase()}`)
 			textures.add(tex.toLowerCase())
 		}
+
 		const verts = []
 		for (let i = 0; i < vertexCount; i++) {
 			const vertex = f32(vertexOffset + 12 * i, 3)
 			verts.push(vertex)
+
 			if (hasmdx && positionOffset !== NONE) {
 				const mdxPos = mdxoff + stride * i + positionOffset
 				if (
@@ -122,13 +137,16 @@ function convert(mdl, mdx, label = "", opts = {}) {
 							Math.abs(vertex[axis] - mdx.readFloatLE(mdxPos + 4 * axis)) >
 							1e-5,
 					)
-				)
+				) {
 					stats.mismatch++
+				}
 			}
+
 			const world = qrot(rotation, vertex)
 			out.push(
 				`v ${formatNumber(world[0] + position[0])} ${formatNumber(world[1] + position[1])} ${formatNumber(world[2] + position[2])}`,
 			)
+
 			// vt for every vertex keeps v/vt indices aligned
 			const uv = hasuv
 				? [
@@ -138,6 +156,7 @@ function convert(mdl, mdx, label = "", opts = {}) {
 				: [0, 0]
 			out.push(`vt ${formatNumber(uv[0])} ${formatNumber(uv[1])}`)
 		}
+
 		for (let face = 0; face < faceCount; face++) {
 			const faceEntry = faceOffset + 32 * face
 			const ix = [u16(faceEntry + 26), u16(faceEntry + 28), u16(faceEntry + 30)]
@@ -145,6 +164,7 @@ function convert(mdl, mdx, label = "", opts = {}) {
 				errors.push(`face index >= ${vertexCount} in ${name}`)
 				continue
 			}
+
 			// stored normal must match winding
 			const normal = f32(faceEntry, 3),
 				[corner0, corner1, corner2] = ix.map((index) => verts[index])
@@ -162,28 +182,40 @@ function convert(mdl, mdx, label = "", opts = {}) {
 					(cross[0] * normal[0] + cross[1] * normal[1] + cross[2] * normal[2]) /
 						length >
 					0.99
-				)
+				) {
 					stats.normalsMatching++
+				}
 			}
+
 			out.push(
 				"f " + ix.map((index) => `${index + vbase}/${index + vbase}`).join(" "),
 			)
 		}
+
 		vbase += vertexCount
 	}
 
 	function node(offset, parentRotation, parentPosition, depth) {
-		if (seen.has(offset)) return errors.push(`node loop at ${offset}`)
-		if (depth > 200) return errors.push("depth")
+		if (seen.has(offset)) {
+			return errors.push(`node loop at ${offset}`)
+		}
+		if (depth > 200) {
+			return errors.push("depth")
+		}
+
 		seen.add(offset)
 		stats.nodes++
+
 		const flags = u16(offset) ?? 0,
 			nameIndex = u16(offset + 4) ?? 0
 		const pos = f32(offset + 0x10, 3),
 			rotation = f32(offset + 0x1c, 4)
 		const childOffset = u32(offset + 0x2c),
 			childCount = u32(offset + 0x30) ?? 0
-		if (!pos || !rotation) return
+		if (!pos || !rotation) {
+			return
+		}
+
 		const worldRotation = qmul(parentRotation, rotation),
 			rotated = qrot(parentRotation, pos),
 			worldPosition = [
@@ -192,15 +224,20 @@ function convert(mdl, mdx, label = "", opts = {}) {
 				rotated[2] + parentPosition[2],
 			]
 		const name = names[nameIndex] ?? `node${offset}`
-		if (flags & 0x20) mesh(offset + 80, name, worldRotation, worldPosition)
+		if (flags & 0x20) {
+			mesh(offset + 80, name, worldRotation, worldPosition)
+		}
+
 		for (let i = 0; i < childCount; i++) {
 			const child = u32(childOffset + 4 * i)
-			if (child !== undefined)
+			if (child !== undefined) {
 				node(child, worldRotation, worldPosition, depth + 1)
+			}
 		}
 	}
 
 	node(root, [1, 0, 0, 0], [0, 0, 0], 0)
+
 	return {
 		obj: out.join("\n") + "\n",
 		stats: { ...stats, hdrNodes },
@@ -227,4 +264,5 @@ if (require.main === module) {
 	fs.writeFileSync(fout, result.obj)
 	console.log(report(fmdl, result))
 }
+
 module.exports = { convert, report }

@@ -9,31 +9,43 @@ const png = require("./png")
 
 // Byte size of one image of width x height pixels for a given storage kind.
 function levelSize(kind, width, height) {
-	if (kind === "dxt1")
+	if (kind === "dxt1") {
 		return Math.max(1, (width + 3) >> 2) * Math.max(1, (height + 3) >> 2) * 8
-	if (kind === "dxt5")
+	}
+	if (kind === "dxt5") {
 		return Math.max(1, (width + 3) >> 2) * Math.max(1, (height + 3) >> 2) * 16
+	}
 	return width * height * { gray: 1, rgb: 3, rgba: 4 }[kind]
 }
 
 function parse(file) {
 	const errors = []
-	if (file.length < 128) return { errors: ["shorter than header"] }
+	if (file.length < 128) {
+		return { errors: ["shorter than header"] }
+	}
+
 	const dataSize = file.readUInt32LE(0),
 		alpha = file.readFloatLE(4)
 	const width = file.readUInt16LE(8),
 		height = file.readUInt16LE(10),
 		enc = file[12],
 		mips = file[13]
-	if (file.subarray(14, 128).some((byte) => byte))
+	if (file.subarray(14, 128).some((byte) => byte)) {
 		errors.push("header padding not zero")
+	}
+
 	let kind
-	if (dataSize === 0) kind = { 1: "gray", 2: "rgb", 4: "rgba" }[enc]
-	else kind = { 2: "dxt1", 4: "dxt5" }[enc]
-	if (!kind)
+	if (dataSize === 0) {
+		kind = { 1: "gray", 2: "rgb", 4: "rgba" }[enc]
+	} else {
+		kind = { 2: "dxt1", 4: "dxt5" }[enc]
+	}
+	if (!kind) {
 		return {
 			errors: [...errors, `unknown encoding ${enc} with dataSize ${dataSize}`],
 		}
+	}
+
 	// The pixel data is a list of sub-images, each with its own mip chain. Each sub-image is
 	// placed at (x, y) in the output. Three layouts exist:
 	//   plain:     one image with `mips` levels.
@@ -42,14 +54,16 @@ function parse(file) {
 	//              each with a full mip chain down to 1x1. The header mip count is 1 and is ignored.
 	const chain = (imageWidth, imageHeight, levels) => {
 		let size = 0
-		for (let level = 0; level < levels; level++)
+		for (let level = 0; level < levels; level++) {
 			size += levelSize(
 				kind,
 				Math.max(1, imageWidth >> level),
 				Math.max(1, imageHeight >> level),
 			)
+		}
 		return size
 	}
+
 	let layout = "plain",
 		images = [{ x: 0, y: 0, width, height, levels: mips }]
 	if (width > 0 && height === 6 * width) {
@@ -80,8 +94,8 @@ function parse(file) {
 				levels = Math.log2(Math.max(frameWidth, frameHeight)) + 1
 			layout = "flipbook"
 			images = []
-			for (let j = 0; j < rows; j++)
-				for (let i = 0; i < columns; i++)
+			for (let j = 0; j < rows; j++) {
+				for (let i = 0; i < columns; i++) {
 					images.push({
 						x: i * frameWidth,
 						y: j * frameHeight,
@@ -89,8 +103,11 @@ function parse(file) {
 						height: frameHeight,
 						levels,
 					})
+				}
+			}
 		}
 	}
+
 	// A recorded size of 16 for a single 8-byte DXT1 block is accepted: all such files end exactly after the mip chain.
 	const top = levelSize(kind, images[0].width, images[0].height)
 	if (
@@ -98,18 +115,24 @@ function parse(file) {
 		dataSize !== top &&
 		!(dataSize === 16 && top === 8) &&
 		layout !== "flipbook"
-	)
+	) {
 		errors.push(`dataSize ${dataSize} matches no known layout`)
+	}
+
 	let pixels = 0
 	for (const image of images) {
 		image.offset = 128 + pixels
 		pixels += chain(image.width, image.height, image.levels)
 	}
-	if (layout === "flipbook" && pixels !== dataSize)
+	if (layout === "flipbook" && pixels !== dataSize) {
 		errors.push(`flipbook frames total ${pixels}, dataSize ${dataSize}`)
+	}
+
 	const end = 128 + pixels
-	if (end > file.length)
+	if (end > file.length) {
 		errors.push(`pixel data ends at ${end}, past end of file ${file.length}`)
+	}
+
 	const txi = end <= file.length ? file.subarray(end) : Buffer.alloc(0)
 	if (
 		txi.some(
@@ -120,8 +143,10 @@ function parse(file) {
 				byte !== 13 &&
 				(byte < 32 || byte > 126),
 		)
-	)
+	) {
 		errors.push("trailer not ASCII")
+	}
+
 	return {
 		dataSize,
 		alpha,
@@ -152,9 +177,10 @@ function decodeImage(file, offset, kind, width, height) {
 		const channels = { gray: 1, rgb: 3, rgba: 4 }[kind]
 		for (let i = 0; i < width * height; i++) {
 			const src = offset + i * channels
-			if (channels === 1)
-				(out.fill(file[src], 4 * i, 4 * i + 3), (out[4 * i + 3] = 255))
-			else {
+			if (channels === 1) {
+				out.fill(file[src], 4 * i, 4 * i + 3)
+				out[4 * i + 3] = 255
+			} else {
 				out[4 * i] = file[src]
 				out[4 * i + 1] = file[src + 1]
 				out[4 * i + 2] = file[src + 2]
@@ -163,30 +189,37 @@ function decodeImage(file, offset, kind, width, height) {
 		}
 		return out
 	}
+
 	const blockSize = kind === "dxt1" ? 8 : 16,
 		blocksWide = Math.max(1, (width + 3) >> 2),
 		blocksHigh = Math.max(1, (height + 3) >> 2)
-	for (let blockY = 0; blockY < blocksHigh; blockY++)
+	for (let blockY = 0; blockY < blocksHigh; blockY++) {
 		for (let blockX = 0; blockX < blocksWide; blockX++) {
 			let block = offset + (blockY * blocksWide + blockX) * blockSize
+
 			const alphas = new Array(16).fill(255)
 			if (kind === "dxt5") {
 				const alpha0 = file[block],
 					alpha1 = file[block + 1],
 					alphaTable = [alpha0, alpha1]
-				if (alpha0 > alpha1)
-					for (let i = 1; i < 7; i++)
+				if (alpha0 > alpha1) {
+					for (let i = 1; i < 7; i++) {
 						alphaTable.push((((7 - i) * alpha0 + i * alpha1) / 7 + 0.5) | 0)
-				else {
-					for (let i = 1; i < 5; i++)
+					}
+				} else {
+					for (let i = 1; i < 5; i++) {
 						alphaTable.push((((5 - i) * alpha0 + i * alpha1) / 5 + 0.5) | 0)
+					}
 					alphaTable.push(0, 255)
 				}
+
 				const bits = file.readUIntLE(block + 2, 6)
-				for (let i = 0; i < 16; i++)
+				for (let i = 0; i < 16; i++) {
 					alphas[i] = alphaTable[Math.floor(bits / 2 ** (3 * i)) & 7]
+				}
 				block += 8
 			}
+
 			const raw0 = file.readUInt16LE(block),
 				raw1 = file.readUInt16LE(block + 2),
 				color0 = expandRgb565(raw0),
@@ -197,16 +230,21 @@ function decodeImage(file, offset, kind, width, height) {
 					color0.map((channel, i) => ((2 * channel + color1[i]) / 3 + 0.5) | 0),
 					color0.map((channel, i) => ((channel + 2 * color1[i]) / 3 + 0.5) | 0),
 				)
-			} else
+			} else {
 				palette.push(
 					color0.map((channel, i) => (channel + color1[i]) >> 1),
 					[0, 0, 0],
 				)
+			}
+
 			const indices = file.readUInt32LE(block + 4)
 			for (let i = 0; i < 16; i++) {
 				const x = blockX * 4 + (i & 3),
 					y = blockY * 4 + (i >> 2)
-				if (x >= width || y >= height) continue
+				if (x >= width || y >= height) {
+					continue
+				}
+
 				const colorIndex = (indices >>> (2 * i)) & 3,
 					dst = 4 * (y * width + x)
 				out[dst] = palette[colorIndex][0]
@@ -216,6 +254,8 @@ function decodeImage(file, offset, kind, width, height) {
 					kind === "dxt1" && raw0 <= raw1 && colorIndex === 3 ? 0 : alphas[i]
 			}
 		}
+	}
+
 	return out
 }
 
@@ -223,7 +263,10 @@ function decodeImage(file, offset, kind, width, height) {
 // TPC stores the bottom row of each image first (texture coordinate v = 0), so rows are reversed.
 // Sub-images keep reading order: flipbook frame 0 is at the top left and cube face 0 is at the top.
 function decode(file, texture = parse(file)) {
-	if (texture.errors.length) return null
+	if (texture.errors.length) {
+		return null
+	}
+
 	const rgba = Buffer.alloc(texture.width * texture.height * 4)
 	for (const image of texture.images) {
 		const pix = decodeImage(
@@ -233,19 +276,24 @@ function decode(file, texture = parse(file)) {
 			image.width,
 			image.height,
 		)
-		for (let y = 0; y < image.height; y++)
+		for (let y = 0; y < image.height; y++) {
 			pix.copy(
 				rgba,
 				4 * ((image.y + image.height - 1 - y) * texture.width + image.x),
 				4 * y * image.width,
 				4 * (y + 1) * image.width,
 			)
+		}
 	}
+
 	return { width: texture.width, height: texture.height, rgba }
 }
 
 function report(label, texture) {
-	if (!texture.kind) return `${label} FAIL: ${texture.errors.join("; ")}`
+	if (!texture.kind) {
+		return `${label} FAIL: ${texture.errors.join("; ")}`
+	}
+
 	return (
 		`${label} ${texture.width}x${texture.height} ${texture.kind} mips=${texture.mips} layout=${texture.layout} alpha=${texture.alpha.toFixed(4)} ` +
 		`txi=${texture.txi.length} ` +
@@ -259,7 +307,10 @@ if (require.main === module) {
 		texture = parse(file),
 		image = decode(file, texture)
 	console.log(report(fin, texture))
-	if (image)
+
+	if (image) {
 		fs.writeFileSync(fout, png.encode(image.width, image.height, image.rgba))
+	}
 }
+
 module.exports = { parse, decode, report, levelSize }

@@ -20,8 +20,10 @@ const bink = require("./bink")
 const ASSETS = path.join(kotor.ROOT, "assets"),
 	REPORTS = path.join(kotor.ROOT, "temp", "reports")
 fs.mkdirSync(REPORTS, { recursive: true })
+
 const want = new Set(process.argv.slice(2))
 const run = (stage) => want.size === 0 || want.has(stage)
+
 // A stage process holds the summary lines of its own stage only.
 const summary = []
 const tally = (name, lines) => {
@@ -35,11 +37,14 @@ const tally = (name, lines) => {
 const PACKS = ["swpc_tex_tpa", "swpc_tex_gui"]
 const packErf = (pack) =>
 	kotor.readErf(path.join(kotor.GAME, "TexturePacks", `${pack}.erf`))
+
 // Removes files with the given extensions from dir that were not written in this run.
 const prune = (dir, keep, exts) => {
-	for (const file of fs.readdirSync(dir))
-		if (exts.includes(path.extname(file)) && !keep.has(file))
+	for (const file of fs.readdirSync(dir)) {
+		if (exts.includes(path.extname(file)) && !keep.has(file)) {
 			fs.unlinkSync(path.join(dir, file))
+		}
+	}
 }
 
 // Models: data/models.bif -> assets/data/models/*.obj + *.mtl (passing, with geometry)
@@ -47,20 +52,26 @@ const convertModels = () => {
 	console.log("models...")
 	const out = path.join(ASSETS, "data", "models")
 	fs.mkdirSync(out, { recursive: true })
+
 	const texPath = new Map()
-	for (const pack of [...PACKS].reverse())
-		for (const entry of packErf(pack).entries)
-			if (entry.ext === "tpc")
+	for (const pack of [...PACKS].reverse()) {
+		for (const entry of packErf(pack).entries) {
+			if (entry.ext === "tpc") {
 				texPath.set(
 					entry.resref,
 					`../../TexturePacks/${pack}/${entry.resref}.png`,
 				)
+			}
+		}
+	}
+
 	const resources = kotor.bifResources("data/models.bif")
 	const mdx = new Map(
 		resources
 			.filter((resource) => resource.ext === "mdx")
 			.map((resource) => [resource.resref, resource.data]),
 	)
+
 	const lines = [],
 		written = new Set(),
 		missing = new Set()
@@ -77,20 +88,25 @@ const convertModels = () => {
 		)
 		lines.push(mdl2obj.report(resource.resref, model))
 		hidden += model.stats.hidden
-		if (model.errors.length) continue
+		if (model.errors.length) {
+			continue
+		}
 		if (model.stats.meshes === 0) {
 			skipped++
 			continue
 		}
+
 		const mtl = [`# materials for ${resource.resref}`]
 		for (const texture of [...model.textures].sort()) {
 			mtl.push("", `newmtl ${texture}`, "Kd 1.000000 1.000000 1.000000")
-			if (texPath.has(texture)) mtl.push(`map_Kd ${texPath.get(texture)}`)
-			else {
+			if (texPath.has(texture)) {
+				mtl.push(`map_Kd ${texPath.get(texture)}`)
+			} else {
 				mtl.push("# texture not found in the texture packs")
 				missing.add(texture)
 			}
 		}
+
 		fs.writeFileSync(path.join(out, `${resource.resref}.obj`), model.obj)
 		fs.writeFileSync(
 			path.join(out, `${resource.resref}.mtl`),
@@ -98,6 +114,7 @@ const convertModels = () => {
 		)
 		written.add(`${resource.resref}.obj`).add(`${resource.resref}.mtl`)
 	}
+
 	prune(out, written, [".obj", ".mtl"])
 	tally("models", lines)
 	summary.push(
@@ -113,6 +130,7 @@ const convertTextures = () => {
 		console.log(`textures ${pack}...`)
 		const out = path.join(ASSETS, "TexturePacks", pack)
 		fs.mkdirSync(out, { recursive: true })
+
 		const lines = [],
 			written = new Set()
 		for (const entry of packErf(pack).entries) {
@@ -120,16 +138,21 @@ const convertTextures = () => {
 				lines.push(`${entry.resref}.${entry.ext} not a texture, skipped PASS`)
 				continue
 			}
+
 			const data = entry.data(),
 				texture = tpc.parse(data),
 				image = tpc.decode(data, texture)
 			lines.push(tpc.report(entry.resref, texture))
-			if (!image) continue
+			if (!image) {
+				continue
+			}
+
 			fs.writeFileSync(
 				path.join(out, `${entry.resref}.png`),
 				png.encode(image.width, image.height, image.rgba),
 			)
 			written.add(`${entry.resref}.png`)
+
 			if (texture.txi.replace(/\0/g, "").trim()) {
 				fs.writeFileSync(
 					path.join(out, `${entry.resref}.txi`),
@@ -138,6 +161,7 @@ const convertTextures = () => {
 				written.add(`${entry.resref}.txi`)
 			}
 		}
+
 		prune(out, written, [".png", ".txi"])
 		tally(`textures_${pack}`, lines)
 	}
@@ -158,6 +182,7 @@ const convertTga = () => {
 		console.log(`tga ${group}...`)
 		const out = path.join(ASSETS, "data", group)
 		fs.mkdirSync(out, { recursive: true })
+
 		const lines = [],
 			written = new Set()
 		for (const bif of key.bifs.filter((name) => pattern.test(name))) {
@@ -167,6 +192,7 @@ const convertTga = () => {
 					lines.push(`${label} not an image, skipped PASS`)
 					continue
 				}
+
 				const file = `${resource.resref}.${resource.ext === "tga" ? "png" : "txi"}`
 				if (written.has(file)) {
 					lines.push(
@@ -174,16 +200,21 @@ const convertTga = () => {
 					)
 					continue
 				}
+
 				if (resource.ext === "txi") {
 					fs.writeFileSync(path.join(out, file), resource.data)
 					written.add(file)
 					lines.push(`${label} ${resource.data.length} bytes PASS`)
 					continue
 				}
+
 				const header = tga.parse(resource.data),
 					image = tga.decode(resource.data, header)
 				lines.push(tga.report(label, header))
-				if (!image) continue
+				if (!image) {
+					continue
+				}
+
 				fs.writeFileSync(
 					path.join(out, file),
 					png.encode(image.width, image.height, image.pix, image.channels),
@@ -191,6 +222,7 @@ const convertTga = () => {
 				written.add(file)
 			}
 		}
+
 		prune(out, written, [".png", ".txi"])
 		tally(`tga_${group}`, lines)
 	}
@@ -203,6 +235,7 @@ const convertAudio = (stage, folder) => {
 	const src = path.join(kotor.GAME, folder),
 		out = path.join(ASSETS, folder)
 	fs.mkdirSync(out, { recursive: true })
+
 	const lines = []
 	for (const file of fs
 		.readdirSync(src)
@@ -210,6 +243,7 @@ const convertAudio = (stage, folder) => {
 		.sort()) {
 		const name = file.replace(/\.wav$/i, ""),
 			unwrapped = audio.unwrap(fs.readFileSync(path.join(src, file)))
+
 		let data = unwrapped.payload,
 			err = unwrapped.err,
 			info = unwrapped.info
@@ -219,12 +253,15 @@ const convertAudio = (stage, folder) => {
 			err = decoded.err
 			info += " " + decoded.info
 		}
+
 		lines.push(
 			`${name} ${unwrapped.kind} ${info} ${err ? "FAIL: " + err : "PASS"}`,
 		)
-		if (!err)
+		if (!err) {
 			fs.writeFileSync(path.join(out, `${name}.${unwrapped.kind}`), data)
+		}
 	}
+
 	tally(stage, lines)
 }
 
@@ -322,14 +359,20 @@ const convertMovies = async () => {
 const f32 = (value) => {
 	for (let digits = 1; digits <= 9; digits++) {
 		const shortest = +value.toPrecision(digits)
-		if (Math.fround(shortest) === value) return shortest
+		if (Math.fround(shortest) === value) {
+			return shortest
+		}
 	}
 	return value
 }
+
 const guiJson = (struct) => {
 	const object = {}
-	if (struct.structType !== 0) object.__struct_type = struct.structType
-	for (const field of struct.fields)
+	if (struct.structType !== 0) {
+		object.__struct_type = struct.structType
+	}
+
+	for (const field of struct.fields) {
 		object[field.label] =
 			field.type === 14
 				? guiJson(field.value)
@@ -340,6 +383,7 @@ const guiJson = (struct) => {
 						: field.type === 17
 							? field.value.map(f32)
 							: field.value
+	}
 	return object
 }
 
@@ -360,10 +404,12 @@ const convertGui = () => {
 				.map((entry) => ({ resref: entry.resref, data: entry.data() })),
 		],
 	]
+
 	const lines = []
 	for (const [dir, list] of sources) {
 		const out = path.join(ASSETS, dir)
 		fs.mkdirSync(out, { recursive: true })
+
 		const written = new Set()
 		for (const resource of list) {
 			const gff = kotor.readGff(resource.data, resource.resref)
@@ -373,6 +419,7 @@ const convertGui = () => {
 				)
 				continue
 			}
+
 			fs.writeFileSync(
 				path.join(out, `${resource.resref}.json`),
 				JSON.stringify(guiJson(gff.root), null, 1) + "\n",
@@ -380,8 +427,10 @@ const convertGui = () => {
 			written.add(`${resource.resref}.json`)
 			lines.push(`${dir}/${resource.resref} PASS`)
 		}
+
 		prune(out, written, [".json"])
 	}
+
 	tally("gui", lines)
 }
 

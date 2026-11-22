@@ -338,11 +338,11 @@ Resource type 3 is a TGA image, the uncompressed image format defined by Truevis
 
 The images are in three groups. The table below lists each group, its archives and its output directory.
 
-| Archives                                 | Images | Layout                                | Output                    |
-| ---------------------------------------- | ------ | ------------------------------------- | ------------------------- |
-| `lightmaps.bif`, `lightmaps2.bif` to `lightmaps13.bif` | 5,586  | 32-bit BGRA, sizes 2x2 to 512x512     | `assets/data/lightmaps/`  |
-| `textures.bif`                           | 14     | 8-bit grayscale, 256x256              | `assets/data/textures/`   |
-| `legacy.bif`                             | 1      | 24-bit BGR, 256x256 (`chrome1`)       | `assets/data/legacy/`     |
+| Archives                                               | Images | Layout                            | Output                   |
+| ------------------------------------------------------ | ------ | --------------------------------- | ------------------------ |
+| `lightmaps.bif`, `lightmaps2.bif` to `lightmaps13.bif` | 5,586  | 32-bit BGRA, sizes 2x2 to 512x512 | `assets/data/lightmaps/` |
+| `textures.bif`                                         | 14     | 8-bit grayscale, 256x256          | `assets/data/textures/`  |
+| `legacy.bif`                                           | 1      | 24-bit BGR, 256x256 (`chrome1`)   | `assets/data/legacy/`    |
 
 All 5,601 images pass the parser's check: the header, the optional image ID, the pixels and the optional trailer account for every byte of the file. No resource name occurs twice within a group, so each output directory is flat.
 
@@ -350,18 +350,18 @@ All 5,601 images pass the parser's check: the header, the optional image ID, the
 
 A TGA file begins with an 18-byte header. The table below gives each field and the values seen in all 5,601 images.
 
-| Offset | Type    | Meaning                                    | Evidence                                                                                                        | Confidence |
-| ------ | ------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | u8      | Length of the image ID that follows        | The value is 0 in all 5,601 images.                                                                             | high       |
-| 0x01   | u8      | Color map type                             | The value is 0 (no color map) in all 5,601 images.                                                              | high       |
-| 0x02   | u8      | Image type                                 | 2 (uncompressed true color) in 5,587 images and 3 (uncompressed grayscale) in the 14 images of `textures.bif`.  | high       |
-| 0x03   | u8[5]   | Color map specification                    | All bytes are 0 in all 5,601 images.                                                                            | high       |
-| 0x08   | u16     | X origin                                   | The value is 0 in all 5,601 images.                                                                             | high       |
-| 0x0A   | u16     | Y origin                                   | The value is 0 in all 5,601 images.                                                                             | high       |
-| 0x0C   | u16     | Width in pixels                            | The pixel data size matches width x height x bytes per pixel in all 5,601 images.                               | high       |
-| 0x0E   | u16     | Height in pixels                           | As above. Every image is square, and every side is a power of 2.                                                | high       |
-| 0x10   | u8      | Bits per pixel                             | 32 for lightmaps, 8 for `textures.bif` and 24 for `legacy.bif`.                                                 | high       |
-| 0x11   | u8      | Image descriptor                           | See below.                                                                                                      | high       |
+| Offset | Type  | Meaning                             | Evidence                                                                                                       | Confidence |
+| ------ | ----- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | u8    | Length of the image ID that follows | The value is 0 in all 5,601 images.                                                                            | high       |
+| 0x01   | u8    | Color map type                      | The value is 0 (no color map) in all 5,601 images.                                                             | high       |
+| 0x02   | u8    | Image type                          | 2 (uncompressed true color) in 5,587 images and 3 (uncompressed grayscale) in the 14 images of `textures.bif`. | high       |
+| 0x03   | u8[5] | Color map specification             | All bytes are 0 in all 5,601 images.                                                                           | high       |
+| 0x08   | u16   | X origin                            | The value is 0 in all 5,601 images.                                                                            | high       |
+| 0x0A   | u16   | Y origin                            | The value is 0 in all 5,601 images.                                                                            | high       |
+| 0x0C   | u16   | Width in pixels                     | The pixel data size matches width x height x bytes per pixel in all 5,601 images.                              | high       |
+| 0x0E   | u16   | Height in pixels                    | As above. Every image is square, and every side is a power of 2.                                               | high       |
+| 0x10   | u8    | Bits per pixel                      | 32 for lightmaps, 8 for `textures.bif` and 24 for `legacy.bif`.                                                | high       |
+| 0x11   | u8    | Image descriptor                    | See below.                                                                                                     | high       |
 
 The image descriptor holds the number of alpha bits in its low 4 bits and the pixel origin in bits 4 and 5. Bits 4 and 5 are 0 in all 5,601 images. This means the first stored row is the bottom row of the image, and pixels run left to right. ImageMagick reports every image as bottom-left oriented. Its decoding with `-auto-orient` and ffmpeg's decoding both match the converter's output, in which the rows are reversed to put the top row first. The alpha bit count is 0 in 5,474 lightmaps and 8 in the other 112 lightmaps and in the 14 grayscale images. The game does not appear to rely on it: all 5,474 lightmaps that declare 0 alpha bits still store 4 bytes per pixel.
 
@@ -371,11 +371,11 @@ True color pixels are stored in the order blue, green, red and, at 32 bits per p
 
 Some images end with the optional TGA 2.0 trailer. The table below lists the three cases.
 
-| Bytes after the pixels | Contents                                     | Images                                                     |
-| ---------------------- | -------------------------------------------- | ---------------------------------------------------------- |
-| 0                      | None                                         | 5,474 lightmaps                                            |
-| 26                     | Footer only                                  | 5 lightmaps, 14 images of `textures.bif`, 1 of `legacy.bif` |
-| 521                    | 495-byte extension area, then the footer     | 107 lightmaps                                              |
+| Bytes after the pixels | Contents                                 | Images                                                      |
+| ---------------------- | ---------------------------------------- | ----------------------------------------------------------- |
+| 0                      | None                                     | 5,474 lightmaps                                             |
+| 26                     | Footer only                              | 5 lightmaps, 14 images of `textures.bif`, 1 of `legacy.bif` |
+| 521                    | 495-byte extension area, then the footer | 107 lightmaps                                               |
 
 The footer is 26 bytes long. It holds a u32 offset of the extension area, a u32 offset of the developer area and the signature "TRUEVISION-XFILE." followed by a NUL byte. The developer area offset is 0 in all 127 files with a footer. The extension area offset is 0 when there is no extension area. When there is one, the offset equals the end of the pixel data. The first field of the extension area holds its size. That field holds 494 in all 107 files, but 495 bytes are present, which is the size the TGA 2.0 standard specifies. The cause of this difference is not known. The converter does not read the rest of the extension area.
 
@@ -383,7 +383,7 @@ The 112 lightmaps with a trailer are the same 112 that declare 8 alpha bits. All
 
 ## Lightmaps
 
-Lightmaps are named after an area model, followed by "_lm" and a number, for example `m01aa_01a_lm0`. Each lightmap has a TXI file of the same name in the same archive, resource type 2022. TXI is plain text with one option per line, as in the TPC trailer above. The TXI files of the 5,474 lightmaps without a trailer all read "islightmap 1", "compresstexture 0", "mipmap 0" and "downsamplemax 0". The TXI files of the other 112, which are the lightmaps with a trailer, lack the "islightmap 1" line. The effect of this difference in the game is unknown. The converter writes each TXI file beside its PNG file.
+Lightmaps are named after an area model, followed by "\_lm" and a number, for example `m01aa_01a_lm0`. Each lightmap has a TXI file of the same name in the same archive, resource type 2022. TXI is plain text with one option per line, as in the TPC trailer above. The TXI files of the 5,474 lightmaps without a trailer all read "islightmap 1", "compresstexture 0", "mipmap 0" and "downsamplemax 0". The TXI files of the other 112, which are the lightmaps with a trailer, lack the "islightmap 1" line. The effect of this difference in the game is unknown. The converter writes each TXI file beside its PNG file.
 
 The alpha channel is 255 everywhere in 3,221 lightmaps. In the other 2,365, some pixels have lower alpha values, down to 0. The meaning of the lightmap alpha channel is UNKNOWN. The converter keeps it.
 
@@ -544,29 +544,29 @@ The folder `streamsounds/` holds 970 files with the extension `.wav`. They are c
 
 The following table lists the fields of the embedded WAV file. Offsets count from the "RIFF" tag at file offset 0x1D6.
 
-| Offset | Type    | Meaning                      | Evidence                                                                                                              | Confidence |
-| ------ | ------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | char[4] | "RIFF"                       | True in all 970 files.                                                                                                | high       |
-| 0x04   | u32     | RIFF size: file size - 478   | The chunk walk ends exactly at the end of all 970 files.                                                              | high       |
-| 0x08   | char[4] | "WAVE"                       | True in all 970 files.                                                                                                | high       |
-| 0x0C   | chunk   | "fmt " chunk, 16 or 18 bytes | 960 files use 16 bytes. 10 use 18 bytes, where the extra u16 is 0.                                                    | high       |
-| 0x14   | u16     | Format tag, always 1 (PCM)   | True in all 970 files.                                                                                                | high       |
-| 0x16   | u16     | Channel count                | 952 files are mono. The 18 `mus_sbat_*` files are stereo.                                                             | high       |
-| 0x18   | u32     | Sample rate                  | 966 files use 22,050 Hz. The four `N_DARKJEDIM_*` files use 44,100 Hz.                                                | high       |
-| 0x1C   | u32     | Bytes per second             | Equals rate × block align in all 970 files.                                                                           | high       |
-| 0x20   | u16     | Block align: 2 × channels    | True in all 970 files.                                                                                                | high       |
-| 0x22   | u16     | Bits per sample, always 16   | True in all 970 files.                                                                                                | high       |
+| Offset | Type    | Meaning                      | Evidence                                                               | Confidence |
+| ------ | ------- | ---------------------------- | ---------------------------------------------------------------------- | ---------- |
+| 0x00   | char[4] | "RIFF"                       | True in all 970 files.                                                 | high       |
+| 0x04   | u32     | RIFF size: file size - 478   | The chunk walk ends exactly at the end of all 970 files.               | high       |
+| 0x08   | char[4] | "WAVE"                       | True in all 970 files.                                                 | high       |
+| 0x0C   | chunk   | "fmt " chunk, 16 or 18 bytes | 960 files use 16 bytes. 10 use 18 bytes, where the extra u16 is 0.     | high       |
+| 0x14   | u16     | Format tag, always 1 (PCM)   | True in all 970 files.                                                 | high       |
+| 0x16   | u16     | Channel count                | 952 files are mono. The 18 `mus_sbat_*` files are stereo.              | high       |
+| 0x18   | u32     | Sample rate                  | 966 files use 22,050 Hz. The four `N_DARKJEDIM_*` files use 44,100 Hz. | high       |
+| 0x1C   | u32     | Bytes per second             | Equals rate × block align in all 970 files.                            | high       |
+| 0x20   | u16     | Block align: 2 × channels    | True in all 970 files.                                                 | high       |
+| 0x22   | u16     | Bits per sample, always 16   | True in all 970 files.                                                 | high       |
 
 The chunks after "fmt " vary. The table below counts each chunk sequence.
 
-| Chunk sequence after "fmt "  | Files | Notes                                                                                 |
-| ---------------------------- | ----- | ------------------------------------------------------------------------------------- |
-| data                         | 932   | The plain case.                                                                       |
-| fact, data                   | 10    | These are the files with an 18-byte "fmt " chunk. "fact" equals the sample count.     |
-| data, LIST                   | 25    | LIST INFO metadata written by Sound Forge 6.0, with an engineer name and a 2003 date. |
-| data, LIST, smpl             | 1     | `cs_sfgenloop.wav`. The smpl chunk declares no loops.                                 |
-| data, smpl                   | 1     | `al_en_emptybar.wav`. The smpl chunk declares no loops.                               |
-| data, cue, LIST              | 1     | `al_nt_fountsmal.wav`. One cue point at sample 0, labelled "Loop 1-2".                |
+| Chunk sequence after "fmt " | Files | Notes                                                                                 |
+| --------------------------- | ----- | ------------------------------------------------------------------------------------- |
+| data                        | 932   | The plain case.                                                                       |
+| fact, data                  | 10    | These are the files with an 18-byte "fmt " chunk. "fact" equals the sample count.     |
+| data, LIST                  | 25    | LIST INFO metadata written by Sound Forge 6.0, with an engineer name and a 2003 date. |
+| data, LIST, smpl            | 1     | `cs_sfgenloop.wav`. The smpl chunk declares no loops.                                 |
+| data, smpl                  | 1     | `al_en_emptybar.wav`. The smpl chunk declares no loops.                               |
+| data, cue, LIST             | 1     | `al_nt_fountsmal.wav`. One cue point at sample 0, labelled "Loop 1-2".                |
 
 In all 10 files with a "fact" chunk, its value equals the data size divided by 2. Every data size is a whole number of blocks. The engine probably ignores the metadata chunks, because they occur in only 28 files, but this is unverified.
 
@@ -574,17 +574,17 @@ In all 10 files with a "fact" chunk, its value equals the data size divided by 2
 
 The names encode what the sound is for. The meanings of the prefixes are inferred from the names alone and are unverified.
 
-| Prefix | Files | Probable meaning                                                                                  |
-| ------ | ----- | ------------------------------------------------------------------------------------------------- |
-| P\_    | 419   | Party member voice sets, such as `P_CARTH_*` and `P_PLYERMW_*` (player, male).                     |
-| N\_    | 256   | Non-player character voice sets, such as `N_BITH_*`.                                              |
-| c\_    | 181   | Creature and droid sounds, such as `c_drdastro_*`.                                                |
-| al\_   | 69    | Ambient loops, such as `al_nt_ocean`.                                                             |
-| mus\_  | 18    | Battle music stingers, all named `mus_sbat_<area>`.                                               |
-| pl\_   | 14    | Placeable loops, such as `pl_lrgfountain`.                                                        |
-| mgs\_  | 7     | Minigame sounds, such as `mgs_engine_01l` and `mgs_bike_idle`.                                    |
-| cs\_   | 5     | Cutscene sounds, such as `cs_duelcrowd`.                                                          |
-| as\_   | 1     | `as_el_alert`. The meaning of this prefix is unknown.                                             |
+| Prefix | Files | Probable meaning                                                               |
+| ------ | ----- | ------------------------------------------------------------------------------ |
+| P\_    | 419   | Party member voice sets, such as `P_CARTH_*` and `P_PLYERMW_*` (player, male). |
+| N\_    | 256   | Non-player character voice sets, such as `N_BITH_*`.                           |
+| c\_    | 181   | Creature and droid sounds, such as `c_drdastro_*`.                             |
+| al\_   | 69    | Ambient loops, such as `al_nt_ocean`.                                          |
+| mus\_  | 18    | Battle music stingers, all named `mus_sbat_<area>`.                            |
+| pl\_   | 14    | Placeable loops, such as `pl_lrgfountain`.                                     |
+| mgs\_  | 7     | Minigame sounds, such as `mgs_engine_01l` and `mgs_bike_idle`.                 |
+| cs\_   | 5     | Cutscene sounds, such as `cs_duelcrowd`.                                       |
+| as\_   | 1     | `as_el_alert`. The meaning of this prefix is unknown.                          |
 
 The suffix names the sound-set slot. Examples are ATK1 (attack), BAT1 (battle cry), HIT1 (hit), DEAD (death) and SLCT (selected). Party members have about 29 slots each, including CRIT, POIS, LOW, STLH (stealth) and SRCH (search). The prefixes appear in both upper and lower case. No two names collide when case is ignored.
 

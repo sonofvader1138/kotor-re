@@ -18,11 +18,15 @@ function fatal(message) {
 // Key entry 22 bytes: char[16] resref, u16 type, u32 id (bif << 20 | index).
 function readKey(file = path.join(GAME, "chitin.key")) {
 	const data = fs.readFileSync(file)
-	if (data.toString("latin1", 0, 8) !== "KEY V1  ") fatal(`${file}: not KEY V1`)
+	if (data.toString("latin1", 0, 8) !== "KEY V1  ") {
+		fatal(`${file}: not KEY V1`)
+	}
+
 	const bifCount = data.readUInt32LE(8),
 		keyCount = data.readUInt32LE(12),
 		bifTable = data.readUInt32LE(16),
 		keyTable = data.readUInt32LE(20)
+
 	const bifs = []
 	for (let i = 0; i < bifCount; i++) {
 		const entry = bifTable + 12 * i,
@@ -35,6 +39,7 @@ function readKey(file = path.join(GAME, "chitin.key")) {
 				.replace(/\\/g, "/"),
 		)
 	}
+
 	const keys = []
 	for (let i = 0; i < keyCount; i++) {
 		const entry = keyTable + 22 * i
@@ -50,6 +55,7 @@ function readKey(file = path.join(GAME, "chitin.key")) {
 			index: id & 0xfffff,
 		})
 	}
+
 	return { bifs, keys }
 }
 
@@ -57,15 +63,22 @@ function readKey(file = path.join(GAME, "chitin.key")) {
 // Var entry 16 bytes: u32 id, u32 offset, u32 size, u32 type.
 function readBif(file) {
 	const buf = fs.readFileSync(file)
-	if (buf.toString("latin1", 0, 8) !== "BIFFV1  ") fatal(`${file}: not BIFFV1`)
+	if (buf.toString("latin1", 0, 8) !== "BIFFV1  ") {
+		fatal(`${file}: not BIFFV1`)
+	}
+
 	const entryCount = buf.readUInt32LE(8),
 		table = buf.readUInt32LE(16)
+
 	const entries = []
 	for (let i = 0; i < entryCount; i++) {
 		const entry = table + 16 * i,
 			offset = buf.readUInt32LE(entry + 4),
 			size = buf.readUInt32LE(entry + 8)
-		if (offset + size > buf.length) fatal(`${file}: entry ${i} out of bounds`)
+		if (offset + size > buf.length) {
+			fatal(`${file}: entry ${i} out of bounds`)
+		}
+
 		entries.push({
 			id: buf.readUInt32LE(entry),
 			offset,
@@ -73,17 +86,24 @@ function readBif(file) {
 			type: buf.readUInt32LE(entry + 12),
 		})
 	}
+
 	return { buf, entries }
 }
 
 // Resources of one BIF, named via KEY: [{resref, type, ext, data}]
 function bifResources(bifName, key = readKey()) {
 	const bifIndex = key.bifs.indexOf(bifName)
-	if (bifIndex < 0) fatal(`${bifName} not in chitin.key`)
+	if (bifIndex < 0) {
+		fatal(`${bifName} not in chitin.key`)
+	}
+
 	const names = new Map()
-	for (const entry of key.keys)
-		if (entry.bif === bifIndex)
+	for (const entry of key.keys) {
+		if (entry.bif === bifIndex) {
 			names.set(`${entry.index}/${entry.type}`, entry.resref)
+		}
+	}
+
 	const { buf, entries } = readBif(path.join(GAME, bifName))
 	return entries.map((entry) => ({
 		resref:
@@ -105,8 +125,12 @@ function readErf(file) {
 		size = fs.fstatSync(fd).size,
 		header = Buffer.alloc(160)
 	fs.readSync(fd, header, 0, 160, 0)
+
 	const sig = header.toString("latin1", 0, 8)
-	if (!/^(ERF |MOD |HAK |SAV )V1\.0$/.test(sig)) fatal(`${file}: not ERF V1.0`)
+	if (!/^(ERF |MOD |HAK |SAV )V1\.0$/.test(sig)) {
+		fatal(`${file}: not ERF V1.0`)
+	}
+
 	const entryCount = header.readUInt32LE(0x10),
 		keyListOffset = header.readUInt32LE(0x18),
 		resourceListOffset = header.readUInt32LE(0x1c)
@@ -114,11 +138,15 @@ function readErf(file) {
 		resourceList = Buffer.alloc(8 * entryCount)
 	fs.readSync(fd, keyList, 0, keyList.length, keyListOffset)
 	fs.readSync(fd, resourceList, 0, resourceList.length, resourceListOffset)
+
 	const entries = []
 	for (let i = 0; i < entryCount; i++) {
 		const offset = resourceList.readUInt32LE(8 * i),
 			len = resourceList.readUInt32LE(8 * i + 4)
-		if (offset + len > size) fatal(`${file}: entry ${i} out of bounds`)
+		if (offset + len > size) {
+			fatal(`${file}: entry ${i} out of bounds`)
+		}
+
 		const type = keyList.readUInt16LE(24 * i + 20)
 		entries.push({
 			resref: keyList
@@ -136,6 +164,7 @@ function readErf(file) {
 			},
 		})
 	}
+
 	return { sig, entries, size }
 }
 
@@ -151,9 +180,16 @@ function readGff(data, name = "gff") {
 	const fail = (message) => {
 		fatal(`${name}: ${message}`)
 	}
-	if (data.length < 56) fail("short header")
+
+	if (data.length < 56) {
+		fail("short header")
+	}
+
 	const header = []
-	for (let i = 8; i < 56; i += 4) header.push(data.readUInt32LE(i))
+	for (let i = 8; i < 56; i += 4) {
+		header.push(data.readUInt32LE(i))
+	}
+
 	const [
 		structOffset,
 		structCount,
@@ -176,47 +212,66 @@ function readGff(data, name = "gff") {
 		fieldIndicesOffset !== fieldDataOffset + fieldDataLength ||
 		listIndicesOffset !== fieldIndicesOffset + fieldIndicesLength ||
 		listIndicesOffset + listIndicesLength !== data.length
-	)
+	) {
 		fail("header regions do not chain to end of file")
+	}
+
 	const use = {
 		data: new Uint8Array(fieldDataLength),
 		idx: new Uint8Array(fieldIndicesLength),
 		list: new Uint8Array(listIndicesLength),
 	}
 	const mark = (region, offset, count, len) => {
-		if (offset + count > len)
+		if (offset + count > len) {
 			fail(`${region} range ${offset}+${count} past ${len}`)
-		for (let i = offset; i < offset + count; i++)
-			if (use[region][i]++) fail(`${region} byte ${i} used twice`)
+		}
+
+		for (let i = offset; i < offset + count; i++) {
+			if (use[region][i]++) {
+				fail(`${region} byte ${i} used twice`)
+			}
+		}
 	}
+
 	const fieldUsed = new Uint8Array(fieldCount),
 		structUsed = new Uint8Array(structCount)
+
 	const labels = []
-	for (let i = 0; i < labelCount; i++)
+	for (let i = 0; i < labelCount; i++) {
 		labels.push(
 			data
 				.toString("latin1", labelOffset + 16 * i, labelOffset + 16 * i + 16)
 				.replace(/\0.*$/s, ""),
 		)
+	}
 	const labelUsed = new Uint8Array(labelCount),
 		types = {}
 
 	function field(fieldIndex) {
-		if (fieldIndex >= fieldCount)
+		if (fieldIndex >= fieldCount) {
 			fail(`field index ${fieldIndex} >= ${fieldCount}`)
-		if (fieldUsed[fieldIndex]++) fail(`field ${fieldIndex} used twice`)
+		}
+		if (fieldUsed[fieldIndex]++) {
+			fail(`field ${fieldIndex} used twice`)
+		}
+
 		const entry = fieldOffset + 12 * fieldIndex,
 			type = data.readUInt32LE(entry),
 			labelIndex = data.readUInt32LE(entry + 4),
 			raw = data.readUInt32LE(entry + 8)
-		if (labelIndex >= labelCount)
+		if (labelIndex >= labelCount) {
 			fail(`label index ${labelIndex} >= ${labelCount}`)
+		}
+
 		labelUsed[labelIndex] = 1
 		types[type] = (types[type] || 0) + 1
+
 		let value
 		switch (type) {
 			case 0:
-				if (raw > 0xff) fail(`u8 field ${fieldIndex} value ${raw}`)
+				if (raw > 0xff) {
+					fail(`u8 field ${fieldIndex} value ${raw}`)
+				}
 				value = raw
 				break
 			case 4:
@@ -242,7 +297,9 @@ function readGff(data, name = "gff") {
 			case 11: {
 				mark("data", raw, 1, fieldDataLength)
 				const len = data[fieldDataOffset + raw]
-				if (len > 16) fail(`resref length ${len}`)
+				if (len > 16) {
+					fail(`resref length ${len}`)
+				}
 				mark("data", raw + 1, len, fieldDataLength)
 				value = data.toString(
 					"latin1",
@@ -259,10 +316,11 @@ function readGff(data, name = "gff") {
 				const count = data.readUInt32LE(listIndicesOffset + raw)
 				mark("list", raw + 4, 4 * count, listIndicesLength)
 				value = []
-				for (let i = 0; i < count; i++)
+				for (let i = 0; i < count; i++) {
 					value.push(
 						struct(data.readUInt32LE(listIndicesOffset + raw + 4 + 4 * i)),
 					)
+				}
 				break
 			}
 			case 17:
@@ -274,34 +332,51 @@ function readGff(data, name = "gff") {
 			default:
 				fail(`unknown field type ${type} (field ${fieldIndex})`)
 		}
+
 		return { label: labels[labelIndex], type, value }
 	}
+
 	function struct(structIndex, root = false) {
-		if (structIndex >= structCount)
+		if (structIndex >= structCount) {
 			fail(`struct index ${structIndex} >= ${structCount}`)
-		if (structUsed[structIndex]++) fail(`struct ${structIndex} used twice`)
+		}
+		if (structUsed[structIndex]++) {
+			fail(`struct ${structIndex} used twice`)
+		}
+
 		const entry = structOffset + 12 * structIndex,
 			type = data.readUInt32LE(entry),
 			first = data.readUInt32LE(entry + 4),
 			count = data.readUInt32LE(entry + 8)
+
 		let ids = []
-		if (count === 1) ids = [first]
-		else if (count > 1) {
+		if (count === 1) {
+			ids = [first]
+		} else if (count > 1) {
 			mark("idx", first, 4 * count, fieldIndicesLength)
-			for (let i = 0; i < count; i++)
+			for (let i = 0; i < count; i++) {
 				ids.push(data.readUInt32LE(fieldIndicesOffset + first + 4 * i))
+			}
 		}
+
 		return { structType: type, fields: ids.map(field) }
 	}
+
 	const root = struct(0, true)
+
 	for (const [region, used] of Object.entries(use)) {
 		const unused = used.indexOf(0)
-		if (unused >= 0) fail(`${region} byte ${unused} never used`)
+		if (unused >= 0) {
+			fail(`${region} byte ${unused} never used`)
+		}
 	}
-	if (fieldUsed.indexOf(0) >= 0)
+	if (fieldUsed.indexOf(0) >= 0) {
 		fail(`field ${fieldUsed.indexOf(0)} never used`)
-	if (structUsed.indexOf(0) >= 0)
+	}
+	if (structUsed.indexOf(0) >= 0) {
 		fail(`struct ${structUsed.indexOf(0)} never used`)
+	}
+
 	return {
 		fileType: data.toString("latin1", 0, 4),
 		version: data.toString("latin1", 4, 8),

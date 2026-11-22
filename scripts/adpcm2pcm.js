@@ -33,6 +33,7 @@ function pcmWav(pcm, channels, rate, bytes) {
 	header.write("RIFF", 0)
 	header.writeUInt32LE(36 + bytes, 4)
 	header.write("WAVE", 8)
+
 	header.write("fmt ", 12)
 	header.writeUInt32LE(16, 16)
 	header.writeUInt16LE(1, 20)
@@ -41,8 +42,10 @@ function pcmWav(pcm, channels, rate, bytes) {
 	header.writeUInt32LE(rate * channels * 2, 28)
 	header.writeUInt16LE(channels * 2, 32)
 	header.writeUInt16LE(16, 34)
+
 	header.write("data", 36)
 	header.writeUInt32LE(bytes, 40)
+
 	return Buffer.concat([header, Buffer.from(pcm.buffer, 0, bytes)])
 }
 
@@ -56,14 +59,19 @@ function decode(file) {
 		channels = fmt.readUInt16LE(2),
 		rate = fmt.readUInt32LE(4),
 		blockAlign = fmt.readUInt16LE(12)
-	if (tag !== 0x11) return { out: file, info: `copied (fmt=${tag})`, err: "" }
+	if (tag !== 0x11) {
+		return { out: file, info: `copied (fmt=${tag})`, err: "" }
+	}
+
 	const samplesPerBlock = fmt.readUInt16LE(18)
-	if (samplesPerBlock !== ((blockAlign - 4 * channels) * 2) / channels + 1)
+	if (samplesPerBlock !== ((blockAlign - 4 * channels) * 2) / channels + 1) {
 		return {
 			out: null,
 			info: "",
 			err: `samples/block ${samplesPerBlock} vs blockalign ${blockAlign}`,
 		}
+	}
+
 	const blocks = Math.floor(data.length / blockAlign),
 		total = blocks * samplesPerBlock
 	const sampleCount = fact && fact <= total ? fact : total
@@ -79,23 +87,30 @@ function decode(file) {
 			firstSample = block * samplesPerBlock,
 			pred = [],
 			idx = []
+
 		for (let channel = 0; channel < channels; channel++) {
 			pred[channel] = data.readInt16LE(blockStart + 4 * channel)
 			idx[channel] = data[blockStart + 4 * channel + 2]
-			if (idx[channel] > 88)
+			if (idx[channel] > 88) {
 				return {
 					out: null,
 					info: "",
 					err: `bad step index ${idx[channel]} block ${block}`,
 				}
+			}
+
 			if (last[channel] !== null) {
 				const gap = Math.abs(pred[channel] - last[channel])
 				errSum += gap
 				errN++
-				if (gap > maxErr) maxErr = gap
+				if (gap > maxErr) {
+					maxErr = gap
+				}
 			}
+
 			pcm[firstSample * channels + channel] = pred[channel]
 		}
+
 		// after headers: 4-byte groups per channel, 8 samples each, low nibble first
 		let pos = blockStart + 4 * channels
 		for (let sample = 1; pos < blockStart + blockAlign; sample += 8) {
@@ -104,11 +119,21 @@ function decode(file) {
 					const byte = data[pos + (j >> 1)],
 						nib = j & 1 ? byte >> 4 : byte & 15,
 						step = STEP[idx[channel]]
+
 					let diff = step >> 3
-					if (nib & 1) diff += step >> 2
-					if (nib & 2) diff += step >> 1
-					if (nib & 4) diff += step
-					if (nib & 8) diff = -diff
+					if (nib & 1) {
+						diff += step >> 2
+					}
+					if (nib & 2) {
+						diff += step >> 1
+					}
+					if (nib & 4) {
+						diff += step
+					}
+					if (nib & 8) {
+						diff = -diff
+					}
+
 					let value = pred[channel] + diff
 					if (value > 32767) {
 						value = 32767
@@ -117,6 +142,7 @@ function decode(file) {
 						value = -32768
 						clip++
 					}
+
 					pred[channel] = value
 					idx[channel] = Math.min(
 						88,
@@ -127,9 +153,12 @@ function decode(file) {
 				pos += 4
 			}
 		}
-		for (let channel = 0; channel < channels; channel++)
+
+		for (let channel = 0; channel < channels; channel++) {
 			last[channel] = pred[channel]
+		}
 	}
+
 	const partial = data.length - blocks * blockAlign
 	return {
 		out: pcmWav(pcm, channels, rate, sampleCount * channels * 2),
@@ -141,9 +170,13 @@ function decode(file) {
 if (require.main === module) {
 	const [inp, out] = process.argv.slice(2)
 	const result = decode(fs.readFileSync(inp))
-	if (result.out) fs.writeFileSync(out, result.out)
+	if (result.out) {
+		fs.writeFileSync(out, result.out)
+	}
+
 	console.log(
 		`${inp.replace(/.*\//, "")} ${result.info} ${result.err ? "FAIL: " + result.err : "PASS"}`,
 	)
 }
+
 module.exports = { decode }

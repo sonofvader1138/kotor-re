@@ -21,26 +21,34 @@ const SAMPLE_RATES = {
 // Walk MP3 frames from pos. Returns {end, frames, err}; err 'riff' = stopped at embedded RIFF.
 function mp3walk(mp3, pos = 0) {
 	let frames = 0
-	if (mp3.toString("latin1", pos, pos + 3) === "ID3")
+	if (mp3.toString("latin1", pos, pos + 3) === "ID3") {
 		pos +=
 			10 +
 			((mp3[pos + 6] << 21) |
 				(mp3[pos + 7] << 14) |
 				(mp3[pos + 8] << 7) |
 				mp3[pos + 9])
+	}
+
 	while (pos < mp3.length) {
 		if (
 			mp3.length - pos === 128 &&
 			mp3.toString("latin1", pos, pos + 3) === "TAG"
-		)
+		) {
 			return { end: pos + 128, frames, err: "" }
-		if (mp3.toString("latin1", pos, pos + 4) === "RIFF")
+		}
+		if (mp3.toString("latin1", pos, pos + 4) === "RIFF") {
 			return { end: pos, frames, err: "riff" }
-		if (pos + 4 > mp3.length)
+		}
+		if (pos + 4 > mp3.length) {
 			return { end: pos, frames, err: `trailing ${mp3.length - pos}` }
+		}
+
 		const header = mp3.readUInt32BE(pos)
-		if (header >>> 21 !== 0x7ff)
+		if (header >>> 21 !== 0x7ff) {
 			return { end: pos, frames, err: `no sync at ${pos}` }
+		}
+
 		const ver = (header >>> 19) & 3,
 			lay = (header >>> 17) & 3,
 			bitrateIndex = (header >>> 12) & 15,
@@ -52,8 +60,10 @@ function mp3walk(mp3, pos = 0) {
 			bitrateIndex === 0 ||
 			bitrateIndex === 15 ||
 			sampleRateIndex === 3
-		)
+		) {
 			return { end: pos, frames, err: `bad header at ${pos}` }
+		}
+
 		pos +=
 			Math.floor(
 				((ver === 3 ? 144 : 72) *
@@ -63,11 +73,15 @@ function mp3walk(mp3, pos = 0) {
 			) + pad
 		frames++
 	}
+
 	return { end: pos, frames, err: pos > mp3.length ? "overrun" : "" }
 }
 
 function riffwalk(riff) {
-	if (riff.readUInt32LE(4) !== riff.length - 8) return "bad RIFF size"
+	if (riff.readUInt32LE(4) !== riff.length - 8) {
+		return "bad RIFF size"
+	}
+
 	let pos = 12
 	const ids = []
 	while (pos + 8 <= riff.length) {
@@ -75,7 +89,10 @@ function riffwalk(riff) {
 		ids.push(riff.toString("latin1", pos, pos + 4))
 		pos += 8 + chunkSize + (chunkSize & 1)
 	}
-	if (pos !== riff.length) return `chunk end ${pos}/${riff.length}`
+
+	if (pos !== riff.length) {
+		return `chunk end ${pos}/${riff.length}`
+	}
 	return ids.includes("data") ? "" : "no data chunk"
 }
 
@@ -95,6 +112,7 @@ function unwrap(file) {
 			err: walk.err,
 		}
 	}
+
 	const walk = mp3walk(file)
 	if (walk.err === "riff") {
 		const payload = file.subarray(walk.end)
@@ -109,6 +127,7 @@ function unwrap(file) {
 			err: riffwalk(payload),
 		}
 	}
+
 	return {
 		kind: "mp3",
 		payload: file,
@@ -123,14 +142,18 @@ if (require.main === module) {
 		args.length && fs.existsSync(args[0]) && fs.statSync(args[0]).isDirectory()
 			? args.shift()
 			: null
+
 	for (const file of args) {
 		const name = path.basename(file).replace(/\.wav$/i, ""),
 			result = unwrap(fs.readFileSync(file))
 		console.log(
 			`${name.padEnd(24)} ${result.kind} ${result.info.padEnd(40)} ${result.err ? "FAIL: " + result.err : "PASS"}`,
 		)
-		if (out && !result.err)
+
+		if (out && !result.err) {
 			fs.writeFileSync(path.join(out, `${name}.${result.kind}`), result.payload)
+		}
 	}
 }
+
 module.exports = { unwrap, mp3walk, riffwalk }
