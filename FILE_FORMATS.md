@@ -4,7 +4,7 @@ This document describes the game's file formats as determined from the files in 
 
 All integers and floats are little-endian. Offsets are in hexadecimal and count from the start of the structure they belong to, unless a section states otherwise.
 
-# Archives: chitin.key and data/\*.bif
+# Archives: chitin.key, data/\*.bif and ERF
 
 Most game resources are stored in 26 BIF archives in `data/`. A BIF archive holds resource data but no names. The file `chitin.key` (the KEY file) lists every resource, gives it a name, and records which BIF archive holds it. Both files are needed to extract a named resource. The reader is `scripts/kotor.js`.
 
@@ -70,7 +70,7 @@ The entry table has one 16-byte entry per resource.
 
 Resource data follows the entry table directly. The resources are stored in order, without gaps or overlaps, and the last one ends exactly at the end of the file. This holds for all 26 archives. The data is not compressed.
 
-The archives contain 29 resource types. Only two are identified: 2002 is an MDL model and 3008 is its MDX vertex data. The others are UNKNOWN. The number of resources of each type is listed below.
+The archives contain 29 resource types. Only two are identified: 2002 is an MDL model and 3008 is its MDX vertex data. Type 3007 (TPC texture) does not occur in the BIF archives; it occurs in the ERF texture packs. The others are UNKNOWN. The number of resources of each type is listed below.
 
 | Type | Count | Type | Count | Type | Count | Type | Count |
 | ---- | ----- | ---- | ----- | ---- | ----- | ---- | ----- |
@@ -83,6 +83,55 @@ The archives contain 29 resource types. Only two are identified: 2002 is an MDL 
 |      |       | 2027 | 205   | 2044 | 317   | 3001 | 112   |
 |      |       |      |       | 2047 | 84    | 3008 | 2,832 |
 
+## ERF archive
+
+An ERF archive is a self-contained archive: unlike a BIF archive, it stores the name of each resource itself. The four texture packs in `TexturePacks/` are ERF archives. The reader is `readErf` in `scripts/kotor.js`. The ERF files in `modules/`, `rims/` and `patch.erf` have not been examined.
+
+An ERF archive begins with a 160-byte header.
+
+| Offset | Type    | Meaning                                         | Evidence                                                                                      | Confidence |
+| ------ | ------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | char[8] | Signature "ERF V1.0"                            | Present in all 4 texture packs.                                                               | high       |
+| 0x08   | u32     | Number of localized strings                     | The value is 0 in all 4 packs, so the string format is UNKNOWN.                               | low        |
+| 0x0C   | u32     | Size of the localized string table              | The value is 0 in all 4 packs.                                                                | low        |
+| 0x10   | u32     | Number of resources                             | The key and resource tables parse consistently in all 4 packs.                                | high       |
+| 0x14   | u32     | Offset of the localized string table (160)      | The value is 160 in all 4 packs.                                                              | low        |
+| 0x18   | u32     | Offset of the key table (160)                   | The value is 160 in all 4 packs.                                                              | high       |
+| 0x1C   | u32     | Offset of the resource table                    | Equals the key table offset plus 24 times the resource count in all 4 packs.                  | high       |
+| 0x20   | u32     | Build year minus 1900                           | The value is 103 (2003) in all 4 packs.                                                       | low        |
+| 0x24   | u32     | Build day of the year                           | The value is 309 in all 4 packs.                                                              | low        |
+| 0x28   | u32     | UNKNOWN, possibly a description string number   | The value is 0 in all 4 packs.                                                                | low        |
+| 0x2C   | u8[116] | Padding                                         | All bytes are 0 in all 4 packs.                                                               | medium     |
+
+The key table has one 24-byte entry per resource.
+
+| Offset | Type     | Meaning             | Evidence                                                  | Confidence |
+| ------ | -------- | ------------------- | --------------------------------------------------------- | ---------- |
+| 0x00   | char[16] | Resref, NUL-padded  | Names match the texture names that MDL meshes refer to.   | high       |
+| 0x10   | u32      | Resource ID         | Equals the entry's index for all 11,453 entries.          | high       |
+| 0x14   | u16      | Resource type       | Every value is a known type (see below).                  | high       |
+| 0x16   | u16      | UNKNOWN, always 0   | The value is 0 in all 4 packs.                            | low        |
+
+The resource table has one 8-byte entry per resource, in the same order as the key table.
+
+| Offset | Type | Meaning                            | Evidence                                    | Confidence |
+| ------ | ---- | ---------------------------------- | ------------------------------------------- | ---------- |
+| 0x00   | u32  | Offset of the resource data        | Every resource lies inside its archive.     | high       |
+| 0x04   | u32  | Size of the resource data in bytes | Every resource lies inside its archive.     | high       |
+
+In all 4 packs, resource data starts directly after the resource table, is stored in table order without gaps, and ends exactly at the end of the file. The data is not compressed.
+
+The contents of the texture packs are listed below.
+
+| Pack             | Resources | Contents                                                                                     |
+| ---------------- | --------- | -------------------------------------------------------------------------------------------- |
+| swpc_tex_tpa.erf | 3,294     | 3,294 TPC textures at full resolution.                                                       |
+| swpc_tex_tpb.erf | 3,294     | The same 3,294 names as tpa. 2,724 are half the width and height of their tpa version; 570 are the same size. |
+| swpc_tex_tpc.erf | 3,294     | The same 3,294 names as tpa. 2,712 are a quarter of the width and height, 12 are half, and 570 are the same size. |
+| swpc_tex_gui.erf | 1,571     | 1,570 TPC textures for the user interface and one resource of type 2022.                     |
+
+The tpb and tpc packs are likely the lower texture quality settings. Only tpa and gui are converted, because tpb and tpc hold no additional images.
+
 # 3D models: MDL and MDX
 
 Each 3D model is stored as two resources with the same resref. The MDL resource (type 2002) holds the model's structure: a tree of nodes, some of which carry meshes. The MDX resource (type 3008) holds the vertex data for those meshes. The converter is `scripts/mdl2obj.js`. It writes Wavefront OBJ files.
@@ -90,6 +139,8 @@ Each 3D model is stored as two resources with the same resref. The MDL resource 
 The models examined here are in `data/models.bif`, which contains 2,445 MDL resources and 2,445 MDX resources. Models may also exist in the RIM, MOD and ERF files, which have not been examined.
 
 All 2,445 models pass the converter's checks. Every read stays inside the file, every face index refers to an existing vertex, and the vertex positions stored in the MDL match those stored in the MDX for all 11,248,282 vertices. Of these models, 368 contain no meshes.
+
+The converter omits meshes whose render flag is 0 (see the mesh header). This removes 14,055 meshes. After this, 473 models have no meshes left and are not written, and 1,972 models are written. Each OBJ file refers to an MTL file with its textures (see "Conversion to model materials" in the texture section).
 
 ## MDL file header
 
@@ -164,8 +215,11 @@ A mesh header is a 332-byte structure. It follows a node that has the 0x20 flag 
 | 0x108  | u32      | Offset of the normal within a vertex record, or 0xFFFFFFFF if absent               | Face orientation agrees with these normals in the c_bantha meshes.                                      | medium     |
 | 0x110  | u32      | Offset of the texture coordinates within a vertex record, or 0xFFFFFFFF if absent  | Textured models display plausible coordinates.                                                          | medium     |
 | 0x130  | u16      | Number of vertices                                                                 | Every face index is below this value.                                                                   | high       |
+| 0x139  | u8       | Render flag: 1 if the game draws the mesh, 0 if not                                | See below.                                                                                              | medium     |
 | 0x144  | u32      | Offset of this mesh's vertex records in the MDX file                               | MDX positions match MDL positions for every vertex.                                                     | high       |
 | 0x148  | u32      | Offset of the vertex positions in the MDL file. Each position is three f32 values. | MDX positions match MDL positions for every vertex.                                                     | high       |
+
+The render flag at 0x139 is 0 or 1 in all 71,568 meshes. Of the 57,513 meshes with the value 1, 56,359 have a texture. Of the 14,055 meshes with the value 0, 13,381 have no texture. Most meshes with the value 0 are named with the suffix "_g" or are walkmeshes and boxes; these look like helper geometry for animation and collision. Rendering one head model (p_bastilah) with and without these meshes shows untextured plates over the face when they are included. The flag has not been tested in the game itself.
 
 The remaining bytes of the mesh header are UNKNOWN.
 
@@ -190,6 +244,66 @@ An MDX file has no header. It is an array of vertex records, each built from f32
 ## Unidentified resources in models.bif
 
 The archive also contains resources of types 2016 (1,202), 2052 (156) and 2053 (196). Their formats are UNKNOWN. The string "BWM V1.0" appears in one of these resources and may mark a walkmesh, but this has not been examined.
+
+# Textures: TPC
+
+A TPC file (resource type 3007) is a texture. It holds pixel data for one image, or for several sub-images, each with its own mipmap chain. A mipmap chain is a series of copies of an image, each half the width and height of the previous one. The file ends with an optional TXI trailer. TXI (texture information) is plain ASCII text that sets rendering options. The converter is `scripts/tpc2png.js`. It writes the top mipmap level as an 8-bit RGBA PNG.
+
+All 11,452 TPC files in the four texture packs parse completely. In each file, the header, the pixel data and an ASCII trailer together account for every byte. The converted PNG files decode with pngjs, an independent PNG decoder, to exactly the pixels the converter produced. This holds for all 3,294 textures of tpa and all 1,570 textures of gui.
+
+## TPC header
+
+A TPC file begins with a 128-byte header.
+
+| Offset | Type    | Meaning                                                    | Evidence                                                                                                                                    | Confidence |
+| ------ | ------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | u32     | Size of the top mipmap level in bytes, or 0 if uncompressed | Matches the computed size in all plain and cube textures, with the exceptions described below.                                              | high       |
+| 0x04   | f32     | UNKNOWN, a value from 0 to 1                               | The value is 1.0 in 6,987 of 11,452 files. Every other value occurs in an encoding 4 texture, which has an alpha channel. It may be an alpha test threshold. | low        |
+| 0x08   | u16     | Width in pixels                                            | Decoded images are coherent at this width.                                                                                                   | high       |
+| 0x0A   | u16     | Height in pixels                                           | Decoded images are coherent at this height.                                                                                                  | high       |
+| 0x0C   | u8      | Encoding (see below)                                       | Every file decodes, and the data sizes match.                                                                                                | high       |
+| 0x0D   | u8      | Number of mipmap levels                                    | The data sizes match in all plain and cube textures.                                                                                        | high       |
+| 0x0E   | u8[114] | Padding                                                    | All bytes are 0 in all 11,452 files.                                                                                                         | high       |
+
+The encoding byte and the size field at 0x00 together select the pixel format. The combinations are listed below.
+
+| Encoding | Size at 0x00 | Pixel format                                  | Files in tpa |
+| -------- | ------------ | --------------------------------------------- | ------------ |
+| 1        | 0            | 8-bit grayscale, 1 byte per pixel             | 4            |
+| 2        | 0            | RGB, 3 bytes per pixel                        | 9            |
+| 4        | 0            | RGBA, 4 bytes per pixel                       | 244          |
+| 2        | nonzero      | DXT1, 8 bytes per 4x4 block                   | 1,743        |
+| 4        | nonzero      | DXT5, 16 bytes per 4x4 block                  | 1,294        |
+
+DXT1 and DXT5 are the standard S3 block compression formats. A mipmap level of width w and height h occupies ceil(w/4) * ceil(h/4) blocks, with at least one block.
+
+For DXT1 textures of 4x4 pixels or smaller, the size field holds 16, but one block is 8 bytes. All such files still end exactly after the computed mipmap chain, so the converter accepts this value. This affects 4 files in tpa, 8 in tpb and 11 in tpc. The reason is not known.
+
+## Pixel data layout
+
+The pixel data starts at offset 128. Each sub-image is stored as its full mipmap chain, largest level first. Three layouts occur.
+
+| Layout   | How to recognize it                                         | Sub-images                                                                                                                 | Files in tpa |
+| -------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| plain    | Neither of the cases below                                  | One image with the header's mipmap count.                                                                                  | 3,191        |
+| cube     | Height equals 6 times the width                             | Six square faces of width x width pixels, each with the header's mipmap count. The TXI holds "cube 1".                     | 63           |
+| flipbook | The size field exceeds the top level size of the full image | numx * numy animation frames. Each frame is (width / numx) x (height / numy) pixels with a full mipmap chain down to 1x1. | 40           |
+
+In a flipbook texture, numx and numy come from the TXI trailer, which also holds "proceduretype cycle" and a frame rate ("fps"). The header's mipmap count is 1 and does not describe the frames. The size field equals the total size of all frames and their mipmaps. For example, c_holododonna is 512x512 DXT1 with numx 2 and numy 2. Each 256x256 frame with 9 mipmap levels is 43,704 bytes, and the four frames total 174,816 bytes, which equals its size field. The converter places the frames in a grid, frame 0 at the top left, in row order. That order is an assumption. Each frame is a complete texture, so a model that uses a flipbook texture appears with the texture tiled 2x2 or more in the converted output.
+
+The order of the six cube faces is UNKNOWN. The converter stacks them vertically in file order.
+
+Each image is stored with its bottom row first. In other words, the first stored row is at texture coordinate v = 0. Two tests support this. When the rows are reversed, the Bastila head model (p_bastilah) renders with its face texture correctly placed; without reversal the eyes and mouth are misplaced. The GUI logo lbl_bwlogo reads upside down unless the rows are reversed. The converter therefore reverses the rows, so the PNG files follow the usual top-row-first convention that OBJ viewers expect.
+
+## TXI trailer
+
+The TXI trailer is ASCII text with one "keyword value" pair per line, separated by CRLF line breaks. It is sometimes followed by NUL bytes. 1,576 of the 3,294 tpa textures have one. The converter writes it beside the PNG as a .txi file. Keywords seen include "proceduretype", "numx", "numy", "fps", "blending", "decal" and "cube". Only numx, numy and cube are used by the converter. The meaning of the other keywords has not been examined.
+
+## Conversion to model materials
+
+Each converted model has an MTL (material library) file beside its OBJ file. The MTL file defines one material per texture name, and each material points at the PNG in `assets/TexturePacks/swpc_tex_tpa/`, or in `swpc_tex_gui/` if the name is only found there. Texture names are compared without regard to case. Of the 1,401 distinct texture names that rendered meshes refer to, 1,364 are found. The remaining 37 are listed in `temp/reports` and are not in the texture packs or in `textures.bif`. They may be in the module archives, which have not been examined.
+
+The PNG files keep their alpha channel, but the MTL files do not declare it as transparency. In KotOR the alpha channel of some textures appears to hold other data, such as an environment map mask, rather than transparency. This has not been verified.
 
 # Music: streammusic/\*.wav
 

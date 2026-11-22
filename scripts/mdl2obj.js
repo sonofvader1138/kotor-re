@@ -14,9 +14,11 @@ function qmul([aw, ax, ay, az], [bw, bx, by, bz]) {
 }
 const f6 = v => v.toFixed(6);
 
-function convert(mdl, mdx, label = '') {
+// opts.mtllib: material library file name written at the top of the OBJ.
+// Meshes whose render byte (mesh header 0x139) is 0 are skipped; the game does not appear to draw them.
+function convert(mdl, mdx, label = '', opts = {}) {
   const B = 12, len = mdl.length - B, errors = [];
-  const st = { nodes: 0, meshes: 0, verts: 0, faces: 0, mismatch: 0, nok: 0, nchk: 0 };
+  const st = { nodes: 0, hidden: 0, meshes: 0, verts: 0, faces: 0, mismatch: 0, nok: 0, nchk: 0 };
   const inb = (o, n, what) => {
     if (o < 0 || o + n > len) { errors.push(`${what} out of bounds (${o}+${n}>${len})`); return false; }
     return true;
@@ -33,6 +35,8 @@ function convert(mdl, mdx, label = '') {
   for (let i = 0; i < ncnt; i++) names.push(cstr(u32(noff + 4 * i), 64));
 
   const out = [`# converted from ${label}`];
+  if (opts.mtllib) out.push(`mtllib ${opts.mtllib}`);
+  const textures = new Set();
   let vbase = 1;
   const seen = new Set();
 
@@ -46,10 +50,11 @@ function convert(mdl, mdx, label = '') {
     inb(foff, 32 * fcnt, `faces ${name}`); inb(vcoff, 12 * vcnt, `verts ${name}`);
     let hasmdx = stride > 0 && vcnt > 0 && mdx.length > 0;
     if (hasmdx && mdxoff + stride * vcnt > mdx.length) { errors.push(`mdx range ${name}`); hasmdx = false; }
+    if (u8(m + 0x139) === 0) { st.hidden++; return; }
     const hasuv = hasmdx && ouv !== NONE;
     st.meshes++; st.verts += vcnt; st.faces += fcnt;
     out.push(`o ${name}`);
-    if (tex && tex.toLowerCase() !== 'null') out.push(`usemtl ${tex}`);
+    if (tex && tex.toLowerCase() !== 'null') { out.push(`usemtl ${tex.toLowerCase()}`); textures.add(tex.toLowerCase()); }
     const verts = [];
     for (let i = 0; i < vcnt; i++) {
       const v = f32(vcoff + 12 * i, 3); verts.push(v);
@@ -93,11 +98,11 @@ function convert(mdl, mdx, label = '') {
   }
 
   node(root, [1, 0, 0, 0], [0, 0, 0], 0);
-  return { obj: out.join('\n') + '\n', st: { ...st, hdrNodes }, errors };
+  return { obj: out.join('\n') + '\n', st: { ...st, hdrNodes }, textures, errors };
 }
 
 function report(label, { st, errors }) {
-  return `${label} nodes=${st.nodes} meshes=${st.meshes} verts=${st.verts} faces=${st.faces} ` +
+  return `${label} nodes=${st.nodes} meshes=${st.meshes} hidden=${st.hidden} verts=${st.verts} faces=${st.faces} ` +
     `mdl/mdx_mismatch=${st.mismatch} hdrnodes=${st.hdrNodes} normals_ok=${st.nok}/${st.nchk} ` +
     (errors.length ? 'FAIL: ' + errors.slice(0, 5).join('; ') : 'PASS');
 }
