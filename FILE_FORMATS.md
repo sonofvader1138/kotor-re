@@ -70,7 +70,7 @@ The entry table has one 16-byte entry per resource.
 
 Resource data follows the entry table directly. The resources are stored in order, without gaps or overlaps, and the last one ends exactly at the end of the file. This holds for all 26 archives. The data is not compressed.
 
-The archives contain 29 resource types. Three are identified: 2002 is an MDL model, 3008 is its MDX vertex data, and 2047 is a GUI layout. Type 3007 (TPC texture) does not occur in the BIF archives; it occurs in the ERF texture packs. The others are UNKNOWN. The number of resources of each type is listed below.
+The archives contain 29 resource types. Five are identified: 2002 is an MDL model, 3008 is its MDX vertex data, 2047 is a GUI layout, 3 is a TGA image and 2022 is a TXI text file of texture options. Type 3007 (TPC texture) does not occur in the BIF archives; it occurs in the ERF texture packs. The others are UNKNOWN. The number of resources of each type is listed below.
 
 | Type | Count | Type | Count | Type | Count | Type | Count |
 | ---- | ----- | ---- | ----- | ---- | ----- | ---- | ----- |
@@ -331,6 +331,69 @@ The TXI trailer is ASCII text with one "keyword value" pair per line, separated 
 Each converted model has an MTL (material library) file beside its OBJ file. The MTL file defines one material per texture name, and each material points at the PNG in `assets/TexturePacks/swpc_tex_tpa/`, or in `swpc_tex_gui/` if the name is only found there. Texture names are compared without regard to case. Of the 1,401 distinct texture names that rendered meshes refer to, 1,364 are found. The remaining 37 are listed in `temp/reports` and are not in the texture packs or in `textures.bif`. They may be in the module archives, which have not been examined.
 
 The PNG files keep their alpha channel, but the MTL files do not declare it as transparency. In KotOR the alpha channel of some textures appears to hold other data, such as an environment map mask, rather than transparency. This has not been verified.
+
+# Images: TGA in the BIF archives
+
+Resource type 3 is a TGA image, the uncompressed image format defined by Truevision. The BIF archives hold 5,601 of them. They matter because 5,586 of them are lightmaps, the precomputed lighting that the game blends over area textures. The converter is `scripts/tga.js`, called by the `tga` stage of `scripts/convert_all.js`. It writes 8-bit PNG files with the same channels as the TGA.
+
+The images are in three groups. The table below lists each group, its archives and its output directory.
+
+| Archives                                 | Images | Layout                                | Output                    |
+| ---------------------------------------- | ------ | ------------------------------------- | ------------------------- |
+| `lightmaps.bif`, `lightmaps2.bif` to `lightmaps13.bif` | 5,586  | 32-bit BGRA, sizes 2x2 to 512x512     | `assets/data/lightmaps/`  |
+| `textures.bif`                           | 14     | 8-bit grayscale, 256x256              | `assets/data/textures/`   |
+| `legacy.bif`                             | 1      | 24-bit BGR, 256x256 (`chrome1`)       | `assets/data/legacy/`     |
+
+All 5,601 images pass the parser's check: the header, the optional image ID, the pixels and the optional trailer account for every byte of the file. No resource name occurs twice within a group, so each output directory is flat.
+
+## TGA header
+
+A TGA file begins with an 18-byte header. The table below gives each field and the values seen in all 5,601 images.
+
+| Offset | Type    | Meaning                                    | Evidence                                                                                                        | Confidence |
+| ------ | ------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | u8      | Length of the image ID that follows        | The value is 0 in all 5,601 images.                                                                             | high       |
+| 0x01   | u8      | Color map type                             | The value is 0 (no color map) in all 5,601 images.                                                              | high       |
+| 0x02   | u8      | Image type                                 | 2 (uncompressed true color) in 5,587 images and 3 (uncompressed grayscale) in the 14 images of `textures.bif`.  | high       |
+| 0x03   | u8[5]   | Color map specification                    | All bytes are 0 in all 5,601 images.                                                                            | high       |
+| 0x08   | u16     | X origin                                   | The value is 0 in all 5,601 images.                                                                             | high       |
+| 0x0A   | u16     | Y origin                                   | The value is 0 in all 5,601 images.                                                                             | high       |
+| 0x0C   | u16     | Width in pixels                            | The pixel data size matches width x height x bytes per pixel in all 5,601 images.                               | high       |
+| 0x0E   | u16     | Height in pixels                           | As above. Every image is square, and every side is a power of 2.                                                | high       |
+| 0x10   | u8      | Bits per pixel                             | 32 for lightmaps, 8 for `textures.bif` and 24 for `legacy.bif`.                                                 | high       |
+| 0x11   | u8      | Image descriptor                           | See below.                                                                                                      | high       |
+
+The image descriptor holds the number of alpha bits in its low 4 bits and the pixel origin in bits 4 and 5. Bits 4 and 5 are 0 in all 5,601 images. This means the first stored row is the bottom row of the image, and pixels run left to right. ImageMagick reports every image as bottom-left oriented. Its decoding with `-auto-orient` and ffmpeg's decoding both match the converter's output, in which the rows are reversed to put the top row first. The alpha bit count is 0 in 5,474 lightmaps and 8 in the other 112 lightmaps and in the 14 grayscale images. The game does not appear to rely on it: all 5,474 lightmaps that declare 0 alpha bits still store 4 bytes per pixel.
+
+True color pixels are stored in the order blue, green, red and, at 32 bits per pixel, alpha. ImageMagick's decoding of all 5,601 source files equals the converter's RGBA output, which confirms this order.
+
+## Trailer
+
+Some images end with the optional TGA 2.0 trailer. The table below lists the three cases.
+
+| Bytes after the pixels | Contents                                     | Images                                                     |
+| ---------------------- | -------------------------------------------- | ---------------------------------------------------------- |
+| 0                      | None                                         | 5,474 lightmaps                                            |
+| 26                     | Footer only                                  | 5 lightmaps, 14 images of `textures.bif`, 1 of `legacy.bif` |
+| 521                    | 495-byte extension area, then the footer     | 107 lightmaps                                              |
+
+The footer is 26 bytes long. It holds a u32 offset of the extension area, a u32 offset of the developer area and the signature "TRUEVISION-XFILE." followed by a NUL byte. The developer area offset is 0 in all 127 files with a footer. The extension area offset is 0 when there is no extension area. When there is one, the offset equals the end of the pixel data. The first field of the extension area holds its size. That field holds 494 in all 107 files, but 495 bytes are present, which is the size the TGA 2.0 standard specifies. The cause of this difference is not known. The converter does not read the rest of the extension area.
+
+The 112 lightmaps with a trailer are the same 112 that declare 8 alpha bits. All of them belong to the areas `m09zz` and `m17mg`.
+
+## Lightmaps
+
+Lightmaps are named after an area model, followed by "_lm" and a number, for example `m01aa_01a_lm0`. Each lightmap has a TXI file of the same name in the same archive, resource type 2022. TXI is plain text with one option per line, as in the TPC trailer above. The TXI files of the 5,474 lightmaps without a trailer all read "islightmap 1", "compresstexture 0", "mipmap 0" and "downsamplemax 0". The TXI files of the other 112, which are the lightmaps with a trailer, lack the "islightmap 1" line. The effect of this difference in the game is unknown. The converter writes each TXI file beside its PNG file.
+
+The alpha channel is 255 everywhere in 3,221 lightmaps. In the other 2,365, some pixels have lower alpha values, down to 0. The meaning of the lightmap alpha channel is UNKNOWN. The converter keeps it.
+
+How a mesh selects its lightmap and which texture coordinates it uses are not documented. Area models are not yet converted, so the lightmaps are not attached to any OBJ file.
+
+## Other resources in the same archives
+
+`textures.bif` also holds 28 TXI files. Fourteen belong to its grayscale images and contain "isbumpmap 1", which suggests the images are bump maps. The other 14, such as `distortiontex` and `grassinfo`, have no image in that archive. The converter writes all 28.
+
+The lightmap archives also hold 112 resources of type 3001, one per area, named after the area, such as `m01aa`. They are ASCII text with CRLF line breaks. An unindented line holds a room name and a count, and indented lines naming other rooms follow it. In 107 of the 112 files, the number of indented lines always equals the count. The other 5, such as `m38ab`, contain a count that does not match or a doubled space. The text may be a room visibility list, but this has not been verified. The converter skips them.
 
 # User interface layouts: GUI
 

@@ -1,4 +1,4 @@
-// Minimal PNG codec. encode: 8-bit RGB or RGBA, filter 0. decode: 8-bit gray, RGB, gray+alpha, RGBA,
+// Minimal PNG codec. encode: 8-bit gray, RGB or RGBA, filter 0. decode: 8-bit gray, RGB, gray+alpha, RGBA,
 // non-interlaced, all five filter types; always returns RGBA.
 const zlib = require("zlib")
 const kotor = require("./kotor")
@@ -20,7 +20,7 @@ function encode(w, h, pix, channels = 4) {
 	ihdr.writeUInt32BE(w, 0)
 	ihdr.writeUInt32BE(h, 4)
 	ihdr[8] = 8
-	ihdr[9] = channels === 4 ? 6 : 2
+	ihdr[9] = { 1: 0, 3: 2, 4: 6 }[channels]
 	return Buffer.concat([
 		Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
 		chunk("IHDR", ihdr),

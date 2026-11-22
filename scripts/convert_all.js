@@ -1,4 +1,4 @@
-// usage: node scripts/convert_all.js [models] [textures] [music] [movies]   (default: all)
+// usage: node scripts/convert_all.js [models] [textures] [tga] [music] [movies]   (default: all)
 // Converts all supported game assets into ~/re/assets. Reports: ~/re/temp/reports.
 // Audio verified with ffprobe if installed. Textures verified with ImageMagick if installed.
 // Models UNVERIFIED (no independent loader yet). Movies require ffmpeg and are verified with ffprobe.
@@ -7,6 +7,7 @@ const path = require("path")
 const childProcess = require("child_process")
 const kotor = require("./kotor")
 const tpc = require("./tpc2png")
+const tga = require("./tga")
 const PNG = require("./png")
 const mdl2obj = require("./mdl2obj")
 const kotorAudio = require("./kotor_audio")
@@ -158,6 +159,99 @@ if (run("textures")) {
 		tally(`textures_${p}`, lines)
 		if (magick) tally(`imagemagick_${p}`, checks)
 		else summary.push(`ImageMagick missing: ${p} UNVERIFIED`)
+	}
+}
+
+// TGA images and their TXI texture options from three groups of BIF archives:
+// data/lightmaps*.bif -> assets/data/lightmaps, data/textures.bif -> assets/data/textures,
+// data/legacy.bif -> assets/data/legacy. Images become 8-bit PNG with the TGA's channels (gray, RGB or
+// RGBA), top row first. Each image is checked three ways: the TGA parser must consume the file exactly,
+// ImageMagick's own decoding of the TGA (with -auto-orient) must equal the PNG's pixels, and
+// ImageMagick and pngcheck must both read the PNG.
+const pngcheck = !childProcess.spawnSync("pngcheck", ["-h"], {
+	stdio: "ignore",
+}).error
+// Decodes a TGA with ImageMagick into 8-bit RGBA, top row first. Returns a report line.
+const magickTgaCheck = (name, data, w, h, rgba) => {
+	const r = childProcess.spawnSync(
+		"convert",
+		["tga:-", "-auto-orient", "-depth", "8", "rgba:-"],
+		{ input: data, maxBuffer: 1 << 28 },
+	)
+	if (r.status !== 0)
+		return `${name} FAIL: ${String(r.stderr || r.error).trim().split("\n")[0]}`
+	if (r.stdout.length !== w * h * 4)
+		return `${name} FAIL: ImageMagick returned ${r.stdout.length} bytes, expected ${w * h * 4}`
+	if (Buffer.compare(r.stdout, rgba) !== 0)
+		return `${name} FAIL: pixels differ from ImageMagick's decoding of the TGA`
+	return `${name} ${w}x${h} PASS`
+}
+// Runs pngcheck on every PNG in dir. Returns one report line per file.
+const pngcheckDir = (dir) => {
+	const files = fs.readdirSync(dir).filter((f) => f.endsWith(".png"))
+	const r = childProcess.spawnSync(
+		"pngcheck",
+		files.map((f) => path.join(dir, f)),
+		{ encoding: "utf8", maxBuffer: 1 << 26 },
+	)
+	const ok = new Set()
+	for (const l of String(r.stdout).split("\n")) {
+		const m = /^OK: (.*?) \(/.exec(l)
+		if (m) ok.add(path.basename(m[1]))
+	}
+	return files.map((f) => (ok.has(f) ? `${f} PASS` : `${f} FAIL: pngcheck`))
+}
+const TGA_GROUPS = [
+	["lightmaps", /^data\/lightmaps\d*\.bif$/],
+	["textures", /^data\/textures\.bif$/],
+	["legacy", /^data\/legacy\.bif$/],
+]
+if (run("tga")) {
+	const key = kotor.readKey()
+	for (const [group, pattern] of TGA_GROUPS) {
+		console.log(`tga ${group}...`)
+		const out = path.join(A, "data", group)
+		fs.mkdirSync(out, { recursive: true })
+		const lines = [],
+			checks = [],
+			written = new Set()
+		for (const bif of key.bifs.filter((b) => pattern.test(b))) {
+			for (const r of kotor.bifResources(bif, key)) {
+				const label = `${path.basename(bif)}:${r.resref}.${r.ext}`
+				if (r.ext !== "tga" && r.ext !== "txi") {
+					lines.push(`${label} not an image, skipped PASS`)
+					continue
+				}
+				const file = `${r.resref}.${r.ext === "tga" ? "png" : "txi"}`
+				if (written.has(file)) {
+					lines.push(`${label} FAIL: ${file} already written from another archive`)
+					continue
+				}
+				if (r.ext === "txi") {
+					fs.writeFileSync(path.join(out, file), r.data)
+					written.add(file)
+					lines.push(`${label} ${r.data.length} bytes PASS`)
+					continue
+				}
+				const t = tga.parse(r.data),
+					d = tga.decode(r.data, t)
+				lines.push(tga.report(label, t))
+				if (!d) continue
+				const png = PNG.encode(d.w, d.h, d.pix, d.channels)
+				fs.writeFileSync(path.join(out, file), png)
+				written.add(file)
+				if (magick) {
+					checks.push(magickTgaCheck(`${r.resref}.tga`, r.data, d.w, d.h, d.rgba))
+					checks.push(magickCheck(file, png, d.w, d.h, d.rgba))
+				}
+			}
+		}
+		prune(out, written, [".png", ".txi"])
+		tally(`tga_${group}`, lines)
+		if (magick) tally(`imagemagick_${group}`, checks)
+		else summary.push(`ImageMagick missing: ${group} UNVERIFIED`)
+		if (pngcheck) tally(`pngcheck_${group}`, pngcheckDir(out))
+		else summary.push(`pngcheck missing: ${group} PNG structure unchecked`)
 	}
 }
 
