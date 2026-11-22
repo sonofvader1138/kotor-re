@@ -1,7 +1,7 @@
-// usage: node scripts/convert_all.js [models] [textures] [music]   (default: all)
+// usage: node scripts/convert_all.js [models] [textures] [music] [movies]   (default: all)
 // Converts all supported game assets into ~/re/assets. Reports: ~/re/temp/reports.
 // Audio verified with ffprobe if installed. Textures verified with ImageMagick if installed.
-// Models UNVERIFIED (no independent loader yet).
+// Models UNVERIFIED (no independent loader yet). Movies require ffmpeg and are verified with ffprobe.
 const fs = require("fs")
 const path = require("path")
 const childProcess = require("child_process")
@@ -11,6 +11,7 @@ const PNG = require("./png")
 const mdl2obj = require("./mdl2obj")
 const kotorAudio = require("./kotor_audio")
 const adpcm2pcm = require("./adpcm2pcm")
+const bink = require("./bink")
 
 const A = path.join(kotor.ROOT, "assets"),
 	R = path.join(kotor.ROOT, "temp", "reports")
@@ -186,6 +187,144 @@ if (run("music")) {
 		if (!err) fs.writeFileSync(path.join(out, `${name}.${u.kind}`), data)
 	}
 	tally("music", lines)
+}
+
+// Movies: movies/*.bik -> assets/movies/*.mp4 (H.264 High profile, yuv420p; AAC LC audio).
+// Requires ffmpeg, which decodes Bink. Each output is checked with ffprobe against the Bink parser:
+// size, frame count, sample rate, channel count and audio duration (within 0.1 s; ffmpeg's Bink
+// audio decoder emits about 0.03 s more than the packets declare). Then ffmpeg compares every
+// output frame with the decoded Bink frame and requires a minimum PSNR of 40 dB.
+const MIN_PSNR = 40
+const has = (p) =>
+	!childProcess.spawnSync(p, ["-version"], { stdio: "ignore" }).error
+if (run("movies") && !(has("ffmpeg") && has("ffprobe")))
+	summary.push("ffmpeg or ffprobe missing: movies not converted")
+else if (run("movies")) {
+	console.log("movies...")
+	const src = path.join(kotor.GAME, "movies"),
+		out = path.join(A, "movies")
+	fs.mkdirSync(out, { recursive: true })
+	const lines = [],
+		written = new Set()
+	for (const f of fs
+		.readdirSync(src)
+		.filter((f) => /\.bik$/i.test(f))
+		.sort()) {
+		const name = f.replace(/\.bik$/i, ""),
+			inFile = path.join(src, f),
+			outFile = path.join(out, `${name}.mp4`)
+		const b = bink.parse(fs.readFileSync(inFile))
+		if (b.errors.length) {
+			lines.push(bink.report(f, b))
+			continue
+		}
+		const h = b.h
+		const enc = childProcess.spawnSync(
+			"ffmpeg",
+			[
+				"-v",
+				"error",
+				"-y",
+				"-i",
+				inFile,
+				"-map",
+				"0:v",
+				"-map",
+				"0:a?",
+				"-c:v",
+				"libx264",
+				"-preset",
+				"slow",
+				"-crf",
+				"18",
+				"-pix_fmt",
+				"yuv420p",
+				"-c:a",
+				"aac",
+				"-b:a",
+				"192k",
+				"-movflags",
+				"+faststart",
+				outFile,
+			],
+			{ encoding: "utf8" },
+		)
+		const encErr = String(enc.stderr || enc.error || "").trim()
+		if (enc.status !== 0 || encErr) {
+			lines.push(`${name}.mp4 FAIL: ffmpeg: ${encErr.split("\n")[0]}`)
+			continue
+		}
+		written.add(`${name}.mp4`)
+		const probe = childProcess.spawnSync(
+			"ffprobe",
+			[
+				"-v",
+				"error",
+				"-count_frames",
+				"-of",
+				"json",
+				"-show_entries",
+				"stream=codec_type,codec_name,width,height,nb_read_frames,sample_rate,channels,duration",
+				outFile,
+			],
+			{ encoding: "utf8" },
+		)
+		const streams = probe.status === 0 ? JSON.parse(probe.stdout).streams : []
+		const v = streams.find((s) => s.codec_type === "video"),
+			a = streams.find((s) => s.codec_type === "audio")
+		const errs = []
+		if (!v || v.codec_name !== "h264") errs.push("no H.264 video stream")
+		else {
+			if (v.width !== h.width || v.height !== h.height)
+				errs.push(`size ${v.width}x${v.height}, Bink ${h.width}x${h.height}`)
+			if (Number(v.nb_read_frames) !== h.frames)
+				errs.push(`${v.nb_read_frames} frames, Bink ${h.frames}`)
+		}
+		let audioInfo = "no audio"
+		if (h.audioTracks === 0 && a) errs.push("unexpected audio stream")
+		if (h.audioTracks > 0) {
+			const t = h.tracks[0],
+				ch = t.flags & 0x2000 ? 2 : 1,
+				dur = b.decodedBytes[0] / (2 * ch * t.sampleRate)
+			if (!a || a.codec_name !== "aac") errs.push("no AAC audio stream")
+			else {
+				if (Number(a.sample_rate) !== t.sampleRate)
+					errs.push(`${a.sample_rate} Hz, Bink ${t.sampleRate} Hz`)
+				if (a.channels !== ch) errs.push(`${a.channels} channels, Bink ${ch}`)
+				if (Math.abs(Number(a.duration) - dur) > 0.1)
+					errs.push(`audio ${a.duration} s, Bink ${dur.toFixed(3)} s`)
+				audioInfo = `${t.sampleRate}Hz ${ch}ch ${dur.toFixed(3)}s`
+			}
+		}
+		const cmp = childProcess.spawnSync(
+			"ffmpeg",
+			[
+				"-hide_banner",
+				"-nostats",
+				"-i",
+				outFile,
+				"-i",
+				inFile,
+				"-lavfi",
+				"[0:v][1:v]psnr",
+				"-f",
+				"null",
+				"-",
+			],
+			{ encoding: "utf8", maxBuffer: 1 << 26 },
+		)
+		const m = /PSNR .*average:(\S+) min:(\S+)/.exec(cmp.stderr || "")
+		const psnrMin = m ? Number(m[2].replace("inf", "Infinity")) : NaN
+		if (!(psnrMin >= MIN_PSNR))
+			errs.push(`minimum PSNR ${m ? m[2] : "not measured"}`)
+		lines.push(
+			`${name}.mp4 ${h.width}x${h.height} ${h.frames} frames ${audioInfo} ` +
+				`PSNR avg ${m ? m[1] : "?"} min ${m ? m[2] : "?"} ` +
+				(errs.length ? "FAIL: " + errs.join("; ") : "PASS"),
+		)
+	}
+	prune(out, written, [".mp4"])
+	tally("movies", lines)
 }
 
 // Independent verification (audio)

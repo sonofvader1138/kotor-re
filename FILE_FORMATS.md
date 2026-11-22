@@ -89,46 +89,46 @@ An ERF archive is a self-contained archive: unlike a BIF archive, it stores the 
 
 An ERF archive begins with a 160-byte header.
 
-| Offset | Type    | Meaning                                         | Evidence                                                                                      | Confidence |
-| ------ | ------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | char[8] | Signature "ERF V1.0"                            | Present in all 4 texture packs.                                                               | high       |
-| 0x08   | u32     | Number of localized strings                     | The value is 0 in all 4 packs, so the string format is UNKNOWN.                               | low        |
-| 0x0C   | u32     | Size of the localized string table              | The value is 0 in all 4 packs.                                                                | low        |
-| 0x10   | u32     | Number of resources                             | The key and resource tables parse consistently in all 4 packs.                                | high       |
-| 0x14   | u32     | Offset of the localized string table (160)      | The value is 160 in all 4 packs.                                                              | low        |
-| 0x18   | u32     | Offset of the key table (160)                   | The value is 160 in all 4 packs.                                                              | high       |
-| 0x1C   | u32     | Offset of the resource table                    | Equals the key table offset plus 24 times the resource count in all 4 packs.                  | high       |
-| 0x20   | u32     | Build year minus 1900                           | The value is 103 (2003) in all 4 packs.                                                       | low        |
-| 0x24   | u32     | Build day of the year                           | The value is 309 in all 4 packs.                                                              | low        |
-| 0x28   | u32     | UNKNOWN, possibly a description string number   | The value is 0 in all 4 packs.                                                                | low        |
-| 0x2C   | u8[116] | Padding                                         | All bytes are 0 in all 4 packs.                                                               | medium     |
+| Offset | Type    | Meaning                                       | Evidence                                                                     | Confidence |
+| ------ | ------- | --------------------------------------------- | ---------------------------------------------------------------------------- | ---------- |
+| 0x00   | char[8] | Signature "ERF V1.0"                          | Present in all 4 texture packs.                                              | high       |
+| 0x08   | u32     | Number of localized strings                   | The value is 0 in all 4 packs, so the string format is UNKNOWN.              | low        |
+| 0x0C   | u32     | Size of the localized string table            | The value is 0 in all 4 packs.                                               | low        |
+| 0x10   | u32     | Number of resources                           | The key and resource tables parse consistently in all 4 packs.               | high       |
+| 0x14   | u32     | Offset of the localized string table (160)    | The value is 160 in all 4 packs.                                             | low        |
+| 0x18   | u32     | Offset of the key table (160)                 | The value is 160 in all 4 packs.                                             | high       |
+| 0x1C   | u32     | Offset of the resource table                  | Equals the key table offset plus 24 times the resource count in all 4 packs. | high       |
+| 0x20   | u32     | Build year minus 1900                         | The value is 103 (2003) in all 4 packs.                                      | low        |
+| 0x24   | u32     | Build day of the year                         | The value is 309 in all 4 packs.                                             | low        |
+| 0x28   | u32     | UNKNOWN, possibly a description string number | The value is 0 in all 4 packs.                                               | low        |
+| 0x2C   | u8[116] | Padding                                       | All bytes are 0 in all 4 packs.                                              | medium     |
 
 The key table has one 24-byte entry per resource.
 
-| Offset | Type     | Meaning             | Evidence                                                  | Confidence |
-| ------ | -------- | ------------------- | --------------------------------------------------------- | ---------- |
-| 0x00   | char[16] | Resref, NUL-padded  | Names match the texture names that MDL meshes refer to.   | high       |
-| 0x10   | u32      | Resource ID         | Equals the entry's index for all 11,453 entries.          | high       |
-| 0x14   | u16      | Resource type       | Every value is a known type (see below).                  | high       |
-| 0x16   | u16      | UNKNOWN, always 0   | The value is 0 in all 4 packs.                            | low        |
+| Offset | Type     | Meaning            | Evidence                                                | Confidence |
+| ------ | -------- | ------------------ | ------------------------------------------------------- | ---------- |
+| 0x00   | char[16] | Resref, NUL-padded | Names match the texture names that MDL meshes refer to. | high       |
+| 0x10   | u32      | Resource ID        | Equals the entry's index for all 11,453 entries.        | high       |
+| 0x14   | u16      | Resource type      | Every value is a known type (see below).                | high       |
+| 0x16   | u16      | UNKNOWN, always 0  | The value is 0 in all 4 packs.                          | low        |
 
 The resource table has one 8-byte entry per resource, in the same order as the key table.
 
-| Offset | Type | Meaning                            | Evidence                                    | Confidence |
-| ------ | ---- | ---------------------------------- | ------------------------------------------- | ---------- |
-| 0x00   | u32  | Offset of the resource data        | Every resource lies inside its archive.     | high       |
-| 0x04   | u32  | Size of the resource data in bytes | Every resource lies inside its archive.     | high       |
+| Offset | Type | Meaning                            | Evidence                                | Confidence |
+| ------ | ---- | ---------------------------------- | --------------------------------------- | ---------- |
+| 0x00   | u32  | Offset of the resource data        | Every resource lies inside its archive. | high       |
+| 0x04   | u32  | Size of the resource data in bytes | Every resource lies inside its archive. | high       |
 
 In all 4 packs, resource data starts directly after the resource table, is stored in table order without gaps, and ends exactly at the end of the file. The data is not compressed.
 
 The contents of the texture packs are listed below.
 
-| Pack             | Resources | Contents                                                                                     |
-| ---------------- | --------- | -------------------------------------------------------------------------------------------- |
-| swpc_tex_tpa.erf | 3,294     | 3,294 TPC textures at full resolution.                                                       |
-| swpc_tex_tpb.erf | 3,294     | The same 3,294 names as tpa. 2,724 are half the width and height of their tpa version; 570 are the same size. |
+| Pack             | Resources | Contents                                                                                                          |
+| ---------------- | --------- | ----------------------------------------------------------------------------------------------------------------- |
+| swpc_tex_tpa.erf | 3,294     | 3,294 TPC textures at full resolution.                                                                            |
+| swpc_tex_tpb.erf | 3,294     | The same 3,294 names as tpa. 2,724 are half the width and height of their tpa version; 570 are the same size.     |
 | swpc_tex_tpc.erf | 3,294     | The same 3,294 names as tpa. 2,712 are a quarter of the width and height, 12 are half, and 570 are the same size. |
-| swpc_tex_gui.erf | 1,571     | 1,570 TPC textures for the user interface and one resource of type 2022.                     |
+| swpc_tex_gui.erf | 1,571     | 1,570 TPC textures for the user interface and one resource of type 2022.                                          |
 
 The tpb and tpc packs are likely the lower texture quality settings. Only tpa and gui are converted, because tpb and tpc hold no additional images.
 
@@ -138,14 +138,14 @@ A RIM archive is a self-contained archive like ERF, with a simpler header and a 
 
 A RIM archive begins with a 120-byte header.
 
-| Offset | Type     | Meaning                         | Evidence                                                                                 | Confidence |
-| ------ | -------- | ------------------------------- | ---------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | char[8]  | Signature "RIM V1.0"            | Present in all 246 files.                                                                | high       |
-| 0x08   | u32      | UNKNOWN, always 0               | The value is 0 in all 246 files.                                                         | low        |
-| 0x0C   | u32      | Number of resources             | The table parses consistently in all 246 files. Four files have 0 resources.             | high       |
-| 0x10   | u32      | Offset of the resource table    | The value is 120 in all 246 files.                                                       | high       |
-| 0x14   | u32      | UNKNOWN flag                    | The value is 1 in the six files whose names end in "dx", such as `globaldx.rim`, and 0 in the other 240. | low        |
-| 0x18   | u8[96]   | Padding                         | All bytes are 0 in all 246 files.                                                        | medium     |
+| Offset | Type    | Meaning                      | Evidence                                                                                                 | Confidence |
+| ------ | ------- | ---------------------------- | -------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | char[8] | Signature "RIM V1.0"         | Present in all 246 files.                                                                                | high       |
+| 0x08   | u32     | UNKNOWN, always 0            | The value is 0 in all 246 files.                                                                         | low        |
+| 0x0C   | u32     | Number of resources          | The table parses consistently in all 246 files. Four files have 0 resources.                             | high       |
+| 0x10   | u32     | Offset of the resource table | The value is 120 in all 246 files.                                                                       | high       |
+| 0x14   | u32     | UNKNOWN flag                 | The value is 1 in the six files whose names end in "dx", such as `globaldx.rim`, and 0 in the other 240. | low        |
+| 0x18   | u8[96]  | Padding                      | All bytes are 0 in all 246 files.                                                                        | medium     |
 
 The resource table has one 32-byte entry per resource.
 
@@ -246,7 +246,7 @@ A mesh header is a 332-byte structure. It follows a node that has the 0x20 flag 
 | 0x144  | u32      | Offset of this mesh's vertex records in the MDX file                               | MDX positions match MDL positions for every vertex.                                                     | high       |
 | 0x148  | u32      | Offset of the vertex positions in the MDL file. Each position is three f32 values. | MDX positions match MDL positions for every vertex.                                                     | high       |
 
-The render flag at 0x139 is 0 or 1 in all 71,568 meshes. Of the 57,513 meshes with the value 1, 56,359 have a texture. Of the 14,055 meshes with the value 0, 13,381 have no texture. Most meshes with the value 0 are named with the suffix "_g" or are walkmeshes and boxes; these look like helper geometry for animation and collision. Rendering one head model (p_bastilah) with and without these meshes shows untextured plates over the face when they are included. The flag has not been tested in the game itself.
+The render flag at 0x139 is 0 or 1 in all 71,568 meshes. Of the 57,513 meshes with the value 1, 56,359 have a texture. Of the 14,055 meshes with the value 0, 13,381 have no texture. Most meshes with the value 0 are named with the suffix "\_g" or are walkmeshes and boxes; these look like helper geometry for animation and collision. Rendering one head model (p_bastilah) with and without these meshes shows untextured plates over the face when they are included. The flag has not been tested in the game itself.
 
 The remaining bytes of the mesh header are UNKNOWN.
 
@@ -282,27 +282,27 @@ All 11,452 TPC files in the four texture packs parse completely. In each file, t
 
 A TPC file begins with a 128-byte header.
 
-| Offset | Type    | Meaning                                                    | Evidence                                                                                                                                    | Confidence |
-| ------ | ------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | u32     | Size of the top mipmap level in bytes, or 0 if uncompressed | Matches the computed size in all plain and cube textures, with the exceptions described below.                                              | high       |
-| 0x04   | f32     | UNKNOWN, a value from 0 to 1                               | The value is 1.0 in 6,987 of 11,452 files. Every other value occurs in an encoding 4 texture, which has an alpha channel. It may be an alpha test threshold. | low        |
-| 0x08   | u16     | Width in pixels                                            | Decoded images are coherent at this width.                                                                                                   | high       |
-| 0x0A   | u16     | Height in pixels                                           | Decoded images are coherent at this height.                                                                                                  | high       |
-| 0x0C   | u8      | Encoding (see below)                                       | Every file decodes, and the data sizes match.                                                                                                | high       |
-| 0x0D   | u8      | Number of mipmap levels                                    | The data sizes match in all plain and cube textures.                                                                                        | high       |
-| 0x0E   | u8[114] | Padding                                                    | All bytes are 0 in all 11,452 files.                                                                                                         | high       |
+| Offset | Type    | Meaning                                                     | Evidence                                                                                                                                                     | Confidence |
+| ------ | ------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| 0x00   | u32     | Size of the top mipmap level in bytes, or 0 if uncompressed | Matches the computed size in all plain and cube textures, with the exceptions described below.                                                               | high       |
+| 0x04   | f32     | UNKNOWN, a value from 0 to 1                                | The value is 1.0 in 6,987 of 11,452 files. Every other value occurs in an encoding 4 texture, which has an alpha channel. It may be an alpha test threshold. | low        |
+| 0x08   | u16     | Width in pixels                                             | Decoded images are coherent at this width.                                                                                                                   | high       |
+| 0x0A   | u16     | Height in pixels                                            | Decoded images are coherent at this height.                                                                                                                  | high       |
+| 0x0C   | u8      | Encoding (see below)                                        | Every file decodes, and the data sizes match.                                                                                                                | high       |
+| 0x0D   | u8      | Number of mipmap levels                                     | The data sizes match in all plain and cube textures.                                                                                                         | high       |
+| 0x0E   | u8[114] | Padding                                                     | All bytes are 0 in all 11,452 files.                                                                                                                         | high       |
 
 The encoding byte and the size field at 0x00 together select the pixel format. The combinations are listed below.
 
-| Encoding | Size at 0x00 | Pixel format                                  | Files in tpa |
-| -------- | ------------ | --------------------------------------------- | ------------ |
-| 1        | 0            | 8-bit grayscale, 1 byte per pixel             | 4            |
-| 2        | 0            | RGB, 3 bytes per pixel                        | 9            |
-| 4        | 0            | RGBA, 4 bytes per pixel                       | 244          |
-| 2        | nonzero      | DXT1, 8 bytes per 4x4 block                   | 1,743        |
-| 4        | nonzero      | DXT5, 16 bytes per 4x4 block                  | 1,294        |
+| Encoding | Size at 0x00 | Pixel format                      | Files in tpa |
+| -------- | ------------ | --------------------------------- | ------------ |
+| 1        | 0            | 8-bit grayscale, 1 byte per pixel | 4            |
+| 2        | 0            | RGB, 3 bytes per pixel            | 9            |
+| 4        | 0            | RGBA, 4 bytes per pixel           | 244          |
+| 2        | nonzero      | DXT1, 8 bytes per 4x4 block       | 1,743        |
+| 4        | nonzero      | DXT5, 16 bytes per 4x4 block      | 1,294        |
 
-DXT1 and DXT5 are the standard S3 block compression formats. A mipmap level of width w and height h occupies ceil(w/4) * ceil(h/4) blocks, with at least one block.
+DXT1 and DXT5 are the standard S3 block compression formats. A mipmap level of width w and height h occupies ceil(w/4) \* ceil(h/4) blocks, with at least one block.
 
 For DXT1 textures of 4x4 pixels or smaller, the size field holds 16, but one block is 8 bytes. All such files still end exactly after the computed mipmap chain, so the converter accepts this value. This affects 4 files in tpa, 8 in tpb and 11 in tpc. The reason is not known.
 
@@ -314,7 +314,7 @@ The pixel data starts at offset 128. Each sub-image is stored as its full mipmap
 | -------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------ |
 | plain    | Neither of the cases below                                  | One image with the header's mipmap count.                                                                                  | 3,191        |
 | cube     | Height equals 6 times the width                             | Six square faces of width x width pixels, each with the header's mipmap count. The TXI holds "cube 1".                     | 63           |
-| flipbook | The size field exceeds the top level size of the full image | numx * numy animation frames. Each frame is (width / numx) x (height / numy) pixels with a full mipmap chain down to 1x1. | 40           |
+| flipbook | The size field exceeds the top level size of the full image | numx \* numy animation frames. Each frame is (width / numx) x (height / numy) pixels with a full mipmap chain down to 1x1. | 40           |
 
 In a flipbook texture, numx and numy come from the TXI trailer, which also holds "proceduretype cycle" and a frame rate ("fps"). The header's mipmap count is 1 and does not describe the frames. The size field equals the total size of all frames and their mipmaps. For example, c_holododonna is 512x512 DXT1 with numx 2 and numy 2. Each 256x256 frame with 9 mipmap levels is 43,704 bytes, and the four frames total 174,816 bytes, which equals its size field. The converter places the frames in a grid, frame 0 at the top left, in row order. That order is an assumption. Each frame is a complete texture, so a model that uses a flipbook texture appears with the texture tiled 2x2 or more in the converted output.
 
@@ -356,42 +356,42 @@ The counts in the sections below were measured on the 84 `gui.bif` files and do 
 
 A GUI file begins with a 56-byte header. After the signature, it consists of six pairs of u32 values, and each pair locates one region of the file.
 
-| Offset | Type    | Meaning                                    | Evidence                                                                 | Confidence |
-| ------ | ------- | ------------------------------------------ | ------------------------------------------------------------------------ | ---------- |
-| 0x00   | char[4] | Content type, "GUI "                       | Present in all 84 files.                                                 | high       |
-| 0x04   | char[4] | Version, "V3.2"                            | Present in all 84 files.                                                 | high       |
-| 0x08   | u32     | Offset of the struct table (always 56)     | The value is 56 in all 84 files.                                         | high       |
-| 0x0C   | u32     | Number of structs                          | The next region starts at this offset plus 12 bytes per struct.          | high       |
-| 0x10   | u32     | Offset of the field table                  | Equals the struct table offset plus 12 times the struct count.           | high       |
-| 0x14   | u32     | Number of fields                           | The next region starts at this offset plus 12 bytes per field.           | high       |
-| 0x18   | u32     | Offset of the label table                  | Equals the field table offset plus 12 times the field count.             | high       |
-| 0x1C   | u32     | Number of labels                           | The next region starts at this offset plus 16 bytes per label.           | high       |
-| 0x20   | u32     | Offset of the field data region            | Equals the label table offset plus 16 times the label count.             | high       |
-| 0x24   | u32     | Size of the field data region in bytes     | The next region starts at its end.                                       | high       |
-| 0x28   | u32     | Offset of the field index region           | Directly follows the field data region.                                  | high       |
-| 0x2C   | u32     | Size of the field index region in bytes    | Equals 4 times the field count in all 84 files.                          | high       |
-| 0x30   | u32     | Offset of the list index region            | Directly follows the field index region.                                 | high       |
-| 0x34   | u32     | Size of the list index region in bytes     | The region ends exactly at the end of all 84 files.                      | high       |
+| Offset | Type    | Meaning                                 | Evidence                                                        | Confidence |
+| ------ | ------- | --------------------------------------- | --------------------------------------------------------------- | ---------- |
+| 0x00   | char[4] | Content type, "GUI "                    | Present in all 84 files.                                        | high       |
+| 0x04   | char[4] | Version, "V3.2"                         | Present in all 84 files.                                        | high       |
+| 0x08   | u32     | Offset of the struct table (always 56)  | The value is 56 in all 84 files.                                | high       |
+| 0x0C   | u32     | Number of structs                       | The next region starts at this offset plus 12 bytes per struct. | high       |
+| 0x10   | u32     | Offset of the field table               | Equals the struct table offset plus 12 times the struct count.  | high       |
+| 0x14   | u32     | Number of fields                        | The next region starts at this offset plus 12 bytes per field.  | high       |
+| 0x18   | u32     | Offset of the label table               | Equals the field table offset plus 12 times the field count.    | high       |
+| 0x1C   | u32     | Number of labels                        | The next region starts at this offset plus 16 bytes per label.  | high       |
+| 0x20   | u32     | Offset of the field data region         | Equals the label table offset plus 16 times the label count.    | high       |
+| 0x24   | u32     | Size of the field data region in bytes  | The next region starts at its end.                              | high       |
+| 0x28   | u32     | Offset of the field index region        | Directly follows the field data region.                         | high       |
+| 0x2C   | u32     | Size of the field index region in bytes | Equals 4 times the field count in all 84 files.                 | high       |
+| 0x30   | u32     | Offset of the list index region         | Directly follows the field index region.                        | high       |
+| 0x34   | u32     | Size of the list index region in bytes  | The region ends exactly at the end of all 84 files.             | high       |
 
 ## Struct, field and label tables
 
 A struct is a group of fields. Struct 0 is the root of the tree. Each entry of the struct table is 12 bytes.
 
-| Offset | Type | Meaning                                                    | Evidence                                                                                                        | Confidence |
-| ------ | ---- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | u32  | Struct type                                                | 0xFFFFFFFF on all 84 roots, 14 on 17 structs in `debug.gui`, and 0 on all 10,950 others. The meaning of the value is UNKNOWN. | low        |
-| 0x04   | u32  | Byte offset into the field index region                    | The region holds the struct's field indices at this offset, and all structs together cover it exactly.          | high       |
-| 0x08   | u32  | Number of fields                                           | Every struct has between 4 and 14 fields, and the indices it reads are all valid.                              | high       |
+| Offset | Type | Meaning                                 | Evidence                                                                                                                      | Confidence |
+| ------ | ---- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | u32  | Struct type                             | 0xFFFFFFFF on all 84 roots, 14 on 17 structs in `debug.gui`, and 0 on all 10,950 others. The meaning of the value is UNKNOWN. | low        |
+| 0x04   | u32  | Byte offset into the field index region | The region holds the struct's field indices at this offset, and all structs together cover it exactly.                        | high       |
+| 0x08   | u32  | Number of fields                        | Every struct has between 4 and 14 fields, and the indices it reads are all valid.                                             | high       |
 
 No struct in these files has fewer than 4 fields. The encoding of a struct with one or zero fields is therefore UNKNOWN. The parser assumes that a struct with one field stores the field index directly at 0x04, but no file tests this assumption.
 
 Each entry of the field table is 12 bytes.
 
-| Offset | Type | Meaning                                                      | Evidence                                                        | Confidence |
-| ------ | ---- | ------------------------------------------------------------ | --------------------------------------------------------------- | ---------- |
-| 0x00   | u32  | Field type (see below)                                       | Nine values occur. Each decodes consistently across all files.  | high       |
-| 0x04   | u32  | Index into the label table                                   | Every index is valid, and every label is used.                  | high       |
-| 0x08   | u32  | The value itself, or an offset or index, depending on type   | See the field type table.                                       | high       |
+| Offset | Type | Meaning                                                    | Evidence                                                       | Confidence |
+| ------ | ---- | ---------------------------------------------------------- | -------------------------------------------------------------- | ---------- |
+| 0x00   | u32  | Field type (see below)                                     | Nine values occur. Each decodes consistently across all files. | high       |
+| 0x04   | u32  | Index into the label table                                 | Every index is valid, and every label is used.                 | high       |
+| 0x08   | u32  | The value itself, or an offset or index, depending on type | See the field type table.                                      | high       |
 
 Each entry of the label table is a 16-byte name, padded with NUL bytes, for example "EXTENT". No struct contains the same label twice. A label does not determine the field type: "TEXT" is a string in 1,631 fields and a struct in 2,016 fields.
 
@@ -399,17 +399,17 @@ Each entry of the label table is a 16-byte name, padded with NUL bytes, for exam
 
 The nine field types that occur are listed below. Types 0, 4, 5 and 8 store their value in the field entry itself. The others store an offset or an index there.
 
-| Type | Count  | Value                                                                                           | Evidence                                                                                   | Confidence |
-| ---- | ------ | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------- |
-| 0    | 8,002  | u8 stored in the field entry                                                                    | Values are only 0, 1 and 2. The labels are flags such as PULSING and Obj_Locked.          | medium     |
-| 4    | 2,016  | u32 stored in the field entry                                                                   | Used only by STRREF. Values range up to 49,116, and 0xFFFFFFFF marks no string.            | medium     |
-| 5    | 32,222 | s32 stored in the field entry                                                                   | Coordinates such as LEFT and WIDTH are plausible, and Obj_ParentID uses -1.                | high       |
-| 8    | 250    | f32 stored in the field entry                                                                   | ALPHA is always 1.0 and ROTATE is always 0.0.                                              | medium     |
-| 10   | 6,235  | String: offset into field data, where a u32 length is followed by that many characters          | Decodes to tags and text such as "LBL_BARKTEXT". The data region is covered exactly.      | high       |
-| 11   | 12,484 | Resref: offset into field data, where a u8 length (at most 16) is followed by that many characters | Decodes to texture and font names that exist in the game files (see below).               | high       |
-| 14   | 8,868  | Index into the struct table                                                                     | Every non-root struct is referenced exactly once by a type 14 or type 15 field.            | high       |
-| 15   | 84     | List: offset into the list index region, where a u32 count is followed by that many struct indices | Used only by CONTROLS. The list index region is covered exactly.                           | high       |
-| 17   | 5,549  | Vector: offset into field data, where three f32 values are stored                               | Used only by COLOR. Components lie between 0 and 1, except the value (-1, -1, -1).         | high       |
+| Type | Count  | Value                                                                                              | Evidence                                                                             | Confidence |
+| ---- | ------ | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------- |
+| 0    | 8,002  | u8 stored in the field entry                                                                       | Values are only 0, 1 and 2. The labels are flags such as PULSING and Obj_Locked.     | medium     |
+| 4    | 2,016  | u32 stored in the field entry                                                                      | Used only by STRREF. Values range up to 49,116, and 0xFFFFFFFF marks no string.      | medium     |
+| 5    | 32,222 | s32 stored in the field entry                                                                      | Coordinates such as LEFT and WIDTH are plausible, and Obj_ParentID uses -1.          | high       |
+| 8    | 250    | f32 stored in the field entry                                                                      | ALPHA is always 1.0 and ROTATE is always 0.0.                                        | medium     |
+| 10   | 6,235  | String: offset into field data, where a u32 length is followed by that many characters             | Decodes to tags and text such as "LBL_BARKTEXT". The data region is covered exactly. | high       |
+| 11   | 12,484 | Resref: offset into field data, where a u8 length (at most 16) is followed by that many characters | Decodes to texture and font names that exist in the game files (see below).          | high       |
+| 14   | 8,868  | Index into the struct table                                                                        | Every non-root struct is referenced exactly once by a type 14 or type 15 field.      | high       |
+| 15   | 84     | List: offset into the list index region, where a u32 count is followed by that many struct indices | Used only by CONTROLS. The list index region is covered exactly.                     | high       |
+| 17   | 5,549  | Vector: offset into field data, where three f32 values are stored                                  | Used only by COLOR. Components lie between 0 and 1, except the value (-1, -1, -1).   | high       |
 
 The type numbers between 0 and 17 that do not occur (1, 2, 3, 6, 7, 9, 12, 13 and 16) are UNKNOWN.
 
@@ -421,17 +421,17 @@ EXTENT is a struct with LEFT, TOP, WIDTH and HEIGHT in pixels. The root EXTENT o
 
 The control kind is given by CONTROLTYPE. The correspondence below comes from the prefixes of the controls' TAG names and from where each kind appears. It has not been confirmed in the running game.
 
-| CONTROLTYPE | Count | Probable kind     | Evidence                                                               | Confidence |
-| ----------- | ----- | ----------------- | ---------------------------------------------------------------------- | ---------- |
-| 2           | 84    | Panel             | Occurs only on the root struct of every file.                          | high       |
-| 4           | 1,155 | Label             | 1,033 tags begin with "LBL_".                                          | medium     |
-| 5           | 77    | UNKNOWN           | Tags begin with "LBH_", "LBL_" or "LBLH_". The kind is UNKNOWN.        | low        |
-| 6           | 711   | Button            | 589 tags begin with "BTN_".                                            | medium     |
-| 7           | 73    | Toggle or check box | Tags begin with "TB_", "CB_" or "BTN_".                              | low        |
-| 8           | 7     | Slider            | Tags begin with "SLD_" or "SLI_".                                      | medium     |
-| 9           | 81    | Scroll bar        | Occurs only in the 81 SCROLLBAR structs.                               | high       |
-| 10          | 75    | Progress bar      | All 75 tags begin with "PB_".                                          | medium     |
-| 11          | 81    | List box          | 78 tags begin with "LB_". Only these controls have SCROLLBAR or PROTOITEM structs. | medium     |
+| CONTROLTYPE | Count | Probable kind       | Evidence                                                                            | Confidence |
+| ----------- | ----- | ------------------- | ----------------------------------------------------------------------------------- | ---------- |
+| 2           | 84    | Panel               | Occurs only on the root struct of every file.                                       | high       |
+| 4           | 1,155 | Label               | 1,033 tags begin with "LBL\_".                                                      | medium     |
+| 5           | 77    | UNKNOWN             | Tags begin with "LBH*", "LBL*" or "LBLH\_". The kind is UNKNOWN.                    | low        |
+| 6           | 711   | Button              | 589 tags begin with "BTN\_".                                                        | medium     |
+| 7           | 73    | Toggle or check box | Tags begin with "TB*", "CB*" or "BTN\_".                                            | low        |
+| 8           | 7     | Slider              | Tags begin with "SLD*" or "SLI*".                                                   | medium     |
+| 9           | 81    | Scroll bar          | Occurs only in the 81 SCROLLBAR structs.                                            | high       |
+| 10          | 75    | Progress bar        | All 75 tags begin with "PB\_".                                                      | medium     |
+| 11          | 81    | List box            | 78 tags begin with "LB\_". Only these controls have SCROLLBAR or PROTOITEM structs. | medium     |
 
 All 81 list boxes have a SCROLLBAR struct. Eighty of them also have a PROTOITEM struct, which is probably the template control for one row. The exception is LB_DESC in `upgrade.gui`. The SCROLLBAR holds DIR and THUMB structs that describe its arrow and thumb images.
 
@@ -472,3 +472,57 @@ The ADPCM data follows the standard WAV variant of IMA ADPCM. The decoder is `sc
 The audio is split into blocks of 2,048 bytes. Each block holds 2,041 samples per channel. A block begins with a 4-byte header for each channel: an s16 starting sample, a u8 step index, and a zero byte. The rest of the block alternates between channels in groups of 4 bytes, which hold 8 samples. Within each byte the low 4 bits come first. The "fact" chunk stores the total number of samples per channel.
 
 The decoder was checked as follows. Each block header stores the sample the encoder expected next. In all 47 files the difference between that sample and the last decoded sample of the previous block is about the same as the difference between any two neighbouring samples. When the order of the 4-bit values is swapped as a test, this difference grows 8 to 14 times.
+
+# Movies: movies/\*.bik
+
+The game's 61 cutscenes and logo screens are in `movies/`. They are Bink video files, a format by RAD Game Tools that the game plays with `binkw32.dll`. All 61 files begin with the signature "BIKi", which `file` identifies as Bink Video revision i. The parser is `scripts/bink.js`, and the converter is the `movies` stage of `scripts/convert_all.js`. All 61 files pass the parser's check: the header size field matches the file size, the frame index ends exactly at the end of the file, the largest-frame field equals the largest frame, and every audio packet fits inside its frame.
+
+The video and audio compression schemes are not documented here. The conversion uses ffmpeg's decoders, `binkvideo` and `binkaudio_dct`, which decode all 61 files.
+
+## Header
+
+The file begins with a 44-byte header. This table describes it.
+
+| Offset | Type    | Meaning                            | Evidence                                                                                             | Confidence |
+| ------ | ------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | char[4] | Signature "BIKi"                   | Present in all 61 files.                                                                             | high       |
+| 0x04   | u32     | File size minus 8                  | Matches the file size in all 61 files.                                                               | high       |
+| 0x08   | u32     | Number of frames (96 to 3,606)     | The frame index has this many entries plus one, and ffprobe counts this many frames in every output. | high       |
+| 0x0C   | u32     | Size of the largest frame in bytes | Equals the largest frame in all 61 files.                                                            | high       |
+| 0x10   | u32     | UNKNOWN                            | Equals the number of frames in all 61 files. Its purpose is not known.                               | low        |
+| 0x14   | u32     | Width in pixels (640)              | Matches `file` and ffprobe in all 61 files.                                                          | high       |
+| 0x18   | u32     | Height in pixels (272, 360 or 480) | Matches `file` and ffprobe in all 61 files.                                                          | high       |
+| 0x1C   | u32     | Frame rate numerator (2,997)       | Frame count divided by this rate equals the audio duration in all 60 files with audio.               | high       |
+| 0x20   | u32     | Frame rate denominator (100)       | As above. The rate is 29.97 frames per second.                                                       | high       |
+| 0x24   | u32     | Video flags                        | The value is 0 in all 61 files. The meaning of individual bits is UNKNOWN.                           | low        |
+| 0x28   | u32     | Number of audio tracks (0 or 1)    | `legal.bik` has 0 and ffprobe finds no audio in it. The other 60 files have 1.                       | high       |
+
+Three arrays follow the header, each with one entry per audio track. Their offsets below assume one track, which is the case in 60 files. The frame index starts after them, at 44 + 12 × (number of tracks).
+
+| Offset | Type | Meaning                                                    | Evidence                                                                         | Confidence |
+| ------ | ---- | ---------------------------------------------------------- | -------------------------------------------------------------------------------- | ---------- |
+| 0x2C   | u32  | Largest decoded audio packet in bytes (138,240 or 145,920) | Equals the largest decoded size declared by the track's packets in all 60 files. | high       |
+| 0x30   | u16  | Sample rate in Hz (44,100, or 48,000 in `56b.bik`)         | Matches ffprobe in all 60 files.                                                 | high       |
+| 0x32   | u16  | Audio flags (0x7000)                                       | See below.                                                                       | low        |
+| 0x34   | u32  | Track ID (0)                                               | The value is 0 in all 60 files. That it is an ID is a hypothesis.                | low        |
+
+The audio flags are 0x7000 in all 60 files. ffprobe reports every track as stereo and decodes it with the DCT (discrete cosine transform) variant of Bink audio. Each packet's decoded size matches 16-bit stereo samples, as described below. The value is therefore consistent with 0x1000 selecting DCT audio, 0x2000 stereo and 0x4000 16-bit samples. Every file has the same value, so the files cannot show which bit means what.
+
+## Frame index
+
+The frame index holds one u32 entry per frame plus one final entry. Bit 0 of an entry is set for a keyframe, and the remaining bits give the frame's offset from the start of the file. The final entry is the end of the last frame and equals the file size in all 61 files. Each frame ends where the next begins. The first frame begins immediately after the index in all 61 files.
+
+Only the first frame of each file is marked as a keyframe. Every later frame therefore depends on earlier frames.
+
+## Frame
+
+A frame begins with one audio packet per track, followed by the video data.
+
+| Offset | Type  | Meaning                                             | Evidence                                              | Confidence |
+| ------ | ----- | --------------------------------------------------- | ----------------------------------------------------- | ---------- |
+| 0x00   | u32   | Audio packet size in bytes, not counting this field | Every packet ends inside its frame in all 61 files.   | high       |
+| 0x04   | u32   | Decoded size of the packet in bytes                 | Present when the packet size is 4 or more. See below. | high       |
+| 0x08   | bytes | Compressed audio                                    | ffmpeg decodes it. The layout is not documented here. | UNKNOWN    |
+| varies | bytes | Compressed video, to the end of the frame           | ffmpeg decodes it. The layout is not documented here. | UNKNOWN    |
+
+The decoded sizes of a track's packets add up to the length of the movie. Dividing the sum by 4 bytes per stereo sample and by the sample rate gives the frame count divided by the frame rate to within 0.0001 seconds, in the 4 files checked by hand: `05_9.bik`, `01a.bik`, `56b.bik` and `07_2.bik`. The conversion repeats this check for all 60 files with audio, as described below. ffmpeg's decoder produces about 0.03 seconds more audio than the packets declare. The cause is not known; it may be padding in the last audio block.
