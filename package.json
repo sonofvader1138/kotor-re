@@ -1,0 +1,13 @@
+{
+	"name": "kotor-re",
+	"version": "1.0.0",
+	"description": "Reverse engineering SW:KOTOR",
+	"license": "ISC",
+	"author": "",
+	"type": "commonjs",
+	"main": "index.js",
+	"scripts": {
+		"convert": "node scripts/convert.js",
+		"verify": "node scripts/verify.js"
+	}
+}

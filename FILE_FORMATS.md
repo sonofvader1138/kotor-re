@@ -334,7 +334,7 @@ The PNG files keep their alpha channel, but the MTL files do not declare it as t
 
 # Images: TGA in the BIF archives
 
-Resource type 3 is a TGA image, the uncompressed image format defined by Truevision. The BIF archives hold 5,601 of them. They matter because 5,586 of them are lightmaps, the precomputed lighting that the game blends over area textures. The converter is `scripts/tga.js`, called by the `tga` stage of `scripts/convert-all.js`. It writes 8-bit PNG files with the same channels as the TGA.
+Resource type 3 is a TGA image, the uncompressed image format defined by Truevision. The BIF archives hold 5,601 of them. They matter because 5,586 of them are lightmaps, the precomputed lighting that the game blends over area textures. The converter is `scripts/tga.js`, called by the `tga` stage of `scripts/convert.js`. It writes 8-bit PNG files with the same channels as the TGA.
 
 The images are in three groups. The table below lists each group, its archives and its output directory.
 
@@ -397,7 +397,7 @@ The lightmap archives also hold 112 resources of type 3001, one per area, named 
 
 # User interface layouts: GUI
 
-A GUI file (resource type 2047) describes one screen or panel of the user interface. It lists the screen's controls, such as buttons, labels and list boxes, with their position, size, textures, font and text. The game contains 91 GUI resources. 84 are in `data/gui.bif`, which holds nothing else, and 7 are in `patch.erf`. No other archive holds one: `chitin.key` lists type 2047 only for `gui.bif`, the 246 RIM files hold none, and the signature "GUI V3.2" occurs in no other file. The reader is `readGff` in `scripts/kotor.js`, and the converter is `scripts/gui2json.js`. The converter writes one JSON file per resource, to `assets/data/gui/` for `gui.bif` and to `assets/patch/` for `patch.erf`.
+A GUI file (resource type 2047) describes one screen or panel of the user interface. It lists the screen's controls, such as buttons, labels and list boxes, with their position, size, textures, font and text. The game contains 91 GUI resources. 84 are in `data/gui.bif`, which holds nothing else, and 7 are in `patch.erf`. No other archive holds one: `chitin.key` lists type 2047 only for `gui.bif`, the 246 RIM files hold none, and the signature "GUI V3.2" occurs in no other file. The reader is `readGff` in `scripts/kotor.js`, and the converter is the `gui` stage of `scripts/convert.js`. It writes one JSON file per resource, to `assets/data/gui/` for `gui.bif` and to `assets/patch/` for `patch.erf`.
 
 ## Resources in patch.erf
 
@@ -538,7 +538,7 @@ The decoder was checked as follows. Each block header stores the sample the enco
 
 # Sound effects and voices: streamsounds/\*.wav
 
-The folder `streamsounds/` holds 970 files with the extension `.wav`. They are combat voice lines, creature sounds, ambient loops and a few music stingers that the game streams from disk instead of loading from the BIF archives. Every file uses Layout B from the music section: the same 470-byte MP3 stub, followed by a complete WAV file at offset 0x1D6 (470). No file uses Layout A, and none uses ADPCM. The converter `scripts/convert-all.js` (stage `sounds`) strips the stub and writes the embedded WAV unchanged to `assets/streamsounds/`.
+The folder `streamsounds/` holds 970 files with the extension `.wav`. They are combat voice lines, creature sounds, ambient loops and a few music stingers that the game streams from disk instead of loading from the BIF archives. Every file uses Layout B from the music section: the same 470-byte MP3 stub, followed by a complete WAV file at offset 0x1D6 (470). No file uses Layout A, and none uses ADPCM. The converter `scripts/convert.js` (stage `sounds`) strips the stub and writes the embedded WAV unchanged to `assets/streamsounds/`.
 
 ## Embedded WAV
 
@@ -594,7 +594,7 @@ All 970 files pass the parser: the chunk walk of each embedded WAV ends exactly 
 
 # Movies: movies/\*.bik
 
-The game's 61 cutscenes and logo screens are in `movies/`. They are Bink video files, a format by RAD Game Tools that the game plays with `binkw32.dll`. All 61 files begin with the signature "BIKi", which `file` identifies as Bink Video revision i. The parser is `scripts/bink.js`, and the converter is the `movies` stage of `scripts/convert-all.js`. All 61 files pass the parser's check: the header size field matches the file size, the frame index ends exactly at the end of the file, the largest-frame field equals the largest frame, and every audio packet fits inside its frame.
+The game's 61 cutscenes and logo screens are in `movies/`. They are Bink video files, a format by RAD Game Tools that the game plays with `binkw32.dll`. All 61 files begin with the signature "BIKi", which `file` identifies as Bink Video revision i. The parser is `scripts/bink.js`, and the converter is the `movies` stage of `scripts/convert.js`. All 61 files pass the parser's check: the header size field matches the file size, the frame index ends exactly at the end of the file, the largest-frame field equals the largest frame, and every audio packet fits inside its frame.
 
 The video and audio compression schemes are not documented here. The conversion uses ffmpeg's decoders, `binkvideo` and `binkaudio_dct`, which decode all 61 files.
 
