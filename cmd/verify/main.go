@@ -21,8 +21,11 @@
 // modules: jq must parse each JSON file. No independent tool reads NCS, so each script listing is
 // assembled again from its text and must equal the source script byte for byte. The assembler shares only
 // the opcode, type and operand tables with the disassembler.
+// rims: assimp must load each OBJ and ffprobe must read each WAV as 16-bit PCM. Each 2DA CSV file and the
+// string numbers of each SSF JSON file, read with jq, must build again into the source resource. jq must
+// parse each UTI JSON file, and each script listing must assemble to the source script.
 //
-// usage: go run ./cmd/verify [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules]   (default: all)
+// usage: go run ./cmd/verify [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules] [rims]   (default: all)
 package main
 
 import (
@@ -194,6 +197,35 @@ var (
 	facesPattern  = regexp.MustCompile(`(?m)^Faces:\s+(\d+)`)
 )
 
+// assimpObj loads one OBJ file with assimp and returns its report line. The label is the file name
+// relative to dir.
+func assimpObj(dir, file string) []string {
+	objPath := filepath.Join(dir, file)
+	faces := 0
+	for text := range bytes.SplitSeq(kotor.ReadFile(objPath), []byte("\n")) {
+		if bytes.HasPrefix(text, []byte("f ")) {
+			faces++
+		}
+	}
+
+	result := kotor.Exec("assimp", []string{"info", objPath, "-r"}, nil)
+	meshes := meshesPattern.FindSubmatch(result.Stdout)
+	loaded := facesPattern.FindSubmatch(result.Stdout)
+	if result.Status != 0 || meshes == nil || loaded == nil {
+		return line(file + " FAIL: assimp: " + kotor.FirstLine(result.Stderr))
+	}
+
+	var errs []string
+	if count, _ := strconv.Atoi(string(meshes[1])); count == 0 {
+		errs = append(errs, "no meshes")
+	}
+	if count, _ := strconv.Atoi(string(loaded[1])); count != faces {
+		errs = append(errs, fmt.Sprintf("assimp loaded %s faces, file has %d", loaded[1], faces))
+	}
+
+	return line(fmt.Sprintf("%s meshes=%s faces=%s %s", file, meshes[1], loaded[1], kotor.Verdict(errs...)))
+}
+
 // Models: assets/data/models/*.obj
 func models(summary *kotor.Summary) {
 	if !kotor.Has("assimp") {
@@ -205,32 +237,7 @@ func models(summary *kotor.Summary) {
 	dir := filepath.Join(kotor.Assets, "data", "models")
 	var jobs []job
 	for _, file := range kotor.ListFiles(dir, ".obj", false) {
-		jobs = append(jobs, func() []string {
-			objPath := filepath.Join(dir, file)
-			faces := 0
-			for text := range bytes.SplitSeq(kotor.ReadFile(objPath), []byte("\n")) {
-				if bytes.HasPrefix(text, []byte("f ")) {
-					faces++
-				}
-			}
-
-			result := kotor.Exec("assimp", []string{"info", objPath, "-r"}, nil)
-			meshes := meshesPattern.FindSubmatch(result.Stdout)
-			loaded := facesPattern.FindSubmatch(result.Stdout)
-			if result.Status != 0 || meshes == nil || loaded == nil {
-				return line(file + " FAIL: assimp: " + kotor.FirstLine(result.Stderr))
-			}
-
-			var errs []string
-			if count, _ := strconv.Atoi(string(meshes[1])); count == 0 {
-				errs = append(errs, "no meshes")
-			}
-			if count, _ := strconv.Atoi(string(loaded[1])); count != faces {
-				errs = append(errs, fmt.Sprintf("assimp loaded %s faces, file has %d", loaded[1], faces))
-			}
-
-			return line(fmt.Sprintf("%s meshes=%s faces=%s %s", file, meshes[1], loaded[1], kotor.Verdict(errs...)))
-		})
+		jobs = append(jobs, func() []string { return assimpObj(dir, file) })
 	}
 	summary.Tally("assimp_models", pool(jobs))
 }
@@ -628,6 +635,212 @@ func modules(summary *kotor.Summary) {
 	summary.Tally("jq_modules", pool(jsonJobs))
 }
 
+// Rims: assets/rims/<archive>/ against rims/<archive>.rim. Each OBJ file must load with assimp, and each
+// WAV file must be read by ffprobe as 16-bit PCM. Each 2DA CSV file, read with Go's encoding/csv reader,
+// and each SSF JSON file, read with jq, must build again into the source resource byte for byte. Each UTI
+// JSON file must parse with jq, and each script listing must assemble to the source script.
+func rims(summary *kotor.Summary) {
+	log("rims...")
+	src := filepath.Join(kotor.Game, "rims")
+	out := filepath.Join(kotor.Assets, "rims")
+	var objJobs, wavJobs, jsonJobs []job
+	var tableReport, scriptReport []string
+	for _, archive := range kotor.ListFiles(src, ".rim", false) {
+		name := strings.TrimSuffix(archive, filepath.Ext(archive))
+		rim, problem := kotor.ReadRim(kotor.ReadFile(filepath.Join(src, archive)))
+		if problem != "" {
+			tableReport = append(tableReport, archive+" FAIL: "+problem)
+			continue
+		}
+
+		dir := filepath.Join(out, name)
+		for _, file := range kotor.ListFiles(dir, ".obj", false) {
+			objJobs = append(objJobs, func() []string { return assimpObj(out, filepath.Join(name, file)) })
+		}
+
+		for _, entry := range rim.Entries {
+			label := filepath.Join(name, entry.Resref)
+			path := filepath.Join(out, label)
+			switch entry.Ext {
+			case "wav":
+				wavJobs = append(wavJobs, func() []string {
+					result := kotor.Exec("ffprobe", []string{"-v", "error", "-show_entries", "stream=codec_name",
+						"-of", "csv=p=0", path + ".wav"}, nil)
+					codec := strings.TrimSpace(string(result.Stdout))
+					if result.Status != 0 || strings.TrimSpace(result.Stderr) != "" {
+						return line(label + ".wav FAIL: " + kotor.FirstLine(result.Stderr))
+					}
+					if codec != pcmCodec {
+						return line(label + ".wav FAIL: codec " + codec)
+					}
+					return line(label + ".wav PASS")
+				})
+
+			case "2da":
+				tableReport = append(tableReport, label+".2da.csv "+kotor.Verdict(checkTwoDaCsv(path+".2da.csv", entry.Data)))
+
+			case "ssf":
+				jsonJobs = append(jsonJobs, func() []string {
+					return line(label + ".ssf.json " + kotor.Verdict(checkSsfJson(path+".ssf.json", entry.Data)))
+				})
+
+			case "ncs":
+				scriptReport = append(scriptReport, label+".ncs.txt "+kotor.Verdict(checkNcsListing(path+".ncs.txt", entry.Data)))
+
+			case "uti":
+				jsonJobs = append(jsonJobs, func() []string {
+					result := kotor.Exec("jq", []string{"empty", path + ".uti.json"}, nil)
+					if result.Status == 0 {
+						return line(label + ".uti.json PASS")
+					}
+					return line(label + ".uti.json FAIL: jq: " + kotor.FirstLine(result.Stderr))
+				})
+			}
+		}
+	}
+	summary.Tally("csv_rims", tableReport)
+	summary.Tally("ncs_rims", scriptReport)
+
+	for _, tool := range []struct {
+		program, report string
+		jobs            []job
+	}{{"assimp", "assimp_rims", objJobs}, {"ffprobe", "ffprobe_rims", wavJobs}, {"jq", "jq_rims", jsonJobs}} {
+		if !kotor.Has(tool.program) {
+			summary.Note(tool.program + " missing: " + tool.report + " UNVERIFIED")
+			continue
+		}
+		summary.Tally(tool.report, pool(tool.jobs))
+	}
+}
+
+// pcmCodec is ffprobe's name for 16-bit little-endian PCM.
+const pcmCodec = "pcm_s16le"
+
+// Binary 2DA layout, rebuilt by checkTwoDaCsv independently of the parser in kotor.
+const (
+	twoDaSignature    = "2DA V2.b\n"
+	twoDaSeparatorTab = '\t'
+	twoDaSeparatorNul = 0
+)
+
+// checkTwoDaCsv reads a converted 2DA table and builds the binary table again: the column labels, the row
+// count, the row labels, one u16 offset per cell, the u16 size of the string data, and the string data,
+// where each distinct string is stored once in the order of its first cell. The separator after each label
+// is the one the source uses after its first column label. It returns an error message when the result
+// differs from the source, or an empty string when it matches.
+func checkTwoDaCsv(path string, source []byte) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err.Error()
+	}
+
+	rows, err := csv.NewReader(bytes.NewReader(data)).ReadAll()
+	if err != nil {
+		return err.Error()
+	}
+	if len(rows) == 0 || len(rows[0]) < 2 || rows[0][0] != "" {
+		return "bad header"
+	}
+
+	columns := rows[0][1:]
+	separatorAt := len(twoDaSignature) + len(columns[0])
+	if separatorAt >= len(source) {
+		return "source too short"
+	}
+	separator := source[separatorAt]
+	if separator != twoDaSeparatorTab && separator != twoDaSeparatorNul {
+		return fmt.Sprintf("source separator %d", separator)
+	}
+
+	latin1 := func(text string) ([]byte, bool) {
+		encoded := []byte{}
+		for _, char := range text {
+			if char > 0xff {
+				return nil, false
+			}
+			encoded = append(encoded, byte(char))
+		}
+		return encoded, true
+	}
+
+	built := []byte(twoDaSignature)
+	for _, label := range columns {
+		encoded, ok := latin1(label)
+		if !ok {
+			return "column label outside Latin-1: " + label
+		}
+		built = append(append(built, encoded...), separator)
+	}
+	built = append(built, twoDaSeparatorNul)
+	built = binary.LittleEndian.AppendUint32(built, uint32(len(rows)-1))
+
+	var cells []string
+	for _, row := range rows[1:] {
+		encoded, ok := latin1(row[0])
+		if !ok {
+			return "row label outside Latin-1: " + row[0]
+		}
+		built = append(append(built, encoded...), separator)
+		cells = append(cells, row[1:]...)
+	}
+
+	offsets := map[string]int{}
+	var stringData []byte
+	for _, cell := range cells {
+		if _, seen := offsets[cell]; seen {
+			continue
+		}
+		encoded, ok := latin1(cell)
+		if !ok {
+			return "cell outside Latin-1: " + cell
+		}
+
+		offsets[cell] = len(stringData)
+		stringData = append(append(stringData, encoded...), twoDaSeparatorNul)
+	}
+
+	for _, cell := range cells {
+		built = binary.LittleEndian.AppendUint16(built, uint16(offsets[cell]))
+	}
+	built = binary.LittleEndian.AppendUint16(built, uint16(len(stringData)))
+	built = append(built, stringData...)
+
+	if !bytes.Equal(built, source) {
+		return fmt.Sprintf("built %d bytes differ from the %d source bytes", len(built), len(source))
+	}
+	return ""
+}
+
+// checkSsfJson reads the string numbers of a converted sound set with jq and builds the sound set again: the
+// signature, the slot table offset 12, and one u32 per slot, 0xFFFFFFFF for null. It returns an error
+// message when the result differs from the source, or an empty string when it matches.
+func checkSsfJson(path string, source []byte) string {
+	result := kotor.Exec("jq", []string{"-r", ".slots[].strref", path}, nil)
+	if result.Status != 0 {
+		return "jq: " + kotor.FirstLine(result.Stderr)
+	}
+
+	built := []byte("SSF V1.1")
+	built = binary.LittleEndian.AppendUint32(built, kotor.SsfHeaderSize)
+	for _, text := range strings.Fields(string(result.Stdout)) {
+		if text == "null" {
+			built = binary.LittleEndian.AppendUint32(built, kotor.SsfEmpty)
+			continue
+		}
+
+		number, err := strconv.ParseUint(text, 10, 32)
+		if err != nil {
+			return "bad string number " + text
+		}
+		built = binary.LittleEndian.AppendUint32(built, uint32(number))
+	}
+
+	if !bytes.Equal(built, source) {
+		return fmt.Sprintf("built %d bytes differ from the %d source bytes", len(built), len(source))
+	}
+	return ""
+}
+
 // ncsMnemonics maps each listing mnemonic to its opcode and type.
 var ncsMnemonics = func() map[string][2]byte {
 	mnemonics := map[string][2]byte{}
@@ -747,6 +960,7 @@ var stages = []kotor.Stage{
 	{Name: "gui", Run: gui},
 	{Name: "lips", Run: lips},
 	{Name: "modules", Run: modules},
+	{Name: "rims", Run: rims},
 }
 
 func main() {

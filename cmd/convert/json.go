@@ -10,7 +10,7 @@ import (
 	"re/kotor"
 )
 
-// A GFF file (GUI layouts and module resources) becomes JSON with one-space indentation. Object keys keep the order of the fields in the file,
+// A GFF file (GUI layouts and module resources) becomes JSON indented with tabs. Object keys keep the order of the fields in the file,
 // and assigning an existing key keeps its position. NaN and infinities have no JSON form and become null.
 
 // orderedObject is a JSON object whose keys keep their insertion order.
@@ -148,5 +148,39 @@ func locStringJson(value kotor.GffFieldValue, tlk *kotor.Tlk, unresolved *int) *
 		}
 		object.set("substrings", substrings)
 	}
+	return object
+}
+
+// ssfJson turns a sound set into an object with "slots", an array with one object per slot in file order.
+// Each slot has "strref", the string number (null for an empty slot), and, when the number names an entry
+// of dialog.tlk, that entry's "text" and "sound" when they are not empty. unresolved counts the string
+// numbers that name no entry of dialog.tlk.
+func ssfJson(ssf *kotor.Ssf, tlk *kotor.Tlk, unresolved *int) *orderedObject {
+	slots := []any{}
+	for _, strref := range ssf.Slots {
+		slot := &orderedObject{}
+		switch {
+		case strref == kotor.SsfEmpty:
+			slot.set("strref", nil)
+
+		case int(strref) >= len(tlk.Entries):
+			slot.set("strref", number(float64(strref), 64))
+			*unresolved++
+
+		default:
+			slot.set("strref", number(float64(strref), 64))
+			entry := tlk.Entries[strref]
+			if entry.Text != "" {
+				slot.set("text", entry.Text)
+			}
+			if entry.Sound != "" {
+				slot.set("sound", entry.Sound)
+			}
+		}
+		slots = append(slots, slot)
+	}
+
+	object := &orderedObject{}
+	object.set("slots", slots)
 	return object
 }

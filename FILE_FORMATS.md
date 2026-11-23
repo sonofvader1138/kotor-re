@@ -150,18 +150,18 @@ The tpb and tpc packs are likely the lower texture quality settings. Only tpa an
 
 ## RIM archive
 
-A RIM archive is a self-contained archive like ERF, with a simpler header and a single table. All 246 files in `modules/` and `rims/` begin with "RIM V1.0". They hold 22,511 resources in total. The reader is `ReadRim` in `kotor/kotor.go`, and `cmd/unpack` writes the resources of one RIM archive to a folder. `ReadRim` checks that every resource lies inside the file in table order, starts on a multiple of 4 and does not overlap the next one, and that every byte between resources and after the last one is zero. All 246 files pass. The contents of the 234 archives in `modules/` are described in the section on modules below. The 12 archives in `rims/` have not been examined beyond their tables.
+A RIM archive is a self-contained archive like ERF, with a simpler header and a single table. All 246 files in `modules/` and `rims/` begin with "RIM V1.0". They hold 22,511 resources in total. The reader is `ReadRim` in `kotor/kotor.go`, and `cmd/unpack` writes the resources of one RIM archive to a folder. `ReadRim` checks that every resource lies inside the file in table order, starts on a multiple of 4 and does not overlap the next one, and that every byte between resources and after the last one is zero. All 246 files pass. The contents of the 234 archives in `modules/` are described in the section on modules below, and the contents of the 12 archives in `rims/` in the section "Global resources: rims/\*.rim".
 
 A RIM archive begins with a 120-byte header.
 
-| Offset | Type    | Meaning                      | Evidence                                                                                                 | Confidence |
-| ------ | ------- | ---------------------------- | -------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | char[8] | Signature "RIM V1.0"         | Present in all 246 files.                                                                                | high       |
-| 0x08   | u32     | UNKNOWN, always 0            | The value is 0 in all 246 files.                                                                         | low        |
-| 0x0C   | u32     | Number of resources          | The table parses consistently in all 246 files. Four files have 0 resources.                             | high       |
-| 0x10   | u32     | Offset of the resource table | The value is 120 in all 246 files.                                                                       | high       |
-| 0x14   | u32     | UNKNOWN flag                 | The value is 1 in the six files whose names end in "dx", such as `globaldx.rim`, and 0 in the other 240. | low        |
-| 0x18   | u8[96]  | Padding                      | All bytes are 0 in all 246 files.                                                                        | medium     |
+| Offset | Type    | Meaning                                       | Evidence                                                                                                                                                          | Confidence |
+| ------ | ------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | char[8] | Signature "RIM V1.0"                          | Present in all 246 files.                                                                                                                                         | high       |
+| 0x08   | u32     | UNKNOWN, always 0                             | The value is 0 in all 246 files.                                                                                                                                  | low        |
+| 0x0C   | u32     | Number of resources                           | The table parses consistently in all 246 files. Four files have 0 resources.                                                                                      | high       |
+| 0x10   | u32     | Offset of the resource table                  | The value is 120 in all 246 files.                                                                                                                                | high       |
+| 0x14   | u32     | Flag, probably marking an archive of MDX data | The value is 1 in the six files whose names end in "dx", such as `globaldx.rim`, and 0 in the other 240. The four nonempty "dx" archives hold only MDX resources. | medium     |
+| 0x18   | u8[96]  | Padding                                       | All bytes are 0 in all 246 files.                                                                                                                                 | medium     |
 
 The resource table has one 32-byte entry per resource.
 
@@ -179,12 +179,12 @@ The 246 archives hold the 22 resource types below. The table gives the number of
 
 | Type | Count  | Signature | Type | Count | Signature           |
 | ---- | ------ | --------- | ---- | ----- | ------------------- |
-| 4    | 375    | none      | 2035 | 635   | UTS V3.2            |
+| 4    | 375    | RIFF      | 2035 | 635   | UTS V3.2            |
 | 2002 | 239    | none      | 2038 | 20    | FAC V3.2            |
 | 2010 | 11,355 | NCS V1.0  | 2040 | 68    | UTE V3.2            |
 | 2012 | 117    | ARE V3.2  | 2042 | 525   | UTD V3.2            |
 | 2014 | 117    | IFO V3.2  | 2044 | 1,467 | UTP V3.2            |
-| 2017 | 306    | none      | 2051 | 38    | UTM V3.2            |
+| 2017 | 306    | 2DA V2.b  | 2051 | 38    | UTM V3.2            |
 | 2023 | 117    | GIT V3.2  | 2056 | 3     | JRL V3.2            |
 | 2025 | 498    | UTI V3.2  | 2058 | 2,049 | UTW V3.2            |
 | 2027 | 1,753  | UTC V3.2  | 2060 | 210   | SSF V1.1            |
@@ -424,10 +424,10 @@ A GFF resource becomes `<resref>.<ext>.json`, for example `m02aa.are.json`. The 
 The following example shows the area name in `assets/modules/tar_m02aa/m02aa.are.json`.
 
 ```
- "Name": {
-  "strref": 35782,
-  "text": "Taris - South Apartments"
- },
+	"Name": {
+		"strref": 35782,
+		"text": "Taris - South Apartments"
+	},
 ```
 
 The localized strings resolve completely. The module files hold 77,261 localized strings. Of these, 34,261 have no string number, and the other 43,000 name 33,882 distinct entries of `dialog.tlk`. Every one of these entries exists and has text. The largest string number is 49,137, below the 49,265 entries of the table.
@@ -452,6 +452,133 @@ A compiled script becomes `<resref>.ncs.txt`, a disassembly listing. No standard
 Each line holds the offset of the instruction in hexadecimal, the mnemonic and the operands in decimal. The mnemonic is the opcode name, followed by the type name when the opcode accepts more than one type. A float is written as the shortest decimal that reads back as the same f32, and a string is written as a quoted Go string literal. A comment after ";" gives the target of a jump or the declaration of the called routine. Warnings come first, as lines that begin with ";". The listing therefore holds every byte of the script.
 
 The `modules` stage of `cmd/verify` writes two reports. In `temp/reports/jq_modules.txt`, jq parses all 9,712 JSON files without error. This shows only that the files are valid JSON. In `temp/reports/ncs_modules.txt`, each listing is assembled again from its text, and the result must equal the source script byte for byte. All 10,863 listings pass. No independent tool reads NCS, so the assembler is part of `cmd/verify`. It shares only the tables of opcodes, types and operand layouts with the disassembler. The listings are therefore shown to be lossless, but the tables themselves are verified only by the decoding evidence described under "Compiled scripts: NCS". A test in which one character of a string constant was altered in one listing made that listing fail.
+
+# Global resources: rims/\*.rim
+
+The folder `rims/` holds 12 RIM archives with resources that do not belong to one module: models, sounds, tables, sound sets, item templates and scripts. Every one of these resources is a copy of a resource in the BIF archives, so the archives probably let the game load a fixed set of resources at once. The archives are read with `ReadRim` in `kotor/kotor.go`. Three formats occur here that the module archives do not hold: the 2DA table, the SSF sound set and the WAV sound. The `rims` stage of `cmd/convert` converts every resource (see "Conversion and verification" below).
+
+## Archives
+
+The archives form six pairs. Each pair consists of an archive `<name>.rim` and an archive `<name>dx.rim`. The "dx" archive holds the MDX resources of the models in the other archive and nothing else, and its header field at 0x14 is 1. The table below lists the 12 archives with their sizes and contents.
+
+| Archive          | Size in bytes | Resources | Contents                                            |
+| ---------------- | ------------- | --------- | --------------------------------------------------- |
+| chargen.rim      | 2,555,540     | 30        | 30 MDL, the player heads `pfha01` to `pmhc05`       |
+| chargendx.rim    | 1,969,674     | 30        | 30 MDX                                              |
+| global.rim       | 20,718,578    | 949       | 246 NCS, 246 WAV, 168 MDL, 153 2DA, 105 SSF, 31 UTI |
+| globaldx.rim     | 630,666       | 180       | 180 MDX                                             |
+| legal.rim        | 120           | 0         | none                                                |
+| legaldx.rim      | 120           | 0         | none                                                |
+| mainmenu.rim     | 387,869       | 1         | 1 MDL, `mainmenu`                                   |
+| mainmenudx.rim   | 265,082       | 2         | 2 MDX, `mainmenu` and `cgmain_light`                |
+| miniglobal.rim   | 12,282,394    | 704       | 246 NCS, 129 WAV, 40 MDL, 153 2DA, 105 SSF, 31 UTI  |
+| miniglobaldx.rim | 224,266       | 40        | 40 MDX                                              |
+| subglobal.rim    | 120           | 0         | none                                                |
+| subglobaldx.rim  | 120           | 0         | none                                                |
+
+The four empty archives consist only of the 120-byte header. `miniglobal.rim` is a subset of `global.rim`: each of its 704 resources occurs in `global.rim` with the same name, type and bytes. Likewise, each of the 40 resources of `miniglobaldx.rim` occurs in `globaldx.rim` with the same bytes. Why both archives exist is UNKNOWN.
+
+The resources of `global.rim`, `globaldx.rim`, `chargen.rim`, `chargendx.rim`, `mainmenu.rim` and `mainmenudx.rim` were compared with the resources of the same name and type in the BIF archives. Every resource has such a counterpart. All are byte-identical except 13 2DA tables, which differ only in their separator bytes (see "2DA table" below). The counterparts are in `2da.bif` (153 tables), `sounds.bif` (246 sounds), `scripts.bif` (246 scripts), `templates.bif` (105 sound sets and 31 item templates), `models.bif` (159 MDL and 172 MDX), `items.bif` (10 MDL and 10 MDX) and `player.bif` (30 MDL and 30 MDX).
+
+Thirteen MDX resources have no MDL resource in the partner archive. Eleven of them, `fxc_droid01` to `fxc_droid17` with gaps, are in `globaldx.rim`, and their models are in `models.bif`. The other two, `fxmuzzle` in `globaldx.rim` and `cgmain_light` in `mainmenudx.rim`, are empty. These 13 resources are not converted.
+
+## 2DA table
+
+A 2DA file (type 2017) is a table with labelled columns and labelled rows, called a two-dimensional array. The game uses such tables for rules data, for example `appearance` (creature appearances) and `baseitems` (item types). All 153 tables in `global.rim` begin with the 9-byte signature "2DA V2.b" followed by a line feed. This is a binary form; the text form "2DA V2.0" does not occur. The parser is `ParseTwoDa` in `kotor/twoda.go`.
+
+The file consists of six consecutive parts with no padding, described in the table below. Offsets depend on the lengths of the labels, so the table gives the order of the parts instead.
+
+| Part | Type                  | Meaning                                                                        | Evidence                                                                                                                    | Confidence |
+| ---- | --------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 1    | char[9]               | Signature "2DA V2.b" and a line feed                                           | Present in all 153 tables.                                                                                                  | high       |
+| 2    | strings, then u8 0    | Column labels, each followed by a separator byte, then one NUL byte            | The labels are readable names such as "label" and "name_strref". The NUL byte follows the last separator in all 153 tables. | high       |
+| 3    | u32                   | Number of rows n                                                               | The following parts parse to the end of the file with this count in all 153 tables.                                         | high       |
+| 4    | strings               | n row labels, each followed by the separator                                   | See above. The labels are "0" to "n-1" in 141 tables. The other 12 use other labels, such as "default" in `loadscreens`.    | high       |
+| 5    | u16[n × columns]      | Offset of each cell's string within the string data, row by row                | Every offset is the start of a string in all 101,114 cells.                                                                 | high       |
+| 6    | u16, then string data | Size of the string data in bytes, then the string data: NUL-terminated strings | The string data ends exactly at the end of the file in all 153 tables. The largest size is 17,629 bytes.                    | high       |
+
+The separator is a tab in 140 tables and a NUL byte in the other 13: `appearance`, `appearancesndset`, `baseitems`, `bodybag`, `doortypes`, `genericdoors`, `heads`, `inventorysnds`, `placeableobjsnds`, `placeables`, `portraits`, `soundset` and `traps`. The copies of these 13 tables in `2da.bif` use tabs. Each RIM copy has the same size as its BIF copy and differs from it only where the BIF copy has a separator tab: for example, `appearance` has 80 columns and 509 rows, and exactly 589 bytes differ. Tab bytes that are part of a cell offset are unchanged. Why these 13 tables were written differently is UNKNOWN. A reader finds the separator as the first tab or NUL byte after the signature.
+
+The string data stores each distinct string once, and several cells may refer to the same string. In all 153 tables, every string is referred to by at least one cell, no string occurs twice, and the strings appear in the order of the first cell that refers to them, row by row. An empty cell refers to an empty string; 37,256 of the 101,114 cells are empty. The text form of 2DA writes such cells as "\*\*\*\*", but that value does not occur here. All bytes of the labels and strings are below 0x80.
+
+The tables have between 1 and 80 columns (median 4) and between 0 and 1,185 rows (median 12). Three tables have no rows: `iprp_base1`, `iprp_slotscost` and `iprp_staminacost`. Their string data is empty, so they end with the size 0.
+
+## SSF sound set
+
+An SSF file (type 2060) is a sound set: it names the voice line that a creature type speaks for each of a fixed list of game events, such as a battle cry or a death cry. All 105 files in `global.rim` begin with the signature "SSF V1.1". The parser is `ParseSsf` in `kotor/ssf.go`.
+
+The file begins with a 12-byte header, described in the table below.
+
+| Offset | Type    | Meaning                    | Evidence                                                                                           | Confidence |
+| ------ | ------- | -------------------------- | -------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | char[8] | Signature "SSF V1.1"       | Present in all 105 files.                                                                          | high       |
+| 0x08   | u32     | Offset of the slot table   | The value is 12 in all 105 files, so the table follows the header directly.                        | medium     |
+| 0x0C   | u32[]   | One string number per slot | The table ends exactly at the end of the file in all 105 files. 97 files have 40 slots, 8 have 49. | high       |
+
+Each slot holds the number of an entry in `dialog.tlk`, or 0xFFFFFFFF for an empty slot. Every number in the 105 files names an existing entry. The entry gives the sound to play and a text. For creature sounds the text is a description, for example "Battlecry 1 - Do not translate this text" with the sound `c_bantha_bat1`. For party members the text is the spoken line, for example "Yes?".
+
+The meaning of each slot follows from two independent sources: the texts of the entries it names, and the sound names of those entries, which end in a suffix such as `_bat1` or `_slct2`. The table below gives, for each slot range, the most common suffix with the number of uses that carry it among all uses whose entry names a sound, and an example text. In a few files one or two entries carry the suffix of a neighbouring slot, such as one `_slct` sound in slot 5. The slot meanings are not confirmed by any other source.
+
+| Slots | Meaning                                 | Sound name suffixes                                                         | Example texts                                   | Confidence |
+| ----- | --------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------- | ---------- |
+| 0–5   | Battle cries                            | `bat` in 265 of 266 uses                                                    | "Battlecry 1 - Do not translate this text"      | high       |
+| 6–8   | Responses when the creature is selected | `slct` in 37 of 39 uses                                                     | "Yes?", "What?", "Huh?"                         | high       |
+| 9–11  | Attack grunts                           | `atk` in 268 of 274 uses                                                    | "Attack Grunt 1 - Do not translate this text"   | high       |
+| 12–13 | Pain grunts                             | `hit` in 177 of 184 uses                                                    | "Pain Grunt 1 - Do not translate this text"     | high       |
+| 14    | Low health                              | `low` in 11 of 14 uses                                                      | "Can't take much more of this!"                 | medium     |
+| 15    | Death                                   | `dead` in 86 of 92 uses                                                     | "Death - Do not translate this text"            | high       |
+| 16    | Critical hit                            | `crit` in 11 of 14 uses                                                     | "Take that!"                                    | medium     |
+| 17    | Target is immune                        | `tia` in 11 of 13 uses                                                      | "I am doing no damage!"                         | medium     |
+| 18    | Mine laid; in eight files, death        | `lmin` in 11 uses, `die` or `DIE` in 8                                      | "Mine successfully laid.", "Player Death Sound" | medium     |
+| 19    | Mine disarmed                           | `dmin` in 12 of 13 uses                                                     | "Disarmed."                                     | medium     |
+| 20    | Stealth begins                          | `stlh` in 11 of 12 uses                                                     | "I shall move unseen."                          | medium     |
+| 21    | Search begins                           | `srch` in 12 of 13 uses                                                     | "I shall be attentive."                         | medium     |
+| 22    | Lock picking begins                     | `block` in 12 of 13 uses                                                    | "Affirmative."                                  | medium     |
+| 23    | Lock picking fails                      | `flock` in 12 of 13 uses                                                    | "Damn!"                                         | medium     |
+| 24    | Lock picking succeeds                   | `slock` in 12 of 13 uses                                                    | "Opened."                                       | medium     |
+| 25    | Separated from the party                | `sprty` in 12 of 13 uses                                                    | "Hang back here for a minute."                  | medium     |
+| 26    | Rejoins the party                       | `rprty` in all 13 uses                                                      | "Hey! Back again!"                              | medium     |
+| 27    | Poisoned                                | `pois` in all 13 uses                                                       | "Agh. I think I've been poisoned..."            | medium     |
+| 28–48 | UNKNOWN                                 | Empty in all files except slot 33, which holds a `slct` sound in two files. | none                                            | low        |
+
+The death sound in slot 18 occurs in the eight files with 49 slots: `darkjedi`, `drdassassin`, `drdmkone`, `drdprobe`, `katarn`, `kinrath`, `player` and `sithtroop`. In each of them only slot 18 is used, and the purpose of the nine extra slots is UNKNOWN. Whether the game reads slot 18 of these files as a death sound or as a mine sound is UNKNOWN.
+
+## WAV sounds
+
+The 246 sounds (type 4) in `global.rim` are ordinary RIFF WAVE files. Unlike the files in `streamsounds/`, they have no fake header: the RIFF size equals the file size minus 8 in all 246 files, and the chunks end exactly at the end of the file. All are mono. The table below gives the encodings.
+
+| Encoding                     | Sample rate | Files | Chunks                                  |
+| ---------------------------- | ----------- | ----- | --------------------------------------- |
+| 16-bit PCM (format 1)        | 22,050 Hz   | 233   | fmt, data, and in 16 files a LIST chunk |
+| 16-bit PCM (format 1)        | 44,100 Hz   | 6     | fmt, data                               |
+| 16-bit PCM (format 1)        | 11,025 Hz   | 3     | fmt, data, LIST                         |
+| IMA ADPCM (format 17), 4-bit | 44,100 Hz   | 4     | fmt (20 bytes), fact, data              |
+
+The four IMA ADPCM files are `cb_sh_blast1`, `cb_sh_hvybl1`, `cb_sh_medbl1` and `cb_sh_sonbl1`. Their blocks are 1,024 bytes long and decode with `DecodeAdpcm` in `kotor/adpcm.go`, which also decodes the stream sounds. Most names begin with `cb_` (92 files, probably combat), `fs_` (67, probably footsteps) or `v_` (45, probably visual effects).
+
+## Conversion and verification
+
+The `rims` stage of `cmd/convert` writes one folder `assets/rims/<archive>/` per archive without "dx" and writes the report `temp/reports/rims.txt`. The report has one line per archive and one line per resource, except the MDX resources, which are read together with their models. All 1,696 lines pass: the 12 archive tables, 239 models, 375 sounds, 306 tables, 210 sound sets, 62 item templates and 492 scripts. The resources become the files below.
+
+| Resource     | Output                         | Form                                                                                                                           |
+| ------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| MDL with MDX | `<resref>.obj`, `<resref>.mtl` | As for `data/models.bif` (see "3D models: MDL and MDX"). 151 models have no rendered geometry and are not written.             |
+| WAV          | `<resref>.wav`                 | 16-bit PCM. PCM files are copied unchanged, and the four IMA ADPCM files are decoded.                                          |
+| 2DA          | `<resref>.2da.csv`             | CSV. The first line holds an empty cell and the column labels. Each further line holds the row label and the cells.            |
+| SSF          | `<resref>.ssf.json`            | JSON with an array `slots`. Each slot has `strref` (null when empty) and the `text` and `sound` of that entry in `dialog.tlk`. |
+| UTI          | `<resref>.uti.json`            | The JSON form of the module files (see "Conversion and verification" under modules).                                           |
+| NCS          | `<resref>.ncs.txt`             | The disassembly listing of the module files.                                                                                   |
+
+The models refer to textures by the same relative path as the models of `data/models.bif`, and every texture they name is found in the texture packs. The CSV files do not record the separator byte of the source table. The following example shows `assets/rims/global/aiscripts.2da.csv`.
+
+```
+,label,name_strref,description_strref,aistate
+0,DEFAULT,1116,1109,0
+1,GRENADE,1120,1112,4
+2,JEDI,1121,1114,5
+```
+
+The `rims` stage of `cmd/verify` writes five reports, and every line passes. In `temp/reports/assimp_rims.txt`, assimp loads all 88 OBJ files with the face count of the file. In `temp/reports/ffprobe_rims.txt`, ffprobe reads all 375 WAV files as 16-bit PCM (`pcm_s16le`). In `temp/reports/csv_rims.txt`, Go's `encoding/csv` reader reads each of the 306 CSV files, and the table built again from it must equal the source table byte for byte. The builder is part of `cmd/verify` and shares no code with the parser; it takes the separator byte from the source. A test in which one cell of `aiscripts.2da.csv` was altered made that file fail. In `temp/reports/jq_rims.txt`, jq reads the string numbers of all 210 SSF JSON files, which must build again into the source sound set, and parses all 62 UTI JSON files. In `temp/reports/ncs_rims.txt`, all 492 script listings assemble to their source scripts.
 
 # String table: dialog.tlk
 
@@ -486,7 +613,7 @@ The meaning of flag bits 1 and 2 (value 6) is UNKNOWN. They are set in all entri
 
 Each 3D model is stored as two resources with the same resref. The MDL resource (type 2002) holds the model's structure: a tree of nodes, some of which carry meshes. The MDX resource (type 3008) holds the vertex data for those meshes. The converter is `cmd/mdl2obj`. It writes Wavefront OBJ files.
 
-The models examined here are in `data/models.bif`, which contains 2,445 MDL resources and 2,445 MDX resources, including area room models such as `m01aa_01a`. Of the converted models, 1,329 have names of that form. The BIF archives hold 387 more models, which have not been examined or converted: 305 in `items.bif`, 63 in `player.bif` and 19 in `party.bif`. The RIM archives hold another 239 MDL and 252 MDX resources, which have not been examined either. `patch.erf` holds one model, `w_lghtsbr_008`, which has not been examined. The MOD archives in `lips/` hold only LIP resources, and the texture packs hold no models.
+The models examined here are in `data/models.bif`, which contains 2,445 MDL resources and 2,445 MDX resources, including area room models such as `m01aa_01a`. Of the converted models, 1,329 have names of that form. The BIF archives hold 387 more models, which have not been examined or converted: 305 in `items.bif`, 63 in `player.bif` and 19 in `party.bif`. The archives in `rims/` hold another 239 MDL and 252 MDX resources. All of them are copies of models in the BIF archives, and their conversion is described in the section "Global resources: rims/\*.rim". `patch.erf` holds one model, `w_lghtsbr_008`, which has not been examined. The MOD archives in `lips/` hold only LIP resources, and the texture packs hold no models.
 
 All 2,445 models pass the converter's checks. Every read stays inside the file, every face index refers to an existing vertex, and the vertex positions stored in the MDL match those stored in the MDX for all 11,248,282 vertices. Of these models, 368 contain no meshes.
 

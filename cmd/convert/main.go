@@ -3,13 +3,14 @@
 // Movies require ffmpeg. All stages run at the same time. Each stage writes its own outputs and reports
 // and keeps its own summary lines, which are printed in stage order at the end.
 //
-// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules]   (default: all)
+// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules] [rims]   (default: all)
 package main
 
 import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -44,23 +45,78 @@ func prune(dir string, keep map[string]bool, exts []string) {
 	}
 }
 
+// texturePaths maps each texture resref to its PNG file in the texture packs, relative to a folder two
+// levels below assets. The first pack in priority order wins, so the packs are read in reverse.
+func texturePaths() map[string]string {
+	paths := map[string]string{}
+	for _, pack := range slices.Backward(kotor.TexturePacks) {
+
+		for _, entry := range packErf(pack) {
+			if entry.Ext == "tpc" {
+				paths[entry.Resref] = "../../TexturePacks/" + pack + "/" + entry.Resref + ".png"
+			}
+		}
+	}
+	return paths
+}
+
+// modelCounts collects what the models of one stage leave out, for the stage summary.
+type modelCounts struct {
+	skipped int
+	hidden  int
+	missing map[string]bool
+}
+
+// writeModel converts one MDL resource and its MDX data to <resref>.obj and <resref>.mtl in out. It
+// returns its report line and the names of the files it wrote. A model without rendered geometry is
+// counted and not written.
+func writeModel(out, label, resref string, mdl, mdx []byte, texturePath map[string]string,
+	counts *modelCounts) (string, []string) {
+	model := kotor.ConvertMdl(mdl, mdx, resref+".mdl", resref+".mtl")
+	counts.hidden += model.Stats.Hidden
+	if len(model.Errors) > 0 {
+		return kotor.ReportMdl(label, model), nil
+	}
+	if model.Stats.Meshes == 0 {
+		counts.skipped++
+		return kotor.ReportMdl(label, model), nil
+	}
+
+	mtl := []string{"# materials for " + resref}
+	for _, texture := range model.Textures {
+		mtl = append(mtl, "", "newmtl "+texture, "Kd 1.000000 1.000000 1.000000")
+		if path, ok := texturePath[texture]; ok {
+			mtl = append(mtl, "map_Kd "+path)
+		} else {
+			mtl = append(mtl, "# texture not found in the texture packs")
+			counts.missing[texture] = true
+		}
+	}
+
+	kotor.WriteFile(filepath.Join(out, resref+".obj"), []byte(model.Obj))
+	kotor.WriteFile(filepath.Join(out, resref+".mtl"), []byte(strings.Join(mtl, "\n")+"\n"))
+	return kotor.ReportMdl(label, model), []string{resref + ".obj", resref + ".mtl"}
+}
+
+func noteModels(summary *kotor.Summary, stage string, counts *modelCounts) {
+	missingNames := make([]string, 0, len(counts.missing))
+	for texture := range counts.missing {
+		missingNames = append(missingNames, texture)
+	}
+	slices.Sort(missingNames)
+	*summary = append(*summary,
+		fmt.Sprintf("%s: models without rendered geometry skipped: %d", stage, counts.skipped),
+		fmt.Sprintf("%s: non-rendered meshes omitted: %d", stage, counts.hidden),
+		fmt.Sprintf("%s: model textures not found: %d (%s)", stage, len(missingNames), strings.Join(missingNames, " ")))
+}
+
 // Models: data/models.bif -> assets/data/models/*.obj + *.mtl (passing, with geometry)
 func convertModels(summary *kotor.Summary) {
 	fmt.Println("models...")
 	out := filepath.Join(kotor.Assets, "data", "models")
 	kotor.MakeDir(out)
 
-	// The first pack in priority order wins, so the packs are read in reverse.
-	texturePath := map[string]string{}
-	for _, pack := range slices.Backward(kotor.TexturePacks) {
-
-		for _, entry := range packErf(pack) {
-			if entry.Ext == "tpc" {
-				texturePath[entry.Resref] = "../../TexturePacks/" + pack + "/" + entry.Resref + ".png"
-			}
-		}
-	}
-
+	texturePath := texturePaths()
 	resources := kotor.BifResources("data/models.bif", kotor.ReadKey())
 	mdx := map[string][]byte{}
 	for _, resource := range resources {
@@ -71,53 +127,20 @@ func convertModels(summary *kotor.Summary) {
 
 	var report []string
 	written := map[string]bool{}
-	missing := map[string]bool{}
-	skipped, hidden := 0, 0
+	counts := &modelCounts{missing: map[string]bool{}}
 	for _, resource := range resources {
-		if resource.Ext != "mdl" {
-			continue
-		}
-
-		model := kotor.ConvertMdl(resource.Data, mdx[resource.Resref], resource.Resref+".mdl", resource.Resref+".mtl")
-		report = append(report, kotor.ReportMdl(resource.Resref, model))
-		hidden += model.Stats.Hidden
-		if len(model.Errors) > 0 {
-			continue
-		}
-		if model.Stats.Meshes == 0 {
-			skipped++
-			continue
-		}
-
-		mtl := []string{"# materials for " + resource.Resref}
-		for _, texture := range model.Textures {
-			mtl = append(mtl, "", "newmtl "+texture, "Kd 1.000000 1.000000 1.000000")
-			if path, ok := texturePath[texture]; ok {
-				mtl = append(mtl, "map_Kd "+path)
-			} else {
-				mtl = append(mtl, "# texture not found in the texture packs")
-				missing[texture] = true
+		if resource.Ext == "mdl" {
+			line, files := writeModel(out, resource.Resref, resource.Resref, resource.Data, mdx[resource.Resref], texturePath, counts)
+			report = append(report, line)
+			for _, file := range files {
+				written[file] = true
 			}
 		}
-
-		kotor.WriteFile(filepath.Join(out, resource.Resref+".obj"), []byte(model.Obj))
-		kotor.WriteFile(filepath.Join(out, resource.Resref+".mtl"), []byte(strings.Join(mtl, "\n")+"\n"))
-		written[resource.Resref+".obj"] = true
-		written[resource.Resref+".mtl"] = true
 	}
 
 	prune(out, written, []string{".obj", ".mtl"})
 	summary.Tally("models", report)
-
-	missingNames := make([]string, 0, len(missing))
-	for texture := range missing {
-		missingNames = append(missingNames, texture)
-	}
-	slices.Sort(missingNames)
-	*summary = append(*summary,
-		fmt.Sprintf("models without rendered geometry skipped: %d", skipped),
-		fmt.Sprintf("non-rendered meshes omitted: %d", hidden),
-		fmt.Sprintf("model textures not found: %d (%s)", len(missingNames), strings.Join(missingNames, " ")))
+	noteModels(summary, "models", counts)
 }
 
 // Textures: TexturePacks/<pack>.erf -> assets/TexturePacks/<pack>/*.png (+ *.txi when present)
@@ -446,19 +469,53 @@ func convertLips(summary *kotor.Summary) {
 	summary.Tally("lips", report)
 }
 
-// Modules: modules/<archive>.rim -> assets/modules/<archive>/, one folder per archive. A GFF resource
-// becomes <resref>.<ext>.json in the form of gffJson, with localized strings resolved through dialog.tlk.
-// A compiled script becomes <resref>.ncs.txt, its disassembly with the routine names of nwscript.nss.
-// The extension stays in the name because an area's ARE and GIT resources share a resref. A GFF resource
-// must parse, and its file type must match its resource type. Unreferenced bytes are reported, not
-// rejected, because 29 module files have them.
-func convertModules(summary *kotor.Summary) {
-	fmt.Println("modules...")
+// dialogTlk reads the string table that localized strings and sound sets refer to.
+func dialogTlk() *kotor.Tlk {
 	tlk, problem := kotor.ReadTlk(kotor.ReadFile(filepath.Join(kotor.Game, "dialog.tlk")))
 	if problem != "" {
 		kotor.Fatal("dialog.tlk: " + problem)
 	}
+	return tlk
+}
 
+// gffFile converts a GFF resource to the JSON form of gffJson and returns the text, notes for the report
+// line and an error text. The file type must match the resource extension, and the version must be V3.2.
+// Unreferenced bytes are noted, not rejected, because 29 module files have them.
+func gffFile(data []byte, ext string, tlk *kotor.Tlk) ([]byte, string, string) {
+	gff, problem := kotor.ReadGff(data)
+	if problem == "" && (gff.FileType != fmt.Sprintf("%-4s", strings.ToUpper(ext)) || gff.Version != "V3.2") {
+		problem = "unexpected " + gff.FileType + gff.Version
+	}
+	if problem != "" {
+		return nil, "", problem
+	}
+
+	unresolved := 0
+	text, err := json.MarshalIndent(gffJson(gff.Root, tlk, &unresolved), "", "\t")
+	if err != nil {
+		return nil, "", err.Error()
+	}
+
+	notes := fmt.Sprintf(" %d structs %d fields", gff.Counts.Structs, gff.Counts.Fields)
+	for _, region := range []string{"idx", "list"} {
+		if gff.Counts.UnusedBytes[region] > 0 {
+			notes += fmt.Sprintf(" %d unreferenced %s bytes", gff.Counts.UnusedBytes[region], region)
+		}
+	}
+	if unresolved > 0 {
+		notes += fmt.Sprintf(" %d string numbers past dialog.tlk", unresolved)
+	}
+	return append(text, '\n'), notes, ""
+}
+
+// Modules: modules/<archive>.rim -> assets/modules/<archive>/, one folder per archive. A GFF resource
+// becomes <resref>.<ext>.json in the form of gffJson, with localized strings resolved through dialog.tlk.
+// A compiled script becomes <resref>.ncs.txt, its disassembly with the routine names of nwscript.nss.
+// The extension stays in the name because an area's ARE and GIT resources share a resref. A GFF resource
+// must parse, and its file type must match its resource type (see gffFile).
+func convertModules(summary *kotor.Summary) {
+	fmt.Println("modules...")
+	tlk := dialogTlk()
 	routines := kotor.ReadNwscript(kotor.ReadKey())
 	src := filepath.Join(kotor.Game, "modules")
 	out := filepath.Join(kotor.Assets, "modules")
@@ -488,34 +545,14 @@ func convertModules(summary *kotor.Summary) {
 				continue
 			}
 
-			gff, problem := kotor.ReadGff(entry.Data)
-			if problem == "" && (gff.FileType != fmt.Sprintf("%-4s", strings.ToUpper(entry.Ext)) || gff.Version != "V3.2") {
-				problem = "unexpected " + gff.FileType + gff.Version
-			}
+			text, notes, problem := gffFile(entry.Data, entry.Ext, tlk)
 			if problem != "" {
 				report = append(report, label+" FAIL: "+problem)
 				continue
 			}
 
-			unresolved := 0
-			text, err := json.MarshalIndent(gffJson(gff.Root, tlk, &unresolved), "", "\t")
-			if err != nil {
-				report = append(report, label+" FAIL: "+err.Error())
-				continue
-			}
-
-			notes := fmt.Sprintf(" %d structs %d fields", gff.Counts.Structs, gff.Counts.Fields)
-			for _, region := range []string{"idx", "list"} {
-				if gff.Counts.UnusedBytes[region] > 0 {
-					notes += fmt.Sprintf(" %d unreferenced %s bytes", gff.Counts.UnusedBytes[region], region)
-				}
-			}
-			if unresolved > 0 {
-				notes += fmt.Sprintf(" %d string numbers past dialog.tlk", unresolved)
-			}
-
 			file := filepath.Join(name, entry.Resref+"."+entry.Ext+".json")
-			kotor.WriteFile(filepath.Join(out, file), append(text, '\n'))
+			kotor.WriteFile(filepath.Join(out, file), text)
 			written[file] = true
 			report = append(report, label+notes+" PASS")
 		}
@@ -523,6 +560,138 @@ func convertModules(summary *kotor.Summary) {
 
 	prune(out, written, []string{".json", ".txt"})
 	summary.Tally("modules", report)
+}
+
+// Rims: rims/<archive>.rim -> assets/rims/<archive>/, one folder per archive. Every archive whose name
+// ends in "dx" holds the MDX data of the models in the archive of the same name without "dx", and no other
+// resources. A model becomes <resref>.obj and <resref>.mtl. A sound becomes <resref>.wav as 16-bit PCM:
+// PCM files are copied, and IMA ADPCM files are decoded. A 2DA table becomes <resref>.2da.csv (see
+// kotor.TwoDaCsv), a sound set becomes <resref>.ssf.json (see ssfJson), an item template becomes
+// <resref>.uti.json (see gffFile), and a compiled script becomes <resref>.ncs.txt. Each archive also gets
+// a report line with its resource count, so that the four empty archives are reported too. MDX data
+// without a model in the partner archive is counted in the summary and not converted.
+func convertRims(summary *kotor.Summary) {
+	fmt.Println("rims...")
+	tlk := dialogTlk()
+	routines := kotor.ReadNwscript(kotor.ReadKey())
+	texturePath := texturePaths()
+	src := filepath.Join(kotor.Game, "rims")
+	out := filepath.Join(kotor.Assets, "rims")
+	kotor.MakeDir(out)
+
+	var report []string
+	archives := map[string]*kotor.Rim{}
+	for _, archive := range kotor.ListFiles(src, ".rim", false) {
+		name := strings.TrimSuffix(archive, filepath.Ext(archive))
+		rim, problem := kotor.ReadRim(kotor.ReadFile(filepath.Join(src, archive)))
+		if problem != "" {
+			report = append(report, archive+" FAIL: "+problem)
+			continue
+		}
+
+		report = append(report, fmt.Sprintf("%s resources=%d flag=%d PASS", archive, len(rim.Entries), rim.Flag))
+		archives[name] = rim
+	}
+
+	written := map[string]bool{}
+	counts := &modelCounts{missing: map[string]bool{}}
+	orphans := []string{}
+	for _, name := range slices.Sorted(maps.Keys(archives)) {
+		if strings.HasSuffix(name, "dx") {
+			continue
+		}
+
+		mdx := map[string][]byte{}
+		used := map[string]bool{}
+		if partner, ok := archives[name+"dx"]; ok {
+			for _, entry := range partner.Entries {
+				if entry.Ext != "mdx" {
+					report = append(report, name+"dx/"+entry.Resref+"."+entry.Ext+" FAIL: not MDX data")
+					continue
+				}
+				mdx[entry.Resref] = entry.Data
+			}
+		}
+
+		dir := filepath.Join(out, name)
+		kotor.MakeDir(dir)
+		for _, entry := range archives[name].Entries {
+			label := name + "/" + entry.Resref + "." + entry.Ext
+			var files []string
+			var line string
+			switch entry.Ext {
+			case "mdl":
+				line, files = writeModel(dir, label, entry.Resref, entry.Data, mdx[entry.Resref], texturePath, counts)
+				used[entry.Resref] = true
+
+			case "wav":
+				problem := kotor.RiffWalk(entry.Data)
+				decoded := kotor.DecodeAdpcm(entry.Data)
+				line = label + " " + decoded.Info + " " + kotor.Verdict(problem, decoded.Err)
+				if problem == "" && decoded.Err == "" {
+					kotor.WriteFile(filepath.Join(dir, entry.Resref+".wav"), decoded.Out)
+					files = []string{entry.Resref + ".wav"}
+				}
+
+			case "2da":
+				table := kotor.ParseTwoDa(entry.Data)
+				line = kotor.ReportTwoDa(label, table)
+				if len(table.Errors) == 0 {
+					kotor.WriteFile(filepath.Join(dir, entry.Resref+".2da.csv"), kotor.TwoDaCsv(table))
+					files = []string{entry.Resref + ".2da.csv"}
+				}
+
+			case "ssf":
+				ssf := kotor.ParseSsf(entry.Data)
+				line = kotor.ReportSsf(label, ssf)
+				unresolved := 0
+				text, err := json.MarshalIndent(ssfJson(ssf, tlk, &unresolved), "", "\t")
+				if err == nil && unresolved > 0 {
+					err = fmt.Errorf("%d string numbers past dialog.tlk", unresolved)
+				}
+				if err != nil {
+					line = label + " FAIL: " + err.Error()
+				}
+				if len(ssf.Errors) == 0 && err == nil {
+					kotor.WriteFile(filepath.Join(dir, entry.Resref+".ssf.json"), append(text, '\n'))
+					files = []string{entry.Resref + ".ssf.json"}
+				}
+
+			case "ncs":
+				ncs := kotor.ParseNcs(entry.Data, routines)
+				line = kotor.ReportNcs(label, ncs)
+				if len(ncs.Errors) == 0 {
+					kotor.WriteFile(filepath.Join(dir, entry.Resref+".ncs.txt"), kotor.NcsListing(ncs, routines))
+					files = []string{entry.Resref + ".ncs.txt"}
+				}
+
+			default:
+				text, notes, problem := gffFile(entry.Data, entry.Ext, tlk)
+				line = label + notes + " " + kotor.Verdict(problem)
+				if problem == "" {
+					kotor.WriteFile(filepath.Join(dir, entry.Resref+"."+entry.Ext+".json"), text)
+					files = []string{entry.Resref + "." + entry.Ext + ".json"}
+				}
+			}
+
+			report = append(report, line)
+			for _, file := range files {
+				written[filepath.Join(name, file)] = true
+			}
+		}
+
+		for resref := range mdx {
+			if !used[resref] {
+				orphans = append(orphans, name+"dx/"+resref)
+			}
+		}
+	}
+
+	prune(out, written, []string{".obj", ".mtl", ".wav", ".csv", ".json", ".txt"})
+	summary.Tally("rims", report)
+	noteModels(summary, "rims", counts)
+	slices.Sort(orphans)
+	summary.Note(fmt.Sprintf("rims: MDX data without a model, not converted: %d (%s)", len(orphans), strings.Join(orphans, " ")))
 }
 
 // Movies start first because they take longest.
@@ -537,6 +706,7 @@ var stages = []kotor.Stage{
 	{Name: "gui", Run: convertGui},
 	{Name: "lips", Run: convertLips},
 	{Name: "modules", Run: convertModules},
+	{Name: "rims", Run: convertRims},
 }
 
 func main() {
