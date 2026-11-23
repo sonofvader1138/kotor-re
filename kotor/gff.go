@@ -196,7 +196,7 @@ func ReadGff(data []byte, name string) *Gff {
 			count := int(u32(data, list))
 			mark("list", int(raw)+4, 4*count, listIndicesLength)
 			value.List = make([]*GffStructValue, 0, count)
-			for i := 0; i < count; i++ {
+			for i := range count {
 				value.List = append(value.List, readStruct(int(u32(data, list+4+4*i))))
 			}
 
@@ -232,7 +232,7 @@ func ReadGff(data []byte, name string) *Gff {
 			ids = []int{first}
 		} else if count > 1 {
 			mark("idx", first, 4*count, fieldIndicesLength)
-			for i := 0; i < count; i++ {
+			for i := range count {
 				ids = append(ids, int(u32(data, fieldIndicesOffset+first+4*i)))
 			}
 		}

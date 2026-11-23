@@ -144,7 +144,7 @@ func ParseTpc(file []byte) *TpcTexture {
 	if width > 0 && height == cubeFaces*width {
 		layout = "cube"
 		images = nil
-		for face := 0; face < cubeFaces; face++ {
+		for face := range cubeFaces {
 			images = append(images, SubImage{Y: face * width, Width: width, Height: width, Levels: float64(mips)})
 		}
 	} else if dataSize != 0 && dataSize != LevelSize(kind, width, height) && TpcHeaderSize+dataSize <= len(file) {
@@ -157,8 +157,8 @@ func ParseTpc(file []byte) *TpcTexture {
 			levels := math.Log2(float64(max(frameWidth, frameHeight))) + 1
 			layout = "flipbook"
 			images = nil
-			for j := 0; j < rows; j++ {
-				for i := 0; i < columns; i++ {
+			for j := range rows {
+				for i := range columns {
 					images = append(images, SubImage{
 						X:      i * frameWidth,
 						Y:      j * frameHeight,
@@ -256,8 +256,8 @@ func decodeImage(file []byte, offset int, kind string, width, height int) []byte
 	}
 	blocksWide := blocksAcross(width)
 	blocksHigh := blocksAcross(height)
-	for blockY := 0; blockY < blocksHigh; blockY++ {
-		for blockX := 0; blockX < blocksWide; blockX++ {
+	for blockY := range blocksHigh {
+		for blockX := range blocksWide {
 			block := offset + (blockY*blocksWide+blockX)*blockSize
 
 			var alphas [blockTexels]int
@@ -283,7 +283,7 @@ func decodeImage(file []byte, offset int, kind string, width, height int) []byte
 				for i := 5; i >= 0; i-- {
 					bits = bits<<8 | uint64(file[block+2+i])
 				}
-				for i := 0; i < blockTexels; i++ {
+				for i := range blockTexels {
 					alphas[i] = alphaTable[bits>>(3*i)&7]
 				}
 				block += dxt1BlockSize
@@ -294,18 +294,18 @@ func decodeImage(file []byte, offset int, kind string, width, height int) []byte
 			color0, color1 := expandRgb565(raw0), expandRgb565(raw1)
 			palette := [4][3]int{color0, color1}
 			if raw0 > raw1 || kind == "dxt5" {
-				for i := 0; i < 3; i++ {
+				for i := range 3 {
 					palette[2][i] = int(float64(2*color0[i]+color1[i])/3 + 0.5)
 					palette[3][i] = int(float64(color0[i]+2*color1[i])/3 + 0.5)
 				}
 			} else {
-				for i := 0; i < 3; i++ {
+				for i := range 3 {
 					palette[2][i] = (color0[i] + color1[i]) >> 1
 				}
 			}
 
 			indices := binary.LittleEndian.Uint32(file[block+4:])
-			for i := 0; i < blockTexels; i++ {
+			for i := range blockTexels {
 				x := blockX*blockPixels + i%blockPixels
 				y := blockY*blockPixels + i/blockPixels
 				if x >= width || y >= height {

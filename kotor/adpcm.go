@@ -121,11 +121,11 @@ func DecodeAdpcm(file []byte) AdpcmDecoded {
 	pred := make([]int, channels)
 	index := make([]int, channels)
 
-	for block := 0; block < blocks; block++ {
+	for block := range blocks {
 		blockStart := block * blockAlign
 		firstSample := block * samplesPerBlock
 
-		for channel := 0; channel < channels; channel++ {
+		for channel := range channels {
 			channelHeader := blockStart + blockHeaderSize*channel
 			pred[channel] = int(int16(binary.LittleEndian.Uint16(data[channelHeader:])))
 			index[channel] = int(data[channelHeader+2])
@@ -149,8 +149,8 @@ func DecodeAdpcm(file []byte) AdpcmDecoded {
 		// Within a group, the low nibble of each byte comes first.
 		pos := blockStart + blockHeaderSize*channels
 		for sample := 1; pos < blockStart+blockAlign; sample += groupSamples {
-			for channel := 0; channel < channels; channel++ {
-				for j := 0; j < groupSamples; j++ {
+			for channel := range channels {
+				for j := range groupSamples {
 					b := int(data[pos+j>>1])
 					nibble := b & 15
 					if j&1 != 0 {

@@ -1,5 +1,5 @@
 // Package kotor holds the readers and converters for the game's file formats (KEY, BIF, ERF, GFF, TPC, TGA, MDL,
-// stream audio, IMA ADPCM and Bink), a minimal PNG encoder, the project paths, and helpers that every command uses.
+// LIP, stream audio, IMA ADPCM and Bink), a minimal PNG encoder, the project paths, and helpers that every command uses.
 package kotor
 
 import (
@@ -37,6 +37,7 @@ const (
 	TypeMdl = 2002
 	TypeTxi = 2022
 	TypeGui = 2047
+	TypeLip = 3004
 	TypeTpc = 3007
 	TypeMdx = 3008
 )
@@ -47,6 +48,7 @@ var extensions = map[uint32]string{
 	TypeMdl: "mdl",
 	TypeTxi: "txi",
 	TypeGui: "gui",
+	TypeLip: "lip",
 	TypeTpc: "tpc",
 	TypeMdx: "mdx",
 }
@@ -77,7 +79,7 @@ var TgaGroups = []TgaGroup{
 }
 
 // reportOrder is the order in which RunStages prints the stage summaries.
-var reportOrder = []string{"models", "textures", "tga", "music", "sounds", "waves", "movies", "gui"}
+var reportOrder = []string{"models", "textures", "tga", "music", "sounds", "waves", "movies", "gui", "lips"}
 
 // A resource reference (resref) is a resource name of at most 16 bytes, padded with NUL bytes.
 const ResrefLength = 16
@@ -238,7 +240,7 @@ func ReadKey() *Key {
 	keyTable := int(u32(data, 20))
 
 	key := &Key{}
-	for i := 0; i < bifCount; i++ {
+	for i := range bifCount {
 		entry := bifTable + keyBifEntrySize*i
 		nameOffset := int(u32(data, entry+4))
 		nameLength := int(u16(data, entry+8))
@@ -246,7 +248,7 @@ func ReadKey() *Key {
 		key.Bifs = append(key.Bifs, strings.ReplaceAll(name, `\`, "/"))
 	}
 
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		entry := keyTable + keyEntrySize*i
 		id := u32(data, entry+18)
 		key.Keys = append(key.Keys, KeyEntry{
@@ -280,7 +282,7 @@ func ReadBif(file string) ([]byte, []BifEntry) {
 	table := int(u32(data, 16))
 
 	entries := make([]BifEntry, 0, entryCount)
-	for i := 0; i < entryCount; i++ {
+	for i := range entryCount {
 		entry := table + bifEntrySize*i
 		offset := u32(data, entry+4)
 		size := u32(data, entry+8)
@@ -403,7 +405,7 @@ func ReadErf(path string) []ErfEntry {
 	readAt(file, resourceList, resourceListOffset)
 
 	var entries []ErfEntry
-	for i := 0; i < entryCount; i++ {
+	for i := range entryCount {
 		resourceEntry := erfResourceEntrySize * i
 		keyEntry := erfKeyEntrySize * i
 		offset := u32(resourceList, resourceEntry)

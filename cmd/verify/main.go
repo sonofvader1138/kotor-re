@@ -16,12 +16,16 @@
 // duration (within 0.1 s; ffmpeg's Bink audio decoder emits about 0.03 s more than the packets declare),
 // and every output frame must have a PSNR of at least 40 dB against the decoded Bink frame.
 // gui: jq must parse each JSON file.
+// lips: Go's encoding/csv reader must read each CSV file, and its keyframes, packed again as f32 and u8, must
+// equal the source LIP keyframe bytes.
 //
-// usage: go run ./cmd/verify [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui]   (default: all)
+// usage: go run ./cmd/verify [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips]   (default: all)
 package main
 
 import (
 	"bytes"
+	"encoding/binary"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -132,7 +136,7 @@ func pngcheckDir(dir string) []string {
 			result := kotor.Exec("pngcheck", paths, nil)
 
 			ok := map[string]bool{}
-			for _, text := range strings.Split(string(result.Stdout), "\n") {
+			for text := range strings.SplitSeq(string(result.Stdout), "\n") {
 				if match := pngcheckOk.FindStringSubmatch(text); match != nil {
 					ok[filepath.Base(match[1])] = true
 				}
@@ -201,7 +205,7 @@ func models(summary *kotor.Summary) {
 		jobs = append(jobs, func() []string {
 			objPath := filepath.Join(dir, file)
 			faces := 0
-			for _, text := range bytes.Split(kotor.ReadFile(objPath), []byte("\n")) {
+			for text := range bytes.SplitSeq(kotor.ReadFile(objPath), []byte("\n")) {
 				if bytes.HasPrefix(text, []byte("f ")) {
 					faces++
 				}
@@ -529,6 +533,57 @@ func gui(summary *kotor.Summary) {
 	summary.Tally("jq_gui", pool(jobs))
 }
 
+// Lips: assets/lips/<module>/*.csv. Go's encoding/csv reader must read each file, and its keyframes, packed
+// again as f32 and u8, must equal the keyframe bytes of the source LIP resource. This reader shares no
+// code with the converter's writer, but it is not an external tool.
+func lips(summary *kotor.Summary) {
+	log("lips...")
+	src := filepath.Join(kotor.Game, "lips")
+	var report []string
+	for _, archive := range kotor.ListFiles(src, ".mod", false) {
+		module := strings.TrimSuffix(archive, filepath.Ext(archive))
+		for _, entry := range kotor.ReadErf(filepath.Join(src, archive)) {
+			label := filepath.Join("lips", module, entry.Resref+".csv")
+			report = append(report, label+" "+kotor.Verdict(checkLipCsv(filepath.Join(kotor.Assets, label), entry.Data())))
+		}
+	}
+	summary.Tally("csv_lips", report)
+}
+
+// checkLipCsv reads a converted LIP file and returns an error message when its keyframes differ from the
+// source resource, or an empty string when they match.
+func checkLipCsv(path string, source []byte) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err.Error()
+	}
+
+	rows, err := csv.NewReader(bytes.NewReader(data)).ReadAll()
+	if err != nil {
+		return err.Error()
+	}
+	if len(rows) == 0 || strings.Join(rows[0], ",") != kotor.LipCsvHeader {
+		return "bad header"
+	}
+
+	packed := make([]byte, 0, len(source))
+	for _, row := range rows[1:] {
+		time, timeErr := strconv.ParseFloat(row[0], 32)
+		shape, shapeErr := strconv.ParseUint(row[1], 10, 8)
+		if timeErr != nil || shapeErr != nil {
+			return "bad value in " + strings.Join(row, ",")
+		}
+
+		packed = binary.LittleEndian.AppendUint32(packed, math.Float32bits(float32(time)))
+		packed = append(packed, byte(shape))
+	}
+
+	if !bytes.Equal(packed, source[kotor.LipHeaderSize:]) {
+		return "keyframes differ from the source"
+	}
+	return ""
+}
+
 // Movies queue their jobs first because each one takes longest, so short jobs fill the other slots.
 var stages = []kotor.Stage{
 	{Name: "movies", Run: movies},
@@ -539,6 +594,7 @@ var stages = []kotor.Stage{
 	{Name: "sounds", Run: func(summary *kotor.Summary) { streamAudio(summary, "sounds", "streamsounds") }},
 	{Name: "waves", Run: func(summary *kotor.Summary) { streamAudio(summary, "waves", "streamwaves") }},
 	{Name: "gui", Run: gui},
+	{Name: "lips", Run: lips},
 }
 
 func main() {

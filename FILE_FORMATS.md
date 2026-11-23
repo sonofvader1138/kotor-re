@@ -750,6 +750,25 @@ The sound or mouth pose that each shape stands for is UNKNOWN. Shape 0 is probab
 
 The name of every LIP resource equals the name of a voice file in `streamwaves/`, ignoring case and the `.wav` extension. All 18,206 resources have such a file. The LIP length is 13 to 49 ms shorter than the voice file's decoded duration (median 31 ms), which is roughly the length of one MP3 frame (36 ms). Of the 13,799 voice files, 889 have no LIP resource. 98 of them are top-level files, such as the cutscene line `BA02CS001.wav`, and 791 are conversation lines, such as `m01aa/tras02/NM01AATRAS02090_.wav`. Why these lines lack lip sync is unknown.
 
+## Conversion and verification
+
+No standard file format exists for lip sync keyframes, so each LIP resource is converted to a CSV (comma-separated values) file. The reader is `ParseLip` in `kotor/lip.go`, and the converter is the `lips` stage of `cmd/convert`. It writes `assets/lips/<archive>/<resref>.csv`, with one folder per archive, named after the archive without `.mod`. The 14 empty archives produce no folder, so 109 folders are written. A name that occurs in several archives is written once per archive.
+
+The following example shows the first lines of `assets/lips/danm14ad_loc/nm14adc86901000_.csv`.
+
+```
+time_s,shape
+0,0
+0.183,5
+0.292,8
+```
+
+The first line is always `time_s,shape`. Each further line is one keyframe: its time in seconds and its mouth shape. Each time is written as the shortest decimal number that reads back as the same f32 value. The header's length field is not written, because the parser requires it to equal the time of the last keyframe. The keyframe count is the number of lines after the first. The CSV file therefore holds every value of the resource.
+
+The parser accepts a resource only if the keyframes end exactly at the end of the resource, every time is at least the previous one, every shape is below 16, and the length equals the last keyframe's time. All 18,206 resources pass.
+
+The `lips` stage of `cmd/verify` reads every CSV file with Go's `encoding/csv` reader. The values it reads are packed again as f32 and u8, and the bytes must equal the keyframe bytes of the source resource. All 18,206 files pass. This reader shares no code with the converter, but it is not an external tool, so the output is not verified by an independent program. A test in which one shape value was altered in one CSV file made that file fail.
+
 # Movies: movies/\*.bik
 
 The game's 61 cutscenes and logo screens are in `movies/`. They are Bink video files, a format by RAD Game Tools that the game plays with `binkw32.dll`. All 61 files begin with the signature "BIKi", which `file` identifies as Bink Video revision i. The parser is `kotor/bink.go`, and the converter is the `movies` stage of `cmd/convert`. All 61 files pass the parser's check: the header size field matches the file size, the frame index ends exactly at the end of the file, the largest-frame field equals the largest frame, and every audio packet fits inside its frame.

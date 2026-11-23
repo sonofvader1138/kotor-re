@@ -75,10 +75,6 @@ func qmul(a, b quat) quat {
 	}
 }
 
-func formatNumber(value float64) string {
-	return strconv.FormatFloat(value, 'f', 6, 64)
-}
-
 type MdlStats struct {
 	Nodes           int
 	Hidden          int
@@ -159,7 +155,7 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 	nameTableOffset, _ := u32(0xb8)
 	nameCount, _ := u32(0xc0)
 	names := make([]string, 0, nameCount)
-	for i := 0; i < nameCount; i++ {
+	for i := range nameCount {
 		nameOffset, ok := u32(nameTableOffset + 4*i)
 		name := ""
 		if ok {
@@ -169,9 +165,9 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 	}
 
 	var out strings.Builder
-	out.WriteString("# converted from " + label + "\n")
+	fmt.Fprintf(&out, "# converted from %s\n", label)
 	if mtllib != "" {
-		out.WriteString("mtllib " + mtllib + "\n")
+		fmt.Fprintf(&out, "mtllib %s\n", mtllib)
 	}
 
 	textures := map[string]bool{}
@@ -210,22 +206,22 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 		stats.Verts += vertexCount
 		stats.Faces += faceCount
 
-		out.WriteString("o " + name + "\n")
+		fmt.Fprintf(&out, "o %s\n", name)
 		material := strings.ToLower(texture)
 		if texture != "" && material != "null" {
-			out.WriteString("usemtl " + material + "\n")
+			fmt.Fprintf(&out, "usemtl %s\n", material)
 			textures[material] = true
 		}
 
 		verts := make([]vec3, 0, vertexCount)
-		for i := 0; i < vertexCount; i++ {
+		for i := range vertexCount {
 			values, _ := f32(vertexOffset+vertexSize*i, 3)
 			vertex := vec3{values[0], values[1], values[2]}
 			verts = append(verts, vertex)
 
 			if hasMdx && positionOffset != none {
 				mdxPosition := mdxOffset + stride*i + positionOffset
-				for axis := 0; axis < 3; axis++ {
+				for axis := range 3 {
 					if math.Abs(vertex[axis]-mdxFloat(mdxPosition+4*axis)) > positionTolerance {
 						stats.Mismatch++
 						break
@@ -234,8 +230,7 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 			}
 
 			world := qrot(rotation, vertex)
-			out.WriteString("v " + formatNumber(world[0]+position[0]) + " " + formatNumber(world[1]+position[1]) +
-				" " + formatNumber(world[2]+position[2]) + "\n")
+			fmt.Fprintf(&out, "v %.6f %.6f %.6f\n", world[0]+position[0], world[1]+position[1], world[2]+position[2])
 
 			// vt for every vertex keeps v/vt indices aligned
 			u, v := 0.0, 0.0
@@ -243,10 +238,10 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 				u = mdxFloat(mdxOffset + stride*i + uvOffset)
 				v = mdxFloat(mdxOffset + stride*i + uvOffset + 4)
 			}
-			out.WriteString("vt " + formatNumber(u) + " " + formatNumber(v) + "\n")
+			fmt.Fprintf(&out, "vt %.6f %.6f\n", u, v)
 		}
 
-		for face := 0; face < faceCount; face++ {
+		for face := range faceCount {
 			faceEntry := faceOffset + faceSize*face
 			vertexIndices := faceEntry + faceVerticesOffset
 			var ix [3]int
@@ -265,7 +260,7 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 			normal, _ := f32(faceEntry, 3)
 			corner0, corner1, corner2 := verts[ix[0]], verts[ix[1]], verts[ix[2]]
 			var edge1, edge2 vec3
-			for axis := 0; axis < 3; axis++ {
+			for axis := range 3 {
 				edge1[axis] = corner1[axis] - corner0[axis]
 				edge2[axis] = corner2[axis] - corner0[axis]
 			}
@@ -328,7 +323,7 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 			mesh(offset+nodeHeaderSize, name, worldRotation, worldPosition)
 		}
 
-		for i := 0; i < childCount; i++ {
+		for i := range childCount {
 			if child, ok := u32(childOffset + 4*i); ok {
 				node(child, worldRotation, worldPosition, depth+1)
 			}

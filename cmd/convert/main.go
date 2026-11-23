@@ -3,7 +3,7 @@
 // Movies require ffmpeg. All stages run at the same time. Each stage writes its own outputs and reports
 // and keeps its own summary lines, which are printed in stage order at the end.
 //
-// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui]   (default: all)
+// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips]   (default: all)
 package main
 
 import (
@@ -52,8 +52,8 @@ func convertModels(summary *kotor.Summary) {
 
 	// The first pack in priority order wins, so the packs are read in reverse.
 	texturePath := map[string]string{}
-	for i := len(kotor.TexturePacks) - 1; i >= 0; i-- {
-		pack := kotor.TexturePacks[i]
+	for _, pack := range slices.Backward(kotor.TexturePacks) {
+
 		for _, entry := range packErf(pack) {
 			if entry.Ext == "tpc" {
 				texturePath[entry.Resref] = "../../TexturePacks/" + pack + "/" + entry.Resref + ".png"
@@ -397,6 +397,43 @@ func convertGui(summary *kotor.Summary) {
 	summary.Tally("gui", report)
 }
 
+// Lips: lips/<module>.mod -> assets/lips/<module>/<resref>.csv, with one "time_s,shape" line per keyframe.
+// Each archive keeps its own folder, so names that occur in several archives are written once per archive.
+// Empty archives produce no folder.
+func convertLips(summary *kotor.Summary) {
+	fmt.Println("lips...")
+	src := filepath.Join(kotor.Game, "lips")
+	out := filepath.Join(kotor.Assets, "lips")
+	kotor.MakeDir(out)
+
+	var report []string
+	written := map[string]bool{}
+	for _, archive := range kotor.ListFiles(src, ".mod", false) {
+		module := strings.TrimSuffix(archive, filepath.Ext(archive))
+		for _, entry := range kotor.ReadErf(filepath.Join(src, archive)) {
+			label := module + "/" + entry.Resref
+			if entry.Type != kotor.TypeLip {
+				report = append(report, label+"."+entry.Ext+" FAIL: not a LIP resource")
+				continue
+			}
+
+			lip := kotor.ParseLip(entry.Data())
+			report = append(report, kotor.ReportLip(label, lip))
+			if len(lip.Errors) > 0 {
+				continue
+			}
+
+			file := filepath.Join(module, entry.Resref+".csv")
+			kotor.MakeDir(filepath.Join(out, module))
+			kotor.WriteFile(filepath.Join(out, file), kotor.LipCsv(lip))
+			written[file] = true
+		}
+	}
+
+	prune(out, written, []string{".csv"})
+	summary.Tally("lips", report)
+}
+
 // Movies start first because they take longest.
 var stages = []kotor.Stage{
 	{Name: "movies", Run: convertMovies},
@@ -407,6 +444,7 @@ var stages = []kotor.Stage{
 	{Name: "sounds", Run: func(summary *kotor.Summary) { convertAudio(summary, "sounds", "streamsounds") }},
 	{Name: "waves", Run: func(summary *kotor.Summary) { convertAudio(summary, "waves", "streamwaves") }},
 	{Name: "gui", Run: convertGui},
+	{Name: "lips", Run: convertLips},
 }
 
 func main() {

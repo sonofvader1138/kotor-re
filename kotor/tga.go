@@ -164,14 +164,14 @@ func DecodeTga(file []byte, header *TgaHeader) *TgaImage {
 	stride := width * channels
 	pix := make([]byte, stride*height)
 
-	for y := 0; y < height; y++ {
+	for y := range height {
 		sourceRow := height - 1 - y
 		if header.TopDown {
 			sourceRow = y
 		}
 		srcRow := header.PixelOffset + sourceRow*stride
 
-		for x := 0; x < width; x++ {
+		for x := range width {
 			src := srcRow + x*channels
 			dst := y*stride + x*channels
 			if channels == 1 {

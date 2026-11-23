@@ -23,7 +23,7 @@ var colorType = map[int]byte{1: 0, 3: 2, 4: 6}
 func EncodePng(width, height int, pix []byte, channels int) []byte {
 	stride := width * channels
 	raw := make([]byte, (stride+1)*height)
-	for y := 0; y < height; y++ {
+	for y := range height {
 		copy(raw[y*(stride+1)+1:], pix[y*stride:(y+1)*stride])
 	}
 

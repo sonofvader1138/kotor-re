@@ -113,7 +113,7 @@ func ParseBink(file []byte) *BinkResult {
 	}
 
 	// The three track arrays follow each other; each holds 4 bytes per track.
-	for track := 0; track < trackCount; track++ {
+	for track := range trackCount {
 		maxDecoded := binkHeaderSize + 4*track
 		rateAndFlags := maxDecoded + 4*trackCount
 		id := rateAndFlags + 4*trackCount
@@ -160,7 +160,7 @@ func ParseBink(file []byte) *BinkResult {
 		// Each frame begins with one audio packet per track: u32 size, then size bytes.
 		// A packet of 4 or more bytes starts with u32 decoded size in bytes.
 		packet := start
-		for track := 0; track < trackCount; track++ {
+		for track := range trackCount {
 			size := u32(packet)
 			if packet+packetSizeField+size > end {
 				result.Errors = append(result.Errors,
