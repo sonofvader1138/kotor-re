@@ -7,6 +7,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -457,10 +458,13 @@ func convertGui(lines *summary) {
 				continue
 			}
 
-			var text strings.Builder
-			writeJson(&text, guiJson(gff.Root), 0)
-			text.WriteString("\n")
-			writeFile(filepath.Join(out, resource.Resref+".json"), []byte(text.String()))
+			text, err := json.MarshalIndent(guiJson(gff.Root), "", " ")
+			if err != nil {
+				report = append(report, src.dir+"/"+resource.Resref+" FAIL: "+err.Error())
+				continue
+			}
+
+			writeFile(filepath.Join(out, resource.Resref+".json"), append(text, '\n'))
 			written[resource.Resref+".json"] = true
 			report = append(report, src.dir+"/"+resource.Resref+" PASS")
 		}
