@@ -6,7 +6,7 @@ All integers and floats are little-endian. Offsets are in hexadecimal and count 
 
 # Archives: chitin.key, data/\*.bif and ERF
 
-Most game resources are stored in 26 BIF archives in `data/`. A BIF archive holds resource data but no names. The file `chitin.key` (the KEY file) lists every resource, gives it a name, and records which BIF archive holds it. Both files are needed to extract a named resource. The reader is `scripts/kotor.js`.
+Most game resources are stored in 26 BIF archives in `data/`. A BIF archive holds resource data but no names. The file `chitin.key` (the KEY file) lists every resource, gives it a name, and records which BIF archive holds it. Both files are needed to extract a named resource. The reader is `kotor/kotor.go`.
 
 A resource name is called a resref. It is at most 16 characters long. A resource is identified by its resref together with a numeric resource type.
 
@@ -97,7 +97,7 @@ In the "V3.2" row, the four characters before the version differ by type and are
 
 ## ERF archive
 
-An ERF archive is a self-contained archive: unlike a BIF archive, it stores the name of each resource itself. The four texture packs in `TexturePacks/` are ERF archives. The reader is `readErf` in `scripts/kotor.js`. `patch.erf` is also an ERF archive, and `readErf` reads its tables without error. It holds 97 resources: 84 TPC textures, 7 GUI layouts, 4 resources of type 2017, and the MDL and MDX resources of one model. Only its GUI resources have been examined. The 123 files in `lips/` are ERF archives with the signature "MOD V1.0" instead of "ERF V1.0" (see the lip sync section). The files in `modules/` and `rims/` are not ERF archives (see the RIM section below).
+An ERF archive is a self-contained archive: unlike a BIF archive, it stores the name of each resource itself. The four texture packs in `TexturePacks/` are ERF archives. The reader is `ReadErf` in `kotor/kotor.go`. `patch.erf` is also an ERF archive, and `ReadErf` reads its tables without error. It holds 97 resources: 84 TPC textures, 7 GUI layouts, 4 resources of type 2017, and the MDL and MDX resources of one model. Only its GUI resources have been examined. The 123 files in `lips/` are ERF archives with the signature "MOD V1.0" instead of "ERF V1.0" (see the lip sync section). The files in `modules/` and `rims/` are not ERF archives (see the RIM section below).
 
 An ERF archive begins with a 160-byte header. The evidence below covers 128 archives: the 4 texture packs, `patch.erf` and the 123 MOD archives in `lips/`.
 
@@ -150,7 +150,7 @@ The tpb and tpc packs are likely the lower texture quality settings. Only tpa an
 
 ## RIM archive
 
-A RIM archive is a self-contained archive like ERF, with a simpler header and a single table. All 246 files in `modules/` and `rims/` begin with "RIM V1.0". They hold 22,511 resources in total. The layout below was established only to search them for GUI resources. There is no reader in `scripts/kotor.js` yet. Apart from their signatures (see below), the resources have not been examined.
+A RIM archive is a self-contained archive like ERF, with a simpler header and a single table. All 246 files in `modules/` and `rims/` begin with "RIM V1.0". They hold 22,511 resources in total. The layout below was established only to search them for GUI resources. There is no reader in `kotor/kotor.go` yet. Apart from their signatures (see below), the resources have not been examined.
 
 A RIM archive begins with a 120-byte header.
 
@@ -195,7 +195,7 @@ Types 2012, 2014 and 2023 each occur 117 times, which equals the number of `_loc
 
 # 3D models: MDL and MDX
 
-Each 3D model is stored as two resources with the same resref. The MDL resource (type 2002) holds the model's structure: a tree of nodes, some of which carry meshes. The MDX resource (type 3008) holds the vertex data for those meshes. The converter is `scripts/mdl2obj.js`. It writes Wavefront OBJ files.
+Each 3D model is stored as two resources with the same resref. The MDL resource (type 2002) holds the model's structure: a tree of nodes, some of which carry meshes. The MDX resource (type 3008) holds the vertex data for those meshes. The converter is `cmd/mdl2obj`. It writes Wavefront OBJ files.
 
 The models examined here are in `data/models.bif`, which contains 2,445 MDL resources and 2,445 MDX resources, including area room models such as `m01aa_01a`. Of the converted models, 1,329 have names of that form. The BIF archives hold 387 more models, which have not been examined or converted: 305 in `items.bif`, 63 in `player.bif` and 19 in `party.bif`. The RIM archives hold another 239 MDL and 252 MDX resources, which have not been examined either. `patch.erf` holds one model, `w_lghtsbr_008`, which has not been examined. The MOD archives in `lips/` hold only LIP resources, and the texture packs hold no models.
 
@@ -203,7 +203,7 @@ All 2,445 models pass the converter's checks. Every read stays inside the file, 
 
 The converter omits meshes whose render flag is 0 (see the mesh header). This removes 14,055 meshes. After this, 473 models have no meshes left and are not written, and 1,972 models are written. Each OBJ file refers to an MTL file with its textures (see "Conversion to model materials" in the texture section).
 
-The OBJ files are verified with assimp, an independent model loader. `scripts/verify.js` imports each of the 1,972 OBJ files and requires at least one mesh and the same face count as the file. All 1,972 pass.
+The OBJ files are verified with assimp, an independent model loader. `cmd/verify` imports each of the 1,972 OBJ files and requires at least one mesh and the same face count as the file. All 1,972 pass.
 
 ## MDL file header
 
@@ -321,7 +321,7 @@ The archive also contains resources of types 2016 (1,202), 2052 (156) and 2053 (
 
 # Textures: TPC
 
-A TPC file (resource type 3007) is a texture. It holds pixel data for one image, or for several sub-images, each with its own mipmap chain. A mipmap chain is a series of copies of an image, each half the width and height of the previous one. The file ends with an optional TXI trailer. TXI (texture information) is plain ASCII text that sets rendering options. The converter is `scripts/tpc2png.js`. It writes the top mipmap level as an 8-bit RGBA PNG.
+A TPC file (resource type 3007) is a texture. It holds pixel data for one image, or for several sub-images, each with its own mipmap chain. A mipmap chain is a series of copies of an image, each half the width and height of the previous one. The file ends with an optional TXI trailer. TXI (texture information) is plain ASCII text that sets rendering options. The converter is `cmd/tpc2png`. It writes the top mipmap level as an 8-bit RGBA PNG.
 
 All 11,452 TPC files in the four texture packs parse completely. In each file, the header, the pixel data and an ASCII trailer together account for every byte. The converted PNG files are verified with two independent tools. ImageMagick decodes each PNG to exactly the pixels of the decoded TPC texture, and pngcheck accepts each file. This holds for all 3,294 textures of tpa and all 1,570 textures of gui.
 
@@ -381,7 +381,7 @@ The PNG files keep their alpha channel, but the MTL files do not declare it as t
 
 # Images: TGA in the BIF archives
 
-Resource type 3 is a TGA image, the uncompressed image format defined by Truevision. The BIF archives hold 5,601 of them. They matter because 5,586 of them are lightmaps, the precomputed lighting that the game blends over area textures. The converter is `scripts/tga.js`, called by the `tga` stage of `scripts/convert.js`. It writes 8-bit PNG files with the same channels as the TGA.
+Resource type 3 is a TGA image, the uncompressed image format defined by Truevision. The BIF archives hold 5,601 of them. They matter because 5,586 of them are lightmaps, the precomputed lighting that the game blends over area textures. The converter is `kotor/tga.go`, called by the `tga` stage of `cmd/convert`. It writes 8-bit PNG files with the same channels as the TGA.
 
 The images are in three groups. The table below lists each group, its archives and its output directory.
 
@@ -444,7 +444,7 @@ The lightmap archives also hold 112 resources of type 3001, one per area, named 
 
 # User interface layouts: GUI
 
-A GUI file (resource type 2047) describes one screen or panel of the user interface. It lists the screen's controls, such as buttons, labels and list boxes, with their position, size, textures, font and text. The game contains 91 GUI resources. 84 are in `data/gui.bif`, which holds nothing else, and 7 are in `patch.erf`. No other archive holds one: `chitin.key` lists type 2047 only for `gui.bif`, the 246 RIM files hold none, and the signature "GUI V3.2" occurs in no other file. The reader is `readGff` in `scripts/kotor.js`, and the converter is the `gui` stage of `scripts/convert.js`. It writes one JSON file per resource, to `assets/data/gui/` for `gui.bif` and to `assets/patch/` for `patch.erf`.
+A GUI file (resource type 2047) describes one screen or panel of the user interface. It lists the screen's controls, such as buttons, labels and list boxes, with their position, size, textures, font and text. The game contains 91 GUI resources. 84 are in `data/gui.bif`, which holds nothing else, and 7 are in `patch.erf`. No other archive holds one: `chitin.key` lists type 2047 only for `gui.bif`, the 246 RIM files hold none, and the signature "GUI V3.2" occurs in no other file. The reader is `ReadGff` in `kotor/gff.go`, and the converter is the `gui` stage of `cmd/convert`. It writes one JSON file per resource, to `assets/data/gui/` for `gui.bif` and to `assets/patch/` for `patch.erf`.
 
 ## Resources in patch.erf
 
@@ -553,7 +553,7 @@ The meanings of FILLSTYLE (0, 1 or 2), DIMENSION, INNEROFFSET, PULSING, DRAWSTYL
 
 # Music: streammusic/\*.wav
 
-The game's music is in `streammusic/`, which holds 119 files. All of them have the extension `.wav`, but none can be played as stored. They use two layouts, each of which hides a standard audio file behind extra bytes. The converter is `scripts/audio.js`. All 119 files pass its check: walking the MP3 frames or WAV chunks of each file ends exactly at the end of the file.
+The game's music is in `streammusic/`, which holds 119 files. All of them have the extension `.wav`, but none can be played as stored. They use two layouts, each of which hides a standard audio file behind extra bytes. The converter is `kotor/audio.go`. All 119 files pass its check: walking the MP3 frames or WAV chunks of each file ends exactly at the end of the file.
 
 ## Layout A: MP3 behind a fake WAV header
 
@@ -577,7 +577,7 @@ In 47 of the 51 embedded WAV files the audio is IMA ADPCM, a 4-bit compressed fo
 
 ## IMA ADPCM encoding
 
-The ADPCM data follows the standard WAV variant of IMA ADPCM. The decoder is `scripts/adpcm2pcm.js`.
+The ADPCM data follows the standard WAV variant of IMA ADPCM. The decoder is `kotor/adpcm.go`.
 
 The audio is split into blocks of 2,048 bytes. Each block holds 2,041 samples per channel. A block begins with a 4-byte header for each channel: an s16 starting sample, a u8 step index, and a zero byte. The rest of the block alternates between channels in groups of 4 bytes, which hold 8 samples. Within each byte the low 4 bits come first. The "fact" chunk stores the total number of samples per channel.
 
@@ -585,11 +585,11 @@ The decoder was checked as follows. Each block header stores the sample the enco
 
 ## Conversion and verification
 
-The `music` stage of `scripts/convert.js` writes the 68 Layout A files to `assets/streammusic/` as MP3 files, with the fake header removed. It writes the 51 Layout B files as WAV files with 16-bit PCM audio, with the stub removed and ADPCM decoded. ffprobe opens all 119 outputs without error. It reports all 51 WAV outputs as 16-bit stereo PCM, 50 at 44,100 Hz and one at 22,050 Hz.
+The `music` stage of `cmd/convert` writes the 68 Layout A files to `assets/streammusic/` as MP3 files, with the fake header removed. It writes the 51 Layout B files as WAV files with 16-bit PCM audio, with the stub removed and ADPCM decoded. ffprobe opens all 119 outputs without error. It reports all 51 WAV outputs as 16-bit stereo PCM, 50 at 44,100 Hz and one at 22,050 Hz.
 
 # Sound effects and voices: streamsounds/\*.wav
 
-The folder `streamsounds/` holds 970 files with the extension `.wav`. They are combat voice lines, creature sounds, ambient loops and a few music stingers that the game streams from disk instead of loading from the BIF archives. Every file uses Layout B from the music section: the same 470-byte MP3 stub, followed by a complete WAV file at offset 0x1D6 (470). No file uses Layout A, and none uses ADPCM. The converter `scripts/convert.js` (stage `sounds`) strips the stub and writes the embedded WAV unchanged to `assets/streamsounds/`.
+The folder `streamsounds/` holds 970 files with the extension `.wav`. They are combat voice lines, creature sounds, ambient loops and a few music stingers that the game streams from disk instead of loading from the BIF archives. Every file uses Layout B from the music section: the same 470-byte MP3 stub, followed by a complete WAV file at offset 0x1D6 (470). No file uses Layout A, and none uses ADPCM. The converter `cmd/convert` (stage `sounds`) strips the stub and writes the embedded WAV unchanged to `assets/streamsounds/`.
 
 ## Embedded WAV
 
@@ -645,7 +645,7 @@ All 970 files pass the parser: the chunk walk of each embedded WAV ends exactly 
 
 # Voice-over: streamwaves/\*\*/\*.wav
 
-The folder `streamwaves/` holds the spoken dialog of the game: 13,799 files with the extension `.wav`, 552 MB in total. Every file uses Layout A from the music section: a 58-byte fake WAV header followed by an MP3 stream. No file uses Layout B. The converter `scripts/convert.js` (stage `waves`) strips the header and writes the MP3 stream unchanged to `assets/streamwaves/`, keeping the folder structure.
+The folder `streamwaves/` holds the spoken dialog of the game: 13,799 files with the extension `.wav`, 552 MB in total. Every file uses Layout A from the music section: a 58-byte fake WAV header followed by an MP3 stream. No file uses Layout B. The converter `cmd/convert` (stage `waves`) strips the header and writes the MP3 stream unchanged to `assets/streamwaves/`, keeping the folder structure.
 
 ## Fake header
 
@@ -695,7 +695,7 @@ The prefixes appear in both upper and lower case. No two paths collide when case
 
 ## Verification
 
-All 13,799 files pass the parser in `scripts/audio.js`: the MP3 frame walk of each file ends exactly at the end of the file. ffprobe opens all 13,799 outputs without error. ffmpeg decodes every output without error, and each decode yields the sample count given above.
+All 13,799 files pass the parser in `kotor/audio.go`: the MP3 frame walk of each file ends exactly at the end of the file. ffprobe opens all 13,799 outputs without error. ffmpeg decodes every output without error, and each decode yields the sample count given above.
 
 # Lip sync: lips/\*.mod
 
@@ -752,7 +752,7 @@ The name of every LIP resource equals the name of a voice file in `streamwaves/`
 
 # Movies: movies/\*.bik
 
-The game's 61 cutscenes and logo screens are in `movies/`. They are Bink video files, a format by RAD Game Tools that the game plays with `binkw32.dll`. All 61 files begin with the signature "BIKi", which `file` identifies as Bink Video revision i. The parser is `scripts/bink.js`, and the converter is the `movies` stage of `scripts/convert.js`. All 61 files pass the parser's check: the header size field matches the file size, the frame index ends exactly at the end of the file, the largest-frame field equals the largest frame, and every audio packet fits inside its frame.
+The game's 61 cutscenes and logo screens are in `movies/`. They are Bink video files, a format by RAD Game Tools that the game plays with `binkw32.dll`. All 61 files begin with the signature "BIKi", which `file` identifies as Bink Video revision i. The parser is `kotor/bink.go`, and the converter is the `movies` stage of `cmd/convert`. All 61 files pass the parser's check: the header size field matches the file size, the frame index ends exactly at the end of the file, the largest-frame field equals the largest frame, and every audio packet fits inside its frame.
 
 The video and audio compression schemes are not documented here. The conversion uses ffmpeg's decoders, `binkvideo` and `binkaudio_dct`, which decode all 61 files.
 
@@ -806,6 +806,6 @@ The decoded sizes of a track's packets add up to the length of the movie. Dividi
 
 ## Conversion and verification
 
-The `movies` stage of `scripts/convert.js` uses ffmpeg to convert each movie to an MP4 file in `assets/movies/`, with H.264 video and AAC audio. The video uses a constant quality setting (CRF 12), because at CRF 18 frames in 12 movies fell below 40 dB PSNR (peak signal-to-noise ratio, a measure of how closely the output matches the source).
+The `movies` stage of `cmd/convert` uses ffmpeg to convert each movie to an MP4 file in `assets/movies/`, with H.264 video and AAC audio. The video uses a constant quality setting (CRF 12), because at CRF 18 frames in 12 movies fell below 40 dB PSNR (peak signal-to-noise ratio, a measure of how closely the output matches the source).
 
-`scripts/verify.js` checks all 61 outputs with ffprobe and ffmpeg. For each movie, ffprobe must report the frame size, the frame count, the sample rate, the channel count and the audio duration of the Bink file, with the duration within 0.1 seconds. Every output frame must also reach at least 40 dB PSNR against the decoded Bink frame. All 61 outputs pass. The lowest PSNR of any frame is 41.8 dB.
+`cmd/verify` checks all 61 outputs with ffprobe and ffmpeg. For each movie, ffprobe must report the frame size, the frame count, the sample rate, the channel count and the audio duration of the Bink file, with the duration within 0.1 seconds. Every output frame must also reach at least 40 dB PSNR against the decoded Bink frame. All 61 outputs pass. The lowest PSNR of any frame is 41.8 dB.

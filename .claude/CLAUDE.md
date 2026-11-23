@@ -9,6 +9,7 @@
 
 The following tools are installed:
 
+- go
 - node
 - jq
 - perl
@@ -26,7 +27,6 @@ The following tools are installed:
 - The working directory is `~/re`
 - You are forbidden from editing the original game files in `~/re/swkotor`
 - Scratch work goes in the `~/re/temp` directory
-- Scripts go in the `~/re/scripts` directory
 - Converted, human-readable (or in otherwise ubiquitous binary format) assets should be stored in the `~/re/assets` directory
   - These assets should be primarily organized similarly to how they are organized in the original game files
   - When the original game files don't offer a clear structure, prefer to organize assets by feature and with a flat structure
@@ -35,6 +35,8 @@ The following tools are installed:
 - Gather evidence before hypothesizing: file, xxd, strings, entropy per region. Compare at least 5 samples of each type.
 - Record findings in `~/re/FILE_FORMATS.md`, which holds all formats in one file. Give each field its offset, type, evidence and confidence. Write UNKNOWN for anything unverified.
 - A parser is correct only if it consumes each file exactly, keeps offsets inside the file, and yields plausible counts. Report pass/fail per sample.
+- Write all long-living code in Golang.
+- For short-lived scripts, you may use whichever language is most obvious, simple, or easy.
 
 ## Writing
 
