@@ -197,7 +197,7 @@ Types 2012, 2014 and 2023 each occur 117 times, once in each of the 117 main mod
 
 A module is one playable location of the game, such as one district of a planet. The folder `modules/` holds 117 modules in 234 RIM archives, 70 MB in total. Each module consists of two archives: `<module>.rim`, called the main archive here, and `<module>_s.rim`, called the support archive here. The main archive describes the area and the objects placed in it. The support archive holds the templates, dialogs and scripts that those objects use. The area's 3D geometry is not in the module; it is in the BIF archives (see "Links to other files" below).
 
-The reader is `ReadRim` in `kotor/kotor.go`, and every resource except the scripts is read with `ReadGff` in `kotor/gff.go`. The scratch program `temp/rimreport` writes one line per archive to `temp/reports/modules.txt`. All 234 archives pass: each RIM table parses, all 9,712 GFF resources parse with the signature that matches their resource type and version "V3.2", and all 10,863 scripts have a valid header. No resource has been converted to `assets/` yet.
+The reader is `ReadRim` in `kotor/kotor.go`. Every resource except the scripts is read with `ReadGff` in `kotor/gff.go`, and the scripts are read with `ParseNcs` in `kotor/ncs.go`. The `modules` stage of `cmd/convert` converts every resource to `assets/modules/` and writes one report line per resource to `temp/reports/modules.txt` (see "Conversion and verification" below). All 234 archives pass: each RIM table parses, all 9,712 GFF resources parse with the signature that matches their resource type and version "V3.2", and all 10,863 scripts decode completely.
 
 ## Archive pairs
 
@@ -251,12 +251,12 @@ Module files use five GFF field types that GUI files do not use. The table below
 
 A localized string stores a string number and any number of literal substrings. Its layout in the field data is described below.
 
-| Offset | Type   | Meaning                                         | Evidence                                                                                           | Confidence |
-| ------ | ------ | ----------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | u32    | Number of bytes that follow this field          | Equals the length of the rest of the value in all 77,261 fields.                                   | high       |
-| 0x04   | u32    | String number in `dialog.tlk`, or 0xFFFFFFFF    | Values such as 35,782 for an area name, and 0xFFFFFFFF where a literal substring is given instead. | medium     |
-| 0x08   | u32    | Number of substrings                            | The value is 0 in 77,091 fields and 1 in 170 fields.                                               | high       |
-| 0x0C   | varies | Substrings: u32 ID, u32 length, then characters | All 170 substrings have ID 0. Their text is plausible, for example the IFO Mod_Name "tar_m02aa".   | medium     |
+| Offset | Type   | Meaning                                         | Evidence                                                                                                                                                                                                      | Confidence |
+| ------ | ------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | u32    | Number of bytes that follow this field          | Equals the length of the rest of the value in all 77,261 fields.                                                                                                                                              | high       |
+| 0x04   | u32    | String number in `dialog.tlk`, or 0xFFFFFFFF    | All 43,000 numbers other than 0xFFFFFFFF name an entry with text, such as 35,782, "Taris - South Apartments", for the area name of `tar_m02aa`. 0xFFFFFFFF occurs where a literal substring is given instead. | high       |
+| 0x08   | u32    | Number of substrings                            | The value is 0 in 77,091 fields and 1 in 170 fields.                                                                                                                                                          | high       |
+| 0x0C   | varies | Substrings: u32 ID, u32 length, then characters | All 170 substrings have ID 0. Their text is plausible, for example the IFO Mod_Name "tar_m02aa".                                                                                                              | medium     |
 
 The meaning of the substring ID is UNKNOWN, because only the value 0 occurs. It may encode a language.
 
@@ -314,14 +314,173 @@ The area's geometry and layout are in BIF archives under the area name. The reso
 
 ## Compiled scripts: NCS
 
-An NCS resource (type 2010) is a compiled script. Only its 13-byte header has been examined. Unlike the other structures in this document, the size field is big-endian.
+An NCS resource (type 2010) is a compiled script. It holds bytecode for a stack machine that runs NWScript, the game's scripting language. Module objects run these scripts through their script fields, such as OnEnter. The decoder is `ParseNcs` in `kotor/ncs.go`. It decodes all 10,863 scripts in the modules and all 1,784 scripts in `data/scripts.bif`, and no script fails.
 
-| Offset | Type    | Meaning                       | Evidence                                        | Confidence |
-| ------ | ------- | ----------------------------- | ----------------------------------------------- | ---------- |
-| 0x00   | char[8] | Signature "NCS V1.0"          | Present in all 10,863 scripts.                  | high       |
-| 0x08   | u8      | UNKNOWN, always 0x42          | The value is 0x42 ("B") in all 10,863 scripts.  | low        |
-| 0x09   | u32 BE  | Size of the resource in bytes | Equals the resource size in all 10,863 scripts. | high       |
-| 0x0D   | varies  | Bytecode                      | The instruction format is UNKNOWN.              | UNKNOWN    |
+An NCS file is the signature "NCS V1.0" followed by instructions up to the end of the file. There is no other header. The byte 0x42 at offset 0x08 is the first instruction, which carries the file size. Every operand is big-endian, unlike the other formats in this document.
+
+| Offset | Type    | Meaning                                                  | Evidence                                                                                                                              | Confidence |
+| ------ | ------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | char[8] | Signature "NCS V1.0"                                     | Present in all 12,647 scripts.                                                                                                        | high       |
+| 0x08   | u8      | Opcode 0x42, called T here: the program size instruction | The value is 0x42 in all 12,647 scripts. Opcode 0x42 occurs nowhere else, and the instructions that follow decode to the end of file. | high       |
+| 0x09   | u32 BE  | Size of the resource in bytes                            | Equals the resource size in all 12,647 scripts.                                                                                       | high       |
+| 0x0D   | varies  | Further instructions                                     | Decoded as described below.                                                                                                           | high       |
+
+### Instructions
+
+An instruction is a u8 opcode, a u8 type and the operands. The type names the kind of the values the instruction works on. Only the T instruction has no type byte. The decoder accepts a script only if every instruction has a known opcode, a type that the opcode accepts, and operands that end inside the file; if the last instruction ends exactly at the end of the file; and if every jump lands on the first byte of an instruction. All 12,647 scripts meet these rules.
+
+The opcode names and operand layouts come from the published description of the NWScript virtual machine of Neverwinter Nights. The game files do not contain them. They were taken as a hypothesis and tested against the files. The evidence is that all 5,680,941 instructions of the 12,647 scripts decode under these layouts with no byte left over, and that all 817,355 jumps land on instructions. A wrong operand size would shift every following instruction, so the decoding would fail.
+
+The table below lists the opcodes. The operand letters stand for i32, u32, i16, u16 and u8; "jump" is an i32 offset relative to the start of the instruction, and "routine" is a u16 routine number followed by a u8 argument count. The count is the number of instructions in all 12,647 scripts. The meanings are those of the published description and have not been confirmed in the running game, except where the evidence column says otherwise.
+
+| Opcode | Name       | Types            | Operands              | Count     | Meaning                                                                   | Evidence and confidence                                                                                        |
+| ------ | ---------- | ---------------- | --------------------- | --------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| 0x01   | CPDOWNSP   | 1                | i32 offset, u16 size  | 690,883   | Copy the top of the stack down to an offset                               | Decodes exactly. High.                                                                                         |
+| 0x02   | RSADD      | I F S O E0–E3    | none                  | 611,495   | Reserve a stack slot for a value of the type                              | Decodes exactly. High.                                                                                         |
+| 0x03   | CPTOPSP    | 1                | i32 offset, u16 size  | 589,468   | Copy a value from an offset to the top of the stack                       | Decodes exactly. High.                                                                                         |
+| 0x04   | CONST      | I F S O          | value of the type     | 1,144,589 | Push a constant                                                           | Strings are plausible text such as "Carth". High.                                                              |
+| 0x05   | ACTION     | 0                | routine               | 336,059   | Call an engine routine                                                    | Every routine number exists in `nwscript.nss`, and the argument counts fit the declarations (see below). High. |
+| 0x06   | LOGAND     | II               | none                  | 64,611    | Logical and                                                               | Decodes exactly. Medium.                                                                                       |
+| 0x07   | LOGOR      | II               | none                  | 47,941    | Logical or                                                                | Decodes exactly. Medium.                                                                                       |
+| 0x08   | INCOR      | II               | none                  | 26        | Bitwise or                                                                | Decodes exactly. Medium.                                                                                       |
+| 0x09   | EXCOR      | II               | none                  | 0         | Bitwise exclusive or                                                      | Never occurs. UNKNOWN.                                                                                         |
+| 0x0A   | BOOLAND    | II               | none                  | 12        | Bitwise and                                                               | Decodes exactly. Medium.                                                                                       |
+| 0x0B   | EQUAL      | pairs            | none; u16 size for TT | 169,313   | Compare for equality                                                      | Decodes exactly. Medium.                                                                                       |
+| 0x0C   | NEQUAL     | pairs            | none; u16 size for TT | 13,136    | Compare for inequality                                                    | One NEQUALTT with size 12 decodes exactly. Medium.                                                             |
+| 0x0D   | GEQ        | II FF            | none                  | 2,920     | Greater than or equal                                                     | Decodes exactly. Medium.                                                                                       |
+| 0x0E   | GT         | II FF            | none                  | 20,806    | Greater than                                                              | Decodes exactly. Medium.                                                                                       |
+| 0x0F   | LT         | II FF            | none                  | 12,130    | Less than                                                                 | Decodes exactly. Medium.                                                                                       |
+| 0x10   | LEQ        | II FF            | none                  | 5,928     | Less than or equal                                                        | Decodes exactly. Medium.                                                                                       |
+| 0x11   | SHLEFT     | II               | none                  | 1         | Shift left                                                                | One occurrence. Low.                                                                                           |
+| 0x12   | SHRIGHT    | II               | none                  | 0         | Shift right                                                               | Never occurs. UNKNOWN.                                                                                         |
+| 0x13   | USHRIGHT   | II               | none                  | 0         | Unsigned shift right                                                      | Never occurs. UNKNOWN.                                                                                         |
+| 0x14   | ADD        | arithmetic pairs | none                  | 38,938    | Add; SS concatenates strings                                              | Decodes exactly. Medium.                                                                                       |
+| 0x15   | SUB        | arithmetic pairs | none                  | 2,223     | Subtract                                                                  | Decodes exactly. Medium.                                                                                       |
+| 0x16   | MUL        | arithmetic pairs | none                  | 3,090     | Multiply                                                                  | Decodes exactly. Medium.                                                                                       |
+| 0x17   | DIV        | arithmetic pairs | none                  | 1,974     | Divide                                                                    | Decodes exactly. Medium.                                                                                       |
+| 0x18   | MOD        | II               | none                  | 1         | Remainder                                                                 | One occurrence. Low.                                                                                           |
+| 0x19   | NEG        | I F              | none                  | 23,848    | Negate                                                                    | Decodes exactly. Medium.                                                                                       |
+| 0x1A   | COMP       | I                | none                  | 0         | Bitwise complement                                                        | Never occurs. UNKNOWN.                                                                                         |
+| 0x1B   | MOVSP      | 0                | i32                   | 849,059   | Move the stack pointer, which removes values                              | All values are negative multiples of 4. High.                                                                  |
+| 0x1D   | JMP        | 0                | jump                  | 301,917   | Jump                                                                      | All targets are instructions. High.                                                                            |
+| 0x1E   | JSR        | 0                | jump                  | 142,691   | Call a subroutine of the script                                           | All targets are instructions. High.                                                                            |
+| 0x1F   | JZ         | 0                | jump                  | 350,504   | Jump if the top of the stack is zero                                      | All targets are instructions. High.                                                                            |
+| 0x20   | RETN       | 0                | none                  | 79,559    | Return from a subroutine                                                  | All 12,647 scripts contain one. High.                                                                          |
+| 0x21   | DESTRUCT   | 1                | u16, i16, u16         | 2,480     | Remove a block from the stack but keep part of it                         | Decodes exactly. Medium.                                                                                       |
+| 0x22   | NOT        | I                | none                  | 13,668    | Logical not                                                               | Decodes exactly. Medium.                                                                                       |
+| 0x23   | DECISP     | I                | i32 offset            | 11,065    | Decrement an integer on the stack                                         | Decodes exactly. Medium.                                                                                       |
+| 0x24   | INCISP     | I                | i32 offset            | 11,180    | Increment an integer on the stack                                         | Decodes exactly. Medium.                                                                                       |
+| 0x25   | JNZ        | 0                | jump                  | 22,243    | Jump if the top of the stack is not zero                                  | All targets are instructions. High.                                                                            |
+| 0x26   | CPDOWNBP   | 1                | i32 offset, u16 size  | 2,471     | Copy down relative to the base pointer (global variables)                 | Decodes exactly. Medium.                                                                                       |
+| 0x27   | CPTOPBP    | 1                | i32 offset, u16 size  | 75,275    | Copy up relative to the base pointer                                      | Decodes exactly. Medium.                                                                                       |
+| 0x28   | DECIBP     | I                | i32 offset            | 0         | Decrement a global integer                                                | Never occurs. UNKNOWN.                                                                                         |
+| 0x29   | INCIBP     | I                | i32 offset            | 0         | Increment a global integer                                                | Never occurs. UNKNOWN.                                                                                         |
+| 0x2A   | SAVEBP     | 0                | none                  | 4,497     | Set the base pointer for global variables                                 | Occurs exactly as often as RESTOREBP. Medium.                                                                  |
+| 0x2B   | RESTOREBP  | 0                | none                  | 4,497     | Restore the base pointer                                                  | Occurs exactly as often as SAVEBP. Medium.                                                                     |
+| 0x2C   | STORESTATE | 0x10             | u32, u32              | 17,796    | Save the state for a deferred action, such as an argument of DelayCommand | Each one in the modules is followed by a forward JMP. Medium.                                                  |
+| 0x2D   | NOP        | 0                | none                  | 0         | No operation                                                              | Never occurs. UNKNOWN.                                                                                         |
+| 0x42   | T          | none             | u32 size              | 12,647    | Program size                                                              | Only at offset 0x08. High.                                                                                     |
+
+Opcode 0x1C does not occur and is not accepted by the decoder. Opcodes with a count of 0 are accepted with the published layout, but this layout is unverified.
+
+The type byte takes the values in the table below. The names are those of the listing. Types 0 and 1 carry no meaning: each opcode always uses the same one of the two, and no opcode uses both. The binary operations use a pair type, whose two letters name the types of the two operands. The decoder accepts some pairs that do not occur, such as VV for ADD. These are part of the published description and are unverified. In particular, no vector operation occurs in the module scripts.
+
+| Type       | Name                 | Meaning                                                                           | Evidence                                                                                                                    |
+| ---------- | -------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| 0x00, 0x01 | none                 | No value type                                                                     | See above.                                                                                                                  |
+| 0x03–0x06  | I F S O              | Integer, float, string, object                                                    | CONST reads an i32, an f32, a u16-prefixed string and an i32 for them. The strings are plausible text, for example "Carth". |
+| 0x10–0x13  | E0–E3                | Engine structures 0 to 3: effect, event, location and talent                      | `nwscript.nss` defines ENGINE_STRUCTURE_0 to 3 with these names. The order of the type codes is assumed to follow it.       |
+| 0x20–0x26  | II FF OO SS TT IF FI | Pairs of the types above. TT is a structure, whose size in bytes follows as a u16 | Decode exactly. The meaning of each pair is taken from the published description.                                           |
+| 0x30–0x33  | E0E0–E3E3            | Pairs of engine structures                                                        | One NEQUALE2E2 occurs.                                                                                                      |
+| 0x3A–0x3C  | VV VF FV             | Pairs with vectors                                                                | Never occurs. UNKNOWN.                                                                                                      |
+
+STORESTATE always has type 0x10, and its two operands are probably the stack sizes to save. The most common values are 472 and 4, 472 and 52, and 108 and 28.
+
+### Program structure
+
+All scripts share one entry pattern. After the T instruction, 7,371 module scripts begin with JSR to the main function, followed by RETN. The other 3,492 begin with RSADDI, then JSR and RETN. These reserve an integer for a return value, so they are probably conditional scripts, which dialogs use to decide whether a line is available. 3,990 module scripts contain SAVEBP, which probably marks scripts with global variables.
+
+### Engine routines: nwscript.nss
+
+ACTION calls an engine routine by number. The names come from `nwscript.nss`, an NWScript source file in `data/scripts.bif` with resource type 2009. The same archive holds 1,774 resources of type 2009, which are probably the sources of most of its 1,784 scripts. They have not been examined further. `nwscript.nss` declares constants and 772 routines. Routine n is the n-th function declaration in the file. The evidence is that 771 declarations are preceded by a comment "// n:" with the same n. The exception is routine 28, GetFacing, whose comment says "// 0:".
+
+The argument count of ACTION counts each argument once, including vectors, which take three stack values, and action arguments, which are passed through STORESTATE. For example, AssignCommand(object, action) is always called with 2 and Location(vector, float) with 2. The count lies between the number of required parameters and the number of all parameters for all but 16 of the 336,059 calls. The 16 others are 12 calls of AddPartyMember with 1 argument (declared with 2), 2 of ActionBarkString with 2 (declared with 1), 1 of StartCreditSequence with 2 (declared with 1) and 1 of EffectBlasterDeflectionIncrease with 2 (declared with 1). Fifteen of them are in module scripts, such as `k_act_carthjoin` in `tar_m02aa`. These scripts were probably compiled against an older version of `nwscript.nss`. In one of them, `nw_s0_lghtnbolt` in `scripts.bif`, the call is also absent from the script's own source, which confirms that the compiled script does not match the shipped source. The decoder reports these calls as warnings, not errors.
+
+The module scripts call 401 of the 772 routines. The most frequent calls are GetIsObjectValid (22,673), GetHasSpell (20,161) and GetBaseItemType (12,102).
+
+## Conversion and verification
+
+The `modules` stage of `cmd/convert` converts every resource of the 234 archives. Its output keeps the layout of the game files: one folder `assets/modules/<archive>/` per archive, named after the archive without `.rim`, so a module has a main folder such as `tar_m02aa` and a support folder such as `tar_m02aa_s`. The report is `temp/reports/modules.txt`, with one line per resource. All 20,575 resources pass.
+
+A GFF resource becomes `<resref>.<ext>.json`, for example `m02aa.are.json`. The extension stays in the name because the ARE and GIT files of an area share a resref. The JSON form is the one used for the GUI files: each struct becomes an object keyed by field label in file order, a struct type other than 0 is kept as `__struct_type`, lists become arrays, and f32 values use the shortest decimal that reads back as the same f32. The five types that only module files use are written as follows.
+
+| Type | JSON value                                                                                                                                                                                             |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2, 3 | A number.                                                                                                                                                                                              |
+| 12   | An object with `strref`, the string number, or null for 0xFFFFFFFF; `text`, the text of that entry in `dialog.tlk`; and `substrings`, when there are any, as an array of objects with `id` and `text`. |
+| 13   | A string of lowercase hexadecimal digits.                                                                                                                                                              |
+| 16   | An array of four numbers in file order.                                                                                                                                                                |
+
+The following example shows the area name in `assets/modules/tar_m02aa/m02aa.are.json`.
+
+```
+ "Name": {
+  "strref": 35782,
+  "text": "Taris - South Apartments"
+ },
+```
+
+The localized strings resolve completely. The module files hold 77,261 localized strings. Of these, 34,261 have no string number, and the other 43,000 name 33,882 distinct entries of `dialog.tlk`. Every one of these entries exists and has text. The largest string number is 49,137, below the 49,265 entries of the table.
+
+The JSON does not record the binary field type, as for the GUI files. The type can still be recovered: in all 9,712 files, each of the 675 combinations of file type, label and JSON value kind occurs with only one binary type. The type 13 hexadecimal string occurs only in Mod_ID, so it cannot be confused with a text string. The 29 files with unreferenced bytes are converted, and their report lines give the number of those bytes. The unreferenced bytes themselves are not written.
+
+A compiled script becomes `<resref>.ncs.txt`, a disassembly listing. No standard format exists for NWScript bytecode, so a text listing is the most widely readable form. The following example shows `assets/modules/tar_m02aa_s/k_act_carthjoin.ncs.txt`.
+
+```
+; warning: ACTION AddPartyMember at 0x29 passes 1 arguments
+00000008  T            54
+0000000d  JSR          8                 ; -> 00000015
+00000013  RETN
+00000015  CONSTI       0
+0000001b  CONSTS       "Carth"
+00000024  ACTION       200 2             ; object GetObjectByTag(string, int)
+00000029  ACTION       574 1             ; int AddPartyMember(int, object)
+0000002e  MOVSP        -4
+00000034  RETN
+```
+
+Each line holds the offset of the instruction in hexadecimal, the mnemonic and the operands in decimal. The mnemonic is the opcode name, followed by the type name when the opcode accepts more than one type. A float is written as the shortest decimal that reads back as the same f32, and a string is written as a quoted Go string literal. A comment after ";" gives the target of a jump or the declaration of the called routine. Warnings come first, as lines that begin with ";". The listing therefore holds every byte of the script.
+
+The `modules` stage of `cmd/verify` writes two reports. In `temp/reports/jq_modules.txt`, jq parses all 9,712 JSON files without error. This shows only that the files are valid JSON. In `temp/reports/ncs_modules.txt`, each listing is assembled again from its text, and the result must equal the source script byte for byte. All 10,863 listings pass. No independent tool reads NCS, so the assembler is part of `cmd/verify`. It shares only the tables of opcodes, types and operand layouts with the disassembler. The listings are therefore shown to be lossless, but the tables themselves are verified only by the decoding evidence described under "Compiled scripts: NCS". A test in which one character of a string constant was altered in one listing made that listing fail.
+
+# String table: dialog.tlk
+
+The file `dialog.tlk` is the string table of the game. It holds 49,265 entries, numbered from 0. A localized string in a GFF file names an entry by this number. An entry holds a text and the name of a sound, which is usually the voice file that speaks the text. The reader is `ReadTlk` in `kotor/tlk.go`. Only one TLK file exists, so the format could not be compared across samples. The 49,265 entries were compared instead.
+
+The file begins with a 20-byte header, described in the table below.
+
+| Offset | Type    | Meaning                   | Evidence                                                                           | Confidence |
+| ------ | ------- | ------------------------- | ---------------------------------------------------------------------------------- | ---------- |
+| 0x00   | char[8] | Signature "TLK V3.0"      | Present in the only file.                                                          | high       |
+| 0x08   | u32     | UNKNOWN, 0                | The value is 0. It may be a language number, but no other language file exists.    | low        |
+| 0x0C   | u32     | Number of entries         | The entry table, 40 bytes per entry, ends exactly at the offset in the next field. | high       |
+| 0x10   | u32     | Offset of the string data | The value is 0x1E11BC, which equals 20 + 40 × 49,265.                              | high       |
+
+Each entry is 40 bytes long and is laid out as described in the table below.
+
+| Offset | Type     | Meaning                                  | Evidence                                                                                                                            | Confidence |
+| ------ | -------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | u32      | Flags                                    | The values are 7 (48,560 entries), 6 (398) and 0x8000 (307). Bit 0 is set exactly in the 48,560 entries that have text.             | medium     |
+| 0x04   | char[16] | Sound resref, padded with NUL bytes      | 32,853 entries name a sound. 20,320 of the names match a file in `streamwaves/` or `streamsounds/`, for example `nglobeband01000_`. | medium     |
+| 0x14   | u32      | UNKNOWN, always 0                        | The value is 0 in all entries. It may be a volume variance.                                                                         | low        |
+| 0x18   | u32      | UNKNOWN, always 0                        | The value is 0 in all entries. It may be a pitch variance.                                                                          | low        |
+| 0x1C   | u32      | Offset of the text, from the string data | The texts lie in entry order with no gap or overlap, and the last ends exactly at the end of the file.                              | high       |
+| 0x20   | u32      | Length of the text in bytes              | See above. The length is 0 exactly when bit 0 of the flags is clear.                                                                | high       |
+| 0x24   | f32      | UNKNOWN, always 0.0                      | The value is 0.0 in all entries. It may be the length of the sound.                                                                 | low        |
+
+The text is not terminated by a NUL byte. All bytes of the texts are below 0x80, and the only control character is the line feed (5,191 times), so the code page does not matter. Entry 0 is "Bad StrRef", and entry 35,782 is "Taris - South Apartments", the area name of `tar_m02aa`.
+
+The meaning of flag bits 1 and 2 (value 6) is UNKNOWN. They are set in all entries with text and in 398 entries without text, of which 359 name a sound. The 307 entries with flag 0x8000 have neither text nor sound. The 12,533 sound names that match no stream audio file include `move2` and `droid2`. These may name resources in the BIF archives, but this has not been checked.
 
 # 3D models: MDL and MDX
 
@@ -675,7 +834,7 @@ The control kind is given by CONTROLTYPE. The correspondence below comes from th
 
 All 81 list boxes have a SCROLLBAR struct. Eighty of them also have a PROTOITEM struct, which is probably the template control for one row. The exception is LB_DESC in `upgrade.gui`. The SCROLLBAR holds DIR and THUMB structs that describe its arrow and thumb images.
 
-BORDER, HILIGHT, SELECTED and HILIGHTSELECTED describe a frame and its fill. Each holds the resrefs CORNER, EDGE and FILL, together with FILLSTYLE, DIMENSION, INNEROFFSET, COLOR and PULSING. TEXT is a struct with TEXT (a string), STRREF, FONT, ALIGNMENT, COLOR and PULSING. The text of a control comes either from the TEXT string or from STRREF, a string number. The largest STRREF value, 49,116, is below 49,265, which is the u32 at offset 0x0C of `dialog.tlk`. That value is probably the string count, but the TLK format has not been examined.
+BORDER, HILIGHT, SELECTED and HILIGHTSELECTED describe a frame and its fill. Each holds the resrefs CORNER, EDGE and FILL, together with FILLSTYLE, DIMENSION, INNEROFFSET, COLOR and PULSING. TEXT is a struct with TEXT (a string), STRREF, FONT, ALIGNMENT, COLOR and PULSING. The text of a control comes either from the TEXT string or from STRREF, a string number. The largest STRREF value, 49,116, is below 49,265, which is the u32 at offset 0x0C of `dialog.tlk`. That value is the number of entries of the string table (see "String table: dialog.tlk").
 
 Resrefs name textures and fonts. All 2,016 FONT values name a known resource. Of the CORNER, EDGE, FILL and IMAGE values that are not empty, all name a texture in the texture packs or a resource in `chitin.key`, except nine FILL names, for example `po_mzaalbar` and `georgem`. None of the nine occurs in a RIM archive either.
 

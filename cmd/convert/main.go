@@ -3,7 +3,7 @@
 // Movies require ffmpeg. All stages run at the same time. Each stage writes its own outputs and reports
 // and keeps its own summary lines, which are printed in stage order at the end.
 //
-// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips]   (default: all)
+// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules]   (default: all)
 package main
 
 import (
@@ -391,7 +391,8 @@ func convertGui(summary *kotor.Summary) {
 				continue
 			}
 
-			text, err := json.MarshalIndent(guiJson(gff.Root), "", " ")
+			// GUI files have no localized strings, so they need no string table.
+			text, err := json.MarshalIndent(gffJson(gff.Root, nil, nil), "", " ")
 			if err != nil {
 				report = append(report, src.dir+"/"+resource.Resref+" FAIL: "+err.Error())
 				continue
@@ -445,6 +446,85 @@ func convertLips(summary *kotor.Summary) {
 	summary.Tally("lips", report)
 }
 
+// Modules: modules/<archive>.rim -> assets/modules/<archive>/, one folder per archive. A GFF resource
+// becomes <resref>.<ext>.json in the form of gffJson, with localized strings resolved through dialog.tlk.
+// A compiled script becomes <resref>.ncs.txt, its disassembly with the routine names of nwscript.nss.
+// The extension stays in the name because an area's ARE and GIT resources share a resref. A GFF resource
+// must parse, and its file type must match its resource type. Unreferenced bytes are reported, not
+// rejected, because 29 module files have them.
+func convertModules(summary *kotor.Summary) {
+	fmt.Println("modules...")
+	tlk, problem := kotor.ReadTlk(kotor.ReadFile(filepath.Join(kotor.Game, "dialog.tlk")))
+	if problem != "" {
+		kotor.Fatal("dialog.tlk: " + problem)
+	}
+
+	routines := kotor.ReadNwscript(kotor.ReadKey())
+	src := filepath.Join(kotor.Game, "modules")
+	out := filepath.Join(kotor.Assets, "modules")
+	kotor.MakeDir(out)
+
+	var report []string
+	written := map[string]bool{}
+	for _, archive := range kotor.ListFiles(src, ".rim", false) {
+		name := strings.TrimSuffix(archive, filepath.Ext(archive))
+		rim, problem := kotor.ReadRim(kotor.ReadFile(filepath.Join(src, archive)))
+		if problem != "" {
+			report = append(report, archive+" FAIL: "+problem)
+			continue
+		}
+		kotor.MakeDir(filepath.Join(out, name))
+
+		for _, entry := range rim.Entries {
+			label := name + "/" + entry.Resref + "." + entry.Ext
+			if entry.Ext == "ncs" {
+				ncs := kotor.ParseNcs(entry.Data, routines)
+				report = append(report, kotor.ReportNcs(label, ncs))
+				if len(ncs.Errors) == 0 {
+					file := filepath.Join(name, entry.Resref+".ncs.txt")
+					kotor.WriteFile(filepath.Join(out, file), kotor.NcsListing(ncs, routines))
+					written[file] = true
+				}
+				continue
+			}
+
+			gff, problem := kotor.ReadGff(entry.Data)
+			if problem == "" && (gff.FileType != fmt.Sprintf("%-4s", strings.ToUpper(entry.Ext)) || gff.Version != "V3.2") {
+				problem = "unexpected " + gff.FileType + gff.Version
+			}
+			if problem != "" {
+				report = append(report, label+" FAIL: "+problem)
+				continue
+			}
+
+			unresolved := 0
+			text, err := json.MarshalIndent(gffJson(gff.Root, tlk, &unresolved), "", " ")
+			if err != nil {
+				report = append(report, label+" FAIL: "+err.Error())
+				continue
+			}
+
+			notes := fmt.Sprintf(" %d structs %d fields", gff.Counts.Structs, gff.Counts.Fields)
+			for _, region := range []string{"idx", "list"} {
+				if gff.Counts.UnusedBytes[region] > 0 {
+					notes += fmt.Sprintf(" %d unreferenced %s bytes", gff.Counts.UnusedBytes[region], region)
+				}
+			}
+			if unresolved > 0 {
+				notes += fmt.Sprintf(" %d string numbers past dialog.tlk", unresolved)
+			}
+
+			file := filepath.Join(name, entry.Resref+"."+entry.Ext+".json")
+			kotor.WriteFile(filepath.Join(out, file), append(text, '\n'))
+			written[file] = true
+			report = append(report, label+notes+" PASS")
+		}
+	}
+
+	prune(out, written, []string{".json", ".txt"})
+	summary.Tally("modules", report)
+}
+
 // Movies start first because they take longest.
 var stages = []kotor.Stage{
 	{Name: "movies", Run: convertMovies},
@@ -456,6 +536,7 @@ var stages = []kotor.Stage{
 	{Name: "waves", Run: func(summary *kotor.Summary) { convertAudio(summary, "waves", "streamwaves") }},
 	{Name: "gui", Run: convertGui},
 	{Name: "lips", Run: convertLips},
+	{Name: "modules", Run: convertModules},
 }
 
 func main() {

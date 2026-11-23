@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"math"
 	"strconv"
@@ -9,7 +10,7 @@ import (
 	"re/kotor"
 )
 
-// A GUI file becomes JSON with one-space indentation. Object keys keep the order of the fields in the file,
+// A GFF file (GUI layouts and module resources) becomes JSON with one-space indentation. Object keys keep the order of the fields in the file,
 // and assigning an existing key keeps its position. NaN and infinities have no JSON form and become null.
 
 // orderedObject is a JSON object whose keys keep their insertion order.
@@ -63,10 +64,14 @@ func number(value float64, bitSize int) any {
 	return json.Number(strconv.FormatFloat(value, 'f', -1, bitSize))
 }
 
-// guiJson turns a struct into an object keyed by field label, in file order. A struct type other than 0 is
-// kept as "__struct_type". Lists become arrays of objects, vectors become 3-element arrays, and f32 values
-// use the shortest decimal that round-trips as an f32.
-func guiJson(structValue *kotor.GffStructValue) *orderedObject {
+// gffJson turns a struct into an object keyed by field label, in file order. A struct type other than 0 is
+// kept as "__struct_type". Lists become arrays of objects, vectors become 3-element arrays and orientations
+// 4-element arrays, and f32 values use the shortest decimal that round-trips as an f32. Binary data becomes
+// a lowercase hexadecimal string. A localized string becomes an object with "strref", the string number
+// (null for 0xFFFFFFFF); "text", the string's text in dialog.tlk when the number names an entry with text;
+// and "substrings", when there are any, as objects with "id" and "text". unresolved counts the string
+// numbers that name no entry of dialog.tlk.
+func gffJson(structValue *kotor.GffStructValue, tlk *kotor.Tlk, unresolved *int) *orderedObject {
 	object := &orderedObject{}
 	if structValue.StructType != 0 {
 		object.set("__struct_type", number(float64(structValue.StructType), 64))
@@ -76,19 +81,19 @@ func guiJson(structValue *kotor.GffStructValue) *orderedObject {
 		var value any
 		switch field.Type {
 		case kotor.GffStruct:
-			value = guiJson(field.Value.Struct)
+			value = gffJson(field.Value.Struct, tlk, unresolved)
 
 		case kotor.GffList:
 			items := []any{}
 			for _, item := range field.Value.List {
-				items = append(items, guiJson(item))
+				items = append(items, gffJson(item, tlk, unresolved))
 			}
 			value = items
 
 		case kotor.GffF32:
 			value = number(field.Value.Number, 32)
 
-		case kotor.GffVector:
+		case kotor.GffVector, kotor.GffOrientation:
 			components := []any{}
 			for _, component := range field.Value.Vector {
 				components = append(components, number(component, 32))
@@ -98,10 +103,50 @@ func guiJson(structValue *kotor.GffStructValue) *orderedObject {
 		case kotor.GffString, kotor.GffResref:
 			value = field.Value.Text
 
+		case kotor.GffBinary:
+			value = hex.EncodeToString(field.Value.Bytes)
+
+		case kotor.GffLocString:
+			value = locStringJson(field.Value, tlk, unresolved)
+
 		default:
 			value = number(field.Value.Number, 64)
 		}
 		object.set(field.Label, value)
+	}
+	return object
+}
+
+// noString is the string number of a localized string that has no entry in dialog.tlk.
+const noString = 0xffffffff
+
+func locStringJson(value kotor.GffFieldValue, tlk *kotor.Tlk, unresolved *int) *orderedObject {
+	object := &orderedObject{}
+	strref := int(value.Number)
+	switch {
+	case strref == noString:
+		object.set("strref", nil)
+
+	case strref >= len(tlk.Entries):
+		object.set("strref", number(value.Number, 64))
+		*unresolved++
+
+	default:
+		object.set("strref", number(value.Number, 64))
+		if tlk.Entries[strref].Text != "" {
+			object.set("text", tlk.Entries[strref].Text)
+		}
+	}
+
+	if len(value.Substrings) > 0 {
+		substrings := []any{}
+		for _, substring := range value.Substrings {
+			item := &orderedObject{}
+			item.set("id", number(float64(substring.ID), 64))
+			item.set("text", substring.Text)
+			substrings = append(substrings, item)
+		}
+		object.set("substrings", substrings)
 	}
 	return object
 }

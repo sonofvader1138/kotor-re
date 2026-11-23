@@ -18,8 +18,11 @@
 // gui: jq must parse each JSON file.
 // lips: Go's encoding/csv reader must read each CSV file, and its keyframes, packed again as f32 and u8, must
 // equal the source LIP keyframe bytes.
+// modules: jq must parse each JSON file. No independent tool reads NCS, so each script listing is
+// assembled again from its text and must equal the source script byte for byte. The assembler shares only
+// the opcode, type and operand tables with the disassembler.
 //
-// usage: go run ./cmd/verify [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips]   (default: all)
+// usage: go run ./cmd/verify [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules]   (default: all)
 package main
 
 import (
@@ -584,6 +587,154 @@ func checkLipCsv(path string, source []byte) string {
 	return ""
 }
 
+// Modules: assets/modules/<archive>/*.json must parse with jq, and every <resref>.ncs.txt listing must
+// assemble to the bytes of the script in the source archive.
+func modules(summary *kotor.Summary) {
+	log("modules...")
+	src := filepath.Join(kotor.Game, "modules")
+	var jsonJobs []job
+	var report []string
+	for _, archive := range kotor.ListFiles(src, ".rim", false) {
+		name := strings.TrimSuffix(archive, filepath.Ext(archive))
+		rim, problem := kotor.ReadRim(kotor.ReadFile(filepath.Join(src, archive)))
+		if problem != "" {
+			report = append(report, archive+" FAIL: "+problem)
+			continue
+		}
+
+		for _, entry := range rim.Entries {
+			if entry.Ext == "ncs" {
+				label := filepath.Join("modules", name, entry.Resref+".ncs.txt")
+				report = append(report, label+" "+kotor.Verdict(checkNcsListing(filepath.Join(kotor.Assets, label), entry.Data)))
+				continue
+			}
+
+			label := filepath.Join("modules", name, entry.Resref+"."+entry.Ext+".json")
+			jsonJobs = append(jsonJobs, func() []string {
+				result := kotor.Exec("jq", []string{"empty", filepath.Join(kotor.Assets, label)}, nil)
+				if result.Status == 0 {
+					return line(label + " PASS")
+				}
+				return line(label + " FAIL: jq: " + kotor.FirstLine(result.Stderr))
+			})
+		}
+	}
+	summary.Tally("ncs_modules", report)
+
+	if !kotor.Has("jq") {
+		summary.Note("jq missing: module JSON UNVERIFIED")
+		return
+	}
+	summary.Tally("jq_modules", pool(jsonJobs))
+}
+
+// ncsMnemonics maps each listing mnemonic to its opcode and type.
+var ncsMnemonics = func() map[string][2]byte {
+	mnemonics := map[string][2]byte{}
+	for opcode := range kotor.NcsOpcodes {
+		for valueType := range 256 {
+			if _, valid := kotor.NcsOperands(opcode, byte(valueType)); !valid {
+				continue
+			}
+
+			mnemonic := kotor.NcsMnemonic(opcode, byte(valueType))
+			if _, taken := mnemonics[mnemonic]; taken {
+				kotor.Fatal("mnemonic " + mnemonic + " is ambiguous")
+			}
+			mnemonics[mnemonic] = [2]byte{opcode, byte(valueType)}
+		}
+	}
+	return mnemonics
+}()
+
+// sizeOpcode is the instruction that carries the program size and has no type byte.
+const sizeOpcode = 0x42
+
+// checkNcsListing assembles a script listing and returns an error message when the result differs from the
+// source script, or an empty string when it matches. Comment lines start with ";", and an instruction's
+// comment starts at the first ";" after its operands.
+func checkNcsListing(path string, source []byte) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err.Error()
+	}
+
+	assembled := []byte("NCS V1.0")
+	for _, text := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
+		if strings.HasPrefix(text, ";") {
+			continue
+		}
+
+		fields := strings.Fields(text)
+		if len(fields) < 2 {
+			return "short line: " + text
+		}
+		offset, err := strconv.ParseUint(fields[0], 16, 32)
+		code, known := ncsMnemonics[fields[1]]
+		if err != nil || int(offset) != len(assembled) || !known {
+			return "bad line: " + text
+		}
+
+		assembled = append(assembled, code[0])
+		if code[0] != sizeOpcode {
+			assembled = append(assembled, code[1])
+		}
+
+		rest := strings.TrimSpace(text[strings.Index(text, fields[1])+len(fields[1]):])
+		layout, _ := kotor.NcsOperands(code[0], code[1])
+		for _, kind := range layout {
+			if kind == 's' {
+				quoted, err := strconv.QuotedPrefix(rest)
+				value, unquoteErr := strconv.Unquote(quoted)
+				if err != nil || unquoteErr != nil {
+					return "bad string: " + text
+				}
+
+				assembled = binary.BigEndian.AppendUint16(assembled, uint16(len([]rune(value))))
+				for _, char := range value {
+					assembled = append(assembled, byte(char))
+				}
+				rest = strings.TrimSpace(rest[len(quoted):])
+				continue
+			}
+
+			token, remainder, _ := strings.Cut(rest, " ")
+			rest = strings.TrimSpace(remainder)
+			var bits uint64
+			if kind == 'f' {
+				value, err := strconv.ParseFloat(token, 32)
+				if err != nil {
+					return "bad float: " + text
+				}
+				bits = uint64(math.Float32bits(float32(value)))
+			} else {
+				value, err := strconv.ParseInt(token, 10, 64)
+				if err != nil {
+					return "bad operand: " + text
+				}
+				bits = uint64(value)
+			}
+
+			switch kotor.NcsOperandSizes[kind] {
+			case 4:
+				assembled = binary.BigEndian.AppendUint32(assembled, uint32(bits))
+			case 2:
+				assembled = binary.BigEndian.AppendUint16(assembled, uint16(bits))
+			case 1:
+				assembled = append(assembled, byte(bits))
+			}
+		}
+		if rest != "" && !strings.HasPrefix(rest, ";") {
+			return "extra operands: " + text
+		}
+	}
+
+	if !bytes.Equal(assembled, source) {
+		return fmt.Sprintf("assembled %d bytes differ from the %d source bytes", len(assembled), len(source))
+	}
+	return ""
+}
+
 // Movies queue their jobs first because each one takes longest, so short jobs fill the other slots.
 var stages = []kotor.Stage{
 	{Name: "movies", Run: movies},
@@ -595,6 +746,7 @@ var stages = []kotor.Stage{
 	{Name: "waves", Run: func(summary *kotor.Summary) { streamAudio(summary, "waves", "streamwaves") }},
 	{Name: "gui", Run: gui},
 	{Name: "lips", Run: lips},
+	{Name: "modules", Run: modules},
 }
 
 func main() {
