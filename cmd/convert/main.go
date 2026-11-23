@@ -55,17 +55,20 @@ func packErf(pack string) *kotor.Erf {
 // prune removes files with the given extensions from dir and its subfolders that were not written in this
 // run. keep holds paths relative to dir.
 func prune(dir string, keep map[string]bool, exts []string) {
-	filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
 
 		relative, _ := filepath.Rel(dir, path)
 		if slices.Contains(exts, filepath.Ext(path)) && !keep[relative] {
-			os.Remove(path)
+			return os.Remove(path)
 		}
 		return nil
 	})
+	if err != nil {
+		kotor.Fatal(err.Error())
+	}
 }
 
 // Models: data/models.bif -> assets/data/models/*.obj + *.mtl (passing, with geometry)
@@ -243,13 +246,17 @@ func convertTga(lines *summary) {
 // listFiles returns the paths of the files under dir whose names match pattern, relative to dir and sorted.
 func listFiles(dir string, pattern *regexp.Regexp) []string {
 	var names []string
-	filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err == nil && path != dir && pattern.MatchString(entry.Name()) {
 			relative, _ := filepath.Rel(dir, path)
 			names = append(names, relative)
 		}
 		return err
 	})
+	if err != nil {
+		kotor.Fatal(err.Error())
+	}
+
 	slices.Sort(names)
 	return names
 }

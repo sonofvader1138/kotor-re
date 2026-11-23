@@ -23,6 +23,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math"
@@ -113,10 +114,10 @@ func firstLine(result kotor.ExecResult) string {
 }
 
 // files lists the files in dir whose names end in ext, as sorted paths relative to dir. recursive
-// includes subfolders.
+// includes subfolders. A missing dir yields no files, so that the caller reports each output as missing.
 func files(dir, ext string, recursive bool) []string {
 	var names []string
-	filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || path == dir {
 			return err
 		}
@@ -130,6 +131,10 @@ func files(dir, ext string, recursive bool) []string {
 		}
 		return nil
 	})
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		kotor.Fatal(err.Error())
+	}
+
 	slices.Sort(names)
 	return names
 }
@@ -456,7 +461,7 @@ var (
 )
 
 func movies(items *summary) {
-	if !(ffprobe && kotor.Has("ffmpeg")) {
+	if !ffprobe || !kotor.Has("ffmpeg") {
 		items.note("ffmpeg or ffprobe missing: movies UNVERIFIED")
 		return
 	}
@@ -499,8 +504,8 @@ func movies(items *summary) {
 			var parsed struct {
 				Streams []probeStream `json:"streams"`
 			}
-			if probe.Status == 0 {
-				json.Unmarshal(probe.Stdout, &parsed)
+			if probe.Status == 0 && json.Unmarshal(probe.Stdout, &parsed) != nil {
+				return line(name + ".mp4 FAIL: ffprobe output is not JSON")
 			}
 			var video, sound *probeStream
 			for i := range parsed.Streams {

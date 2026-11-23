@@ -311,11 +311,19 @@ type ErfEntry struct {
 	file   *os.File
 }
 
-// Data reads the entry's resource from the archive. A short read leaves the rest of the buffer zero.
+// Data reads the entry's resource from the archive. ReadErf has checked that the resource lies inside
+// the file, so any read error is fatal.
 func (entry ErfEntry) Data() []byte {
 	data := make([]byte, entry.Size)
-	entry.file.ReadAt(data, int64(entry.Offset))
+	readAt(entry.file, data, int64(entry.Offset))
 	return data
+}
+
+// readAt fills buffer from file at offset and exits when the file ends early or the read fails.
+func readAt(file *os.File, buffer []byte, offset int64) {
+	if _, err := file.ReadAt(buffer, offset); err != nil {
+		Fatal(err.Error())
+	}
 }
 
 type Erf struct {
@@ -342,7 +350,7 @@ func ReadErf(path string) *Erf {
 	}
 
 	header := make([]byte, erfHeaderSize)
-	file.ReadAt(header, 0)
+	readAt(file, header, 0)
 
 	signature := Latin1(header[:signatureLength])
 	if !erfSignature.MatchString(signature) {
@@ -354,8 +362,8 @@ func ReadErf(path string) *Erf {
 	resourceListOffset := int64(u32(header, 0x1c))
 	keyList := make([]byte, erfKeyEntrySize*entryCount)
 	resourceList := make([]byte, erfResourceEntrySize*entryCount)
-	file.ReadAt(keyList, keyListOffset)
-	file.ReadAt(resourceList, resourceListOffset)
+	readAt(file, keyList, keyListOffset)
+	readAt(file, resourceList, resourceListOffset)
 
 	erf := &Erf{Signature: signature, Size: info.Size()}
 	for i := 0; i < entryCount; i++ {

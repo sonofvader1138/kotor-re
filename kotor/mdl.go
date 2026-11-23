@@ -304,8 +304,8 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 				}
 			}
 
-			out.WriteString(fmt.Sprintf("f %d/%d %d/%d %d/%d\n",
-				ix[0]+vbase, ix[0]+vbase, ix[1]+vbase, ix[1]+vbase, ix[2]+vbase, ix[2]+vbase))
+			fmt.Fprintf(&out, "f %d/%d %d/%d %d/%d\n",
+				ix[0]+vbase, ix[0]+vbase, ix[1]+vbase, ix[1]+vbase, ix[2]+vbase, ix[2]+vbase)
 		}
 
 		vbase += vertexCount

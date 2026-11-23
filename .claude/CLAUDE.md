@@ -10,6 +10,7 @@
 The following tools are installed:
 
 - go
+  - golangci-lint
 - node
 - jq
 - perl

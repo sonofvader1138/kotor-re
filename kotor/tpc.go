@@ -177,7 +177,7 @@ func ParseTpc(file []byte) *TpcTexture {
 
 	// A recorded size of 16 for a single 8-byte DXT1 block is accepted: all such files end exactly after the mip chain.
 	top := LevelSize(kind, images[0].Width, images[0].Height)
-	if dataSize != 0 && dataSize != top && !(dataSize == dxt5BlockSize && top == dxt1BlockSize) && layout != "flipbook" {
+	if dataSize != 0 && dataSize != top && (dataSize != dxt5BlockSize || top != dxt1BlockSize) && layout != "flipbook" {
 		texture.Errors = append(texture.Errors, fmt.Sprintf("dataSize %d matches no known layout", dataSize))
 	}
 

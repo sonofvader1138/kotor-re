@@ -27,12 +27,12 @@ func EncodePng(width, height int, pix []byte, channels int) []byte {
 		copy(raw[y*(stride+1)+1:], pix[y*stride:(y+1)*stride])
 	}
 
-	var out bytes.Buffer
+	var out []byte
 	chunk := func(chunkType string, data []byte) {
-		binary.Write(&out, binary.BigEndian, uint32(len(data)))
+		out = binary.BigEndian.AppendUint32(out, uint32(len(data)))
 		typeAndData := append([]byte(chunkType), data...)
-		out.Write(typeAndData)
-		binary.Write(&out, binary.BigEndian, crc32.ChecksumIEEE(typeAndData))
+		out = append(out, typeAndData...)
+		out = binary.BigEndian.AppendUint32(out, crc32.ChecksumIEEE(typeAndData))
 	}
 
 	ihdr := make([]byte, ihdrSize)
@@ -41,14 +41,15 @@ func EncodePng(width, height int, pix []byte, channels int) []byte {
 	ihdr[8] = bitDepth
 	ihdr[9] = colorType[channels]
 
+	// Writing to a bytes.Buffer cannot fail, so the errors are discarded.
 	var compressed bytes.Buffer
 	writer := zlib.NewWriter(&compressed)
-	writer.Write(raw)
-	writer.Close()
+	_, _ = writer.Write(raw)
+	_ = writer.Close()
 
-	out.Write(pngSignature)
+	out = append(out, pngSignature...)
 	chunk("IHDR", ihdr)
 	chunk("IDAT", compressed.Bytes())
 	chunk("IEND", nil)
-	return out.Bytes()
+	return out
 }
