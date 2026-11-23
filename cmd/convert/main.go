@@ -392,7 +392,7 @@ func convertGui(summary *kotor.Summary) {
 			}
 
 			// GUI files have no localized strings, so they need no string table.
-			text, err := json.MarshalIndent(gffJson(gff.Root, nil, nil), "", " ")
+			text, err := json.MarshalIndent(gffJson(gff.Root, nil, nil), "", "\t")
 			if err != nil {
 				report = append(report, src.dir+"/"+resource.Resref+" FAIL: "+err.Error())
 				continue
@@ -498,7 +498,7 @@ func convertModules(summary *kotor.Summary) {
 			}
 
 			unresolved := 0
-			text, err := json.MarshalIndent(gffJson(gff.Root, tlk, &unresolved), "", " ")
+			text, err := json.MarshalIndent(gffJson(gff.Root, tlk, &unresolved), "", "\t")
 			if err != nil {
 				report = append(report, label+" FAIL: "+err.Error())
 				continue
