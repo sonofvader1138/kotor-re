@@ -70,7 +70,6 @@ type BinkResult struct {
 	AudioBytes       int
 	MaxPacketDecoded []int
 	DecodedBytes     []int
-	HeaderEnd        int
 }
 
 func ParseBink(file []byte) *BinkResult {
@@ -189,14 +188,13 @@ func ParseBink(file []byte) *BinkResult {
 	}
 
 	result.FirstKey = keys[0]
-	result.HeaderEnd = headerEnd
 	return result
 }
 
 func ReportBink(name string, result *BinkResult) string {
 	header := result.Header
 	if header == nil {
-		return name + " FAIL: " + strings.Join(result.Errors, "; ")
+		return name + " " + Verdict(result.Errors...)
 	}
 
 	tracks := make([]string, len(header.Tracks))
@@ -220,5 +218,5 @@ func ReportBink(name string, result *BinkResult) string {
 	return fmt.Sprintf("%s %s %dx%d frames=%d fps=%d/%d videoFlags=0x%x keyframes=%s firstKey=%s tracks=%d [%s] audioBytes=%s %s",
 		name, header.Signature, header.Width, header.Height, header.Frames, header.FpsNum, header.FpsDen,
 		header.VideoFlags, statistic(result.Keyframes), statistic(result.FirstKey), header.AudioTracks,
-		strings.Join(tracks, ","), statistic(result.AudioBytes), Verdict(result.Errors))
+		strings.Join(tracks, ","), statistic(result.AudioBytes), Verdict(result.Errors...))
 }

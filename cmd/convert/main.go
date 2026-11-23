@@ -12,7 +12,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -22,34 +21,7 @@ import (
 	"re/kotor"
 )
 
-// summary holds the summary lines of one stage.
-type summary []string
-
-// tally writes a stage's report and adds its pass and fail counts to the summary.
-func (lines *summary) tally(name string, report []string) {
-	writeFile(filepath.Join(kotor.Reports, name+".txt"), []byte(strings.Join(report, "\n")+"\n"))
-	pass := 0
-	for _, line := range report {
-		if strings.HasSuffix(line, "PASS") {
-			pass++
-		}
-	}
-	*lines = append(*lines, fmt.Sprintf("%s: %d pass, %d fail", name, pass, len(report)-pass))
-}
-
-func writeFile(path string, data []byte) {
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		kotor.Fatal(err.Error())
-	}
-}
-
-func makeDir(path string) {
-	if err := os.MkdirAll(path, 0o755); err != nil {
-		kotor.Fatal(err.Error())
-	}
-}
-
-func packErf(pack string) *kotor.Erf {
+func packErf(pack string) []kotor.ErfEntry {
 	return kotor.ReadErf(filepath.Join(kotor.Game, "TexturePacks", pack+".erf"))
 }
 
@@ -73,16 +45,16 @@ func prune(dir string, keep map[string]bool, exts []string) {
 }
 
 // Models: data/models.bif -> assets/data/models/*.obj + *.mtl (passing, with geometry)
-func convertModels(lines *summary) {
+func convertModels(summary *kotor.Summary) {
 	fmt.Println("models...")
 	out := filepath.Join(kotor.Assets, "data", "models")
-	makeDir(out)
+	kotor.MakeDir(out)
 
 	// The first pack in priority order wins, so the packs are read in reverse.
 	texturePath := map[string]string{}
 	for i := len(kotor.TexturePacks) - 1; i >= 0; i-- {
 		pack := kotor.TexturePacks[i]
-		for _, entry := range packErf(pack).Entries {
+		for _, entry := range packErf(pack) {
 			if entry.Ext == "tpc" {
 				texturePath[entry.Resref] = "../../TexturePacks/" + pack + "/" + entry.Resref + ".png"
 			}
@@ -128,36 +100,36 @@ func convertModels(lines *summary) {
 			}
 		}
 
-		writeFile(filepath.Join(out, resource.Resref+".obj"), []byte(model.Obj))
-		writeFile(filepath.Join(out, resource.Resref+".mtl"), []byte(strings.Join(mtl, "\n")+"\n"))
+		kotor.WriteFile(filepath.Join(out, resource.Resref+".obj"), []byte(model.Obj))
+		kotor.WriteFile(filepath.Join(out, resource.Resref+".mtl"), []byte(strings.Join(mtl, "\n")+"\n"))
 		written[resource.Resref+".obj"] = true
 		written[resource.Resref+".mtl"] = true
 	}
 
 	prune(out, written, []string{".obj", ".mtl"})
-	lines.tally("models", report)
+	summary.Tally("models", report)
 
 	missingNames := make([]string, 0, len(missing))
 	for texture := range missing {
 		missingNames = append(missingNames, texture)
 	}
 	slices.Sort(missingNames)
-	*lines = append(*lines,
+	*summary = append(*summary,
 		fmt.Sprintf("models without rendered geometry skipped: %d", skipped),
 		fmt.Sprintf("non-rendered meshes omitted: %d", hidden),
 		fmt.Sprintf("model textures not found: %d (%s)", len(missingNames), strings.Join(missingNames, " ")))
 }
 
 // Textures: TexturePacks/<pack>.erf -> assets/TexturePacks/<pack>/*.png (+ *.txi when present)
-func convertTextures(lines *summary) {
+func convertTextures(summary *kotor.Summary) {
 	for _, pack := range kotor.TexturePacks {
 		fmt.Printf("textures %s...\n", pack)
 		out := filepath.Join(kotor.Assets, "TexturePacks", pack)
-		makeDir(out)
+		kotor.MakeDir(out)
 
 		var report []string
 		written := map[string]bool{}
-		for _, entry := range packErf(pack).Entries {
+		for _, entry := range packErf(pack) {
 			if entry.Ext != "tpc" {
 				report = append(report, entry.Resref+"."+entry.Ext+" not a texture, skipped PASS")
 				continue
@@ -171,18 +143,18 @@ func convertTextures(lines *summary) {
 				continue
 			}
 
-			writeFile(filepath.Join(out, entry.Resref+".png"), kotor.EncodePng(image.Width, image.Height, image.Rgba, 4))
+			kotor.WriteFile(filepath.Join(out, entry.Resref+".png"), kotor.EncodePng(image.Width, image.Height, image.Rgba, 4))
 			written[entry.Resref+".png"] = true
 
 			txi := string(texture.Txi)
 			if strings.TrimSpace(strings.ReplaceAll(txi, "\x00", "")) != "" {
-				writeFile(filepath.Join(out, entry.Resref+".txi"), []byte(strings.TrimRight(txi, "\x00")))
+				kotor.WriteFile(filepath.Join(out, entry.Resref+".txi"), []byte(strings.TrimRight(txi, "\x00")))
 				written[entry.Resref+".txi"] = true
 			}
 		}
 
 		prune(out, written, []string{".png", ".txi"})
-		lines.tally("textures_"+pack, report)
+		summary.Tally("textures_"+pack, report)
 	}
 }
 
@@ -190,12 +162,12 @@ func convertTextures(lines *summary) {
 // data/lightmaps*.bif -> assets/data/lightmaps, data/textures.bif -> assets/data/textures,
 // data/legacy.bif -> assets/data/legacy. Images become 8-bit PNG with the TGA's channels (gray, RGB or
 // RGBA), top row first. The TGA parser must consume each file exactly.
-func convertTga(lines *summary) {
+func convertTga(summary *kotor.Summary) {
 	key := kotor.ReadKey()
 	for _, group := range kotor.TgaGroups {
 		fmt.Printf("tga %s...\n", group.Name)
 		out := filepath.Join(kotor.Assets, "data", group.Name)
-		makeDir(out)
+		kotor.MakeDir(out)
 
 		var report []string
 		written := map[string]bool{}
@@ -221,7 +193,7 @@ func convertTga(lines *summary) {
 				}
 
 				if resource.Ext == "txi" {
-					writeFile(filepath.Join(out, file), resource.Data)
+					kotor.WriteFile(filepath.Join(out, file), resource.Data)
 					written[file] = true
 					report = append(report, fmt.Sprintf("%s %d bytes PASS", label, len(resource.Data)))
 					continue
@@ -234,55 +206,30 @@ func convertTga(lines *summary) {
 					continue
 				}
 
-				writeFile(filepath.Join(out, file), kotor.EncodePng(image.Width, image.Height, image.Pix, image.Channels))
+				kotor.WriteFile(filepath.Join(out, file), kotor.EncodePng(image.Width, image.Height, image.Pix, image.Channels))
 				written[file] = true
 			}
 		}
 
 		prune(out, written, []string{".png", ".txi"})
-		lines.tally("tga_"+group.Name, report)
+		summary.Tally("tga_"+group.Name, report)
 	}
 }
-
-// listFiles returns the paths of the files under dir whose names match pattern, relative to dir and sorted.
-func listFiles(dir string, pattern *regexp.Regexp) []string {
-	var names []string
-	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if err == nil && path != dir && pattern.MatchString(entry.Name()) {
-			relative, _ := filepath.Rel(dir, path)
-			names = append(names, relative)
-		}
-		return err
-	})
-	if err != nil {
-		kotor.Fatal(err.Error())
-	}
-
-	slices.Sort(names)
-	return names
-}
-
-var wavPattern = regexp.MustCompile(`(?i)\.wav$`)
 
 // Stream audio: streammusic/*.wav, streamsounds/*.wav and streamwaves/**/*.wav -> assets/<folder>/**/*.mp3 | *.wav (PCM).
 // All three folders use the layouts that kotor.UnwrapAudio detects. kotor.DecodeAdpcm copies PCM unchanged.
 // streamwaves has one subfolder per module and dialog, which the output keeps.
-func convertAudio(lines *summary, stage, folder string) {
+func convertAudio(summary *kotor.Summary, stage, folder string) {
 	fmt.Printf("%s...\n", stage)
 	src := filepath.Join(kotor.Game, folder)
 	out := filepath.Join(kotor.Assets, folder)
-	makeDir(out)
+	kotor.MakeDir(out)
 
 	var report []string
 	written := map[string]bool{}
-	for _, file := range listFiles(src, wavPattern) {
-		name := wavPattern.ReplaceAllString(file, "")
-		source, err := os.ReadFile(filepath.Join(src, file))
-		if err != nil {
-			kotor.Fatal(err.Error())
-		}
-
-		unwrapped := kotor.UnwrapAudio(source)
+	for _, file := range kotor.ListFiles(src, ".wav", true) {
+		name := strings.TrimSuffix(file, filepath.Ext(file))
+		unwrapped := kotor.UnwrapAudio(kotor.ReadFile(filepath.Join(src, file)))
 		data, failure, info := unwrapped.Payload, unwrapped.Err, unwrapped.Info
 		if failure == "" && unwrapped.Kind == "wav" {
 			decoded := kotor.DecodeAdpcm(data)
@@ -290,21 +237,17 @@ func convertAudio(lines *summary, stage, folder string) {
 			info += " " + decoded.Info
 		}
 
-		verdict := "PASS"
-		if failure != "" {
-			verdict = "FAIL: " + failure
-		}
-		report = append(report, fmt.Sprintf("%s %s %s %s", name, unwrapped.Kind, info, verdict))
+		report = append(report, fmt.Sprintf("%s %s %s %s", name, unwrapped.Kind, info, kotor.Verdict(failure)))
 		if failure == "" {
 			outFile := name + "." + unwrapped.Kind
-			makeDir(filepath.Join(out, filepath.Dir(outFile)))
-			writeFile(filepath.Join(out, outFile), data)
+			kotor.MakeDir(filepath.Join(out, filepath.Dir(outFile)))
+			kotor.WriteFile(filepath.Join(out, outFile), data)
 			written[outFile] = true
 		}
 	}
 
 	prune(out, written, []string{".mp3", ".wav"})
-	lines.tally(stage, report)
+	summary.Tally(stage, report)
 }
 
 // Movies: movies/*.bik -> assets/movies/*.mp4 (H.264 High profile, yuv420p; AAC LC audio).
@@ -320,45 +263,28 @@ const (
 	movieAudioBitrate = "192k"
 )
 
-var bikPattern = regexp.MustCompile(`(?i)\.bik$`)
-
-func convertMovies(lines *summary) {
+func convertMovies(summary *kotor.Summary) {
 	if !kotor.Has("ffmpeg") {
-		*lines = append(*lines, "ffmpeg missing: movies not converted")
+		summary.Note("ffmpeg missing: movies not converted")
 		return
 	}
 
 	fmt.Println("movies...")
 	src := filepath.Join(kotor.Game, "movies")
 	out := filepath.Join(kotor.Assets, "movies")
-	makeDir(out)
+	kotor.MakeDir(out)
 
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		kotor.Fatal(err.Error())
-	}
-	var files []string
-	for _, entry := range entries {
-		if bikPattern.MatchString(entry.Name()) {
-			files = append(files, entry.Name())
-		}
-	}
-	slices.Sort(files)
+	files := kotor.ListFiles(src, ".bik", false)
 
 	// Each movie's report line goes to its own slot, and written records the outputs ffmpeg produced.
 	report := make([]string, len(files))
 	written := make([]bool, len(files))
 	convertMovie := func(i int) {
 		file := files[i]
-		name := bikPattern.ReplaceAllString(file, "")
+		name := strings.TrimSuffix(file, filepath.Ext(file))
 		inFile := filepath.Join(src, file)
 		outFile := filepath.Join(out, name+".mp4")
-		source, err := os.ReadFile(inFile)
-		if err != nil {
-			kotor.Fatal(err.Error())
-		}
-
-		movie := kotor.ParseBink(source)
+		movie := kotor.ParseBink(kotor.ReadFile(inFile))
 		if len(movie.Errors) > 0 {
 			report[i] = kotor.ReportBink(file, movie)
 			return
@@ -371,12 +297,8 @@ func convertMovies(lines *summary) {
 			"-c:a", "aac", "-b:a", movieAudioBitrate,
 			"-movflags", "+faststart", outFile,
 		}, nil)
-		failure := strings.TrimSpace(result.Stderr)
-		if failure == "" && result.StartError != nil {
-			failure = result.StartError.Error()
-		}
-		if result.Status != 0 || failure != "" {
-			report[i] = name + ".mp4 FAIL: ffmpeg: " + strings.SplitN(failure, "\n", 2)[0]
+		if result.Status != 0 || strings.TrimSpace(result.Stderr) != "" {
+			report[i] = name + ".mp4 FAIL: ffmpeg: " + kotor.FirstLine(result.Stderr)
 			return
 		}
 
@@ -417,16 +339,16 @@ func convertMovies(lines *summary) {
 	keep := map[string]bool{}
 	for i, file := range files {
 		if written[i] {
-			keep[bikPattern.ReplaceAllString(file, "")+".mp4"] = true
+			keep[strings.TrimSuffix(file, filepath.Ext(file))+".mp4"] = true
 		}
 	}
 	prune(out, keep, []string{".mp4"})
-	lines.tally("movies", report)
+	summary.Tally("movies", report)
 }
 
 // GUI: resource type 2047 in data/gui.bif -> assets/data/gui/*.json, and in patch.erf -> assets/patch/*.json.
 // Five patch.erf resources replace gui.bif resources of the same name.
-func convertGui(lines *summary) {
+func convertGui(summary *kotor.Summary) {
 	fmt.Println("gui...")
 	type source struct {
 		dir       string
@@ -439,7 +361,7 @@ func convertGui(lines *summary) {
 			bifGuis = append(bifGuis, resource)
 		}
 	}
-	for _, entry := range kotor.ReadErf(filepath.Join(kotor.Game, "patch.erf")).Entries {
+	for _, entry := range kotor.ReadErf(filepath.Join(kotor.Game, "patch.erf")) {
 		if entry.Type == kotor.TypeGui {
 			patchGuis = append(patchGuis, kotor.Resource{Resref: entry.Resref, Data: entry.Data()})
 		}
@@ -448,7 +370,7 @@ func convertGui(lines *summary) {
 	var report []string
 	for _, src := range []source{{"data/gui", bifGuis}, {"patch", patchGuis}} {
 		out := filepath.Join(kotor.Assets, src.dir)
-		makeDir(out)
+		kotor.MakeDir(out)
 
 		written := map[string]bool{}
 		for _, resource := range src.resources {
@@ -464,7 +386,7 @@ func convertGui(lines *summary) {
 				continue
 			}
 
-			writeFile(filepath.Join(out, resource.Resref+".json"), append(text, '\n'))
+			kotor.WriteFile(filepath.Join(out, resource.Resref+".json"), append(text, '\n'))
 			written[resource.Resref+".json"] = true
 			report = append(report, src.dir+"/"+resource.Resref+" PASS")
 		}
@@ -472,46 +394,21 @@ func convertGui(lines *summary) {
 		prune(out, written, []string{".json"})
 	}
 
-	lines.tally("gui", report)
+	summary.Tally("gui", report)
 }
 
 // Movies start first because they take longest.
-var stages = []struct {
-	name    string
-	convert func(*summary)
-}{
-	{"movies", convertMovies},
-	{"models", convertModels},
-	{"textures", convertTextures},
-	{"tga", convertTga},
-	{"music", func(lines *summary) { convertAudio(lines, "music", "streammusic") }},
-	{"sounds", func(lines *summary) { convertAudio(lines, "sounds", "streamsounds") }},
-	{"waves", func(lines *summary) { convertAudio(lines, "waves", "streamwaves") }},
-	{"gui", convertGui},
+var stages = []kotor.Stage{
+	{Name: "movies", Run: convertMovies},
+	{Name: "models", Run: convertModels},
+	{Name: "textures", Run: convertTextures},
+	{Name: "tga", Run: convertTga},
+	{Name: "music", Run: func(summary *kotor.Summary) { convertAudio(summary, "music", "streammusic") }},
+	{Name: "sounds", Run: func(summary *kotor.Summary) { convertAudio(summary, "sounds", "streamsounds") }},
+	{Name: "waves", Run: func(summary *kotor.Summary) { convertAudio(summary, "waves", "streamwaves") }},
+	{Name: "gui", Run: convertGui},
 }
 
 func main() {
-	makeDir(kotor.Reports)
-	wanted := os.Args[1:]
-
-	results := map[string]*summary{}
-	var group sync.WaitGroup
-	for _, stage := range stages {
-		if len(wanted) > 0 && !slices.Contains(wanted, stage.name) {
-			continue
-		}
-
-		lines := &summary{}
-		results[stage.name] = lines
-		group.Go(func() { stage.convert(lines) })
-	}
-	group.Wait()
-
-	var output []string
-	for _, stage := range kotor.ReportOrder {
-		if lines, ok := results[stage]; ok {
-			output = append(output, *lines...)
-		}
-	}
-	fmt.Println(strings.Join(output, "\n"))
+	kotor.RunStages(stages, os.Args[1:])
 }

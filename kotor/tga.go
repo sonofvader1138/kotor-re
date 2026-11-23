@@ -11,7 +11,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"slices"
-	"strings"
 )
 
 const tgaHeaderSize = 18
@@ -40,8 +39,6 @@ const (
 	descriptorRightToLeft = 0x10
 	descriptorTopDown     = 0x20
 )
-
-const tgaOpaque = 255
 
 // TgaHeader holds the parsed header. Complete is false when the file is shorter than the header, in which
 // case only Errors is set. ExtSize and ExtSizeField are set only when Trailer is "extension+footer".
@@ -150,13 +147,11 @@ func ParseTga(file []byte) *TgaHeader {
 }
 
 // TgaImage holds the pixels top row first. Pix has Channels bytes per pixel in PNG order: gray, RGB or RGBA.
-// Rgba is the same image expanded to RGBA with alpha 255 where the file has no alpha channel.
 type TgaImage struct {
 	Width    int
 	Height   int
 	Channels int
 	Pix      []byte
-	Rgba     []byte
 }
 
 // DecodeTga returns nil when the header has errors.
@@ -168,7 +163,6 @@ func DecodeTga(file []byte, header *TgaHeader) *TgaImage {
 	width, height, channels := header.Width, header.Height, header.Channels
 	stride := width * channels
 	pix := make([]byte, stride*height)
-	rgba := make([]byte, width*height*4)
 
 	for y := 0; y < height; y++ {
 		sourceRow := height - 1 - y
@@ -180,13 +174,8 @@ func DecodeTga(file []byte, header *TgaHeader) *TgaImage {
 		for x := 0; x < width; x++ {
 			src := srcRow + x*channels
 			dst := y*stride + x*channels
-			dstRgba := (y*width + x) * 4
 			if channels == 1 {
 				pix[dst] = file[src]
-				rgba[dstRgba] = file[src]
-				rgba[dstRgba+1] = file[src]
-				rgba[dstRgba+2] = file[src]
-				rgba[dstRgba+3] = tgaOpaque
 				continue
 			}
 
@@ -194,21 +183,18 @@ func DecodeTga(file []byte, header *TgaHeader) *TgaImage {
 			pix[dst] = file[src+2]
 			pix[dst+1] = file[src+1]
 			pix[dst+2] = file[src]
-			copy(rgba[dstRgba:], pix[dst:dst+3])
-			rgba[dstRgba+3] = tgaOpaque
 			if channels == 4 {
 				pix[dst+3] = file[src+3]
-				rgba[dstRgba+3] = file[src+3]
 			}
 		}
 	}
 
-	return &TgaImage{Width: width, Height: height, Channels: channels, Pix: pix, Rgba: rgba}
+	return &TgaImage{Width: width, Height: height, Channels: channels, Pix: pix}
 }
 
 func ReportTga(label string, header *TgaHeader) string {
 	if !header.Complete {
-		return label + " FAIL: " + strings.Join(header.Errors, "; ")
+		return label + " " + Verdict(header.Errors...)
 	}
 
 	origin := "bottom"
@@ -223,5 +209,5 @@ func ReportTga(label string, header *TgaHeader) string {
 
 	return fmt.Sprintf("%s %dx%d type=%d bpp=%d alphaBits=%d origin=%s trailer=%s%s %s",
 		label, header.Width, header.Height, header.ImageType, header.Bpp, header.AlphaBits,
-		origin, header.Trailer, ext, Verdict(header.Errors))
+		origin, header.Trailer, ext, Verdict(header.Errors...))
 }

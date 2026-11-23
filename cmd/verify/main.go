@@ -23,9 +23,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -43,23 +41,6 @@ import (
 const jobsPerCpu = 2
 
 var jobSlots = make(chan struct{}, runtime.NumCPU()*jobsPerCpu)
-
-// item is a summary entry: a note, or a report with its name and lines.
-type item struct {
-	note  string
-	name  string
-	lines []string
-}
-
-type summary []item
-
-func (items *summary) note(text string) {
-	*items = append(*items, item{note: text})
-}
-
-func (items *summary) tally(name string, lines []string) {
-	*items = append(*items, item{name: name, lines: lines})
-}
 
 // A job returns its report lines, usually one.
 type job func() []string
@@ -96,49 +77,6 @@ func exists(path string) bool {
 	return err == nil
 }
 
-func readFile(path string) []byte {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		kotor.Fatal(err.Error())
-	}
-	return data
-}
-
-// firstLine returns the first line of a program's error output, or of the start error when there is none.
-func firstLine(result kotor.ExecResult) string {
-	text := result.Stderr
-	if text == "" && result.StartError != nil {
-		text = result.StartError.Error()
-	}
-	return strings.SplitN(strings.TrimSpace(text), "\n", 2)[0]
-}
-
-// files lists the files in dir whose names end in ext, as sorted paths relative to dir. recursive
-// includes subfolders. A missing dir yields no files, so that the caller reports each output as missing.
-func files(dir, ext string, recursive bool) []string {
-	var names []string
-	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || path == dir {
-			return err
-		}
-
-		relative, _ := filepath.Rel(dir, path)
-		if strings.HasSuffix(relative, ext) {
-			names = append(names, relative)
-		}
-		if entry.IsDir() && !recursive {
-			return filepath.SkipDir
-		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		kotor.Fatal(err.Error())
-	}
-
-	slices.Sort(names)
-	return names
-}
-
 type decodedImage struct {
 	err  string
 	size string
@@ -151,7 +89,7 @@ func magickDecode(format string, data []byte) decodedImage {
 		format + ":-", "-auto-orient", "-format", "%w %h", "-write", "info:fd:2", "-depth", "8", "rgba:-",
 	}, data)
 	if result.Status != 0 {
-		return decodedImage{err: firstLine(result)}
+		return decodedImage{err: kotor.FirstLine(result.Stderr)}
 	}
 
 	lines := strings.Split(strings.TrimSpace(result.Stderr), "\n")
@@ -164,7 +102,7 @@ func pngCheck(name, file, width, height string, rgba []byte) []string {
 		return line(name + " FAIL: output missing")
 	}
 
-	decoded := magickDecode("png", readFile(file))
+	decoded := magickDecode("png", kotor.ReadFile(file))
 	if decoded.err != "" {
 		return line(name + " FAIL: " + decoded.err)
 	}
@@ -183,7 +121,7 @@ const pngcheckBatch = 200
 var pngcheckOk = regexp.MustCompile(`^OK: (.*?) \(`)
 
 func pngcheckDir(dir string) []string {
-	names := files(dir, ".png", false)
+	names := kotor.ListFiles(dir, ".png", false)
 	var jobs []job
 	for chunk := range slices.Chunk(names, pngcheckBatch) {
 		jobs = append(jobs, func() []string {
@@ -220,7 +158,7 @@ var (
 )
 
 // imageChecks runs the pixel and structure checks of one directory at the same time.
-func imageChecks(items *summary, name, dir string, jobs []job) {
+func imageChecks(summary *kotor.Summary, name, dir string, jobs []job) {
 	var pixelLines, structureLines []string
 	var group sync.WaitGroup
 	if magick {
@@ -232,15 +170,15 @@ func imageChecks(items *summary, name, dir string, jobs []job) {
 	group.Wait()
 
 	if magick {
-		items.tally("imagemagick_"+name, pixelLines)
+		summary.Tally("imagemagick_"+name, pixelLines)
 	} else {
-		items.note("ImageMagick missing: " + name + " UNVERIFIED")
+		summary.Note("ImageMagick missing: " + name + " UNVERIFIED")
 	}
 
 	if pngcheck {
-		items.tally("pngcheck_"+name, structureLines)
+		summary.Tally("pngcheck_"+name, structureLines)
 	} else {
-		items.note("pngcheck missing: " + name + " PNG structure unchecked")
+		summary.Note("pngcheck missing: " + name + " PNG structure unchecked")
 	}
 }
 
@@ -250,20 +188,20 @@ var (
 )
 
 // Models: assets/data/models/*.obj
-func models(items *summary) {
+func models(summary *kotor.Summary) {
 	if !kotor.Has("assimp") {
-		items.note("assimp missing: models UNVERIFIED")
+		summary.Note("assimp missing: models UNVERIFIED")
 		return
 	}
 
 	log("models...")
 	dir := filepath.Join(kotor.Assets, "data", "models")
 	var jobs []job
-	for _, file := range files(dir, ".obj", false) {
+	for _, file := range kotor.ListFiles(dir, ".obj", false) {
 		jobs = append(jobs, func() []string {
 			objPath := filepath.Join(dir, file)
 			faces := 0
-			for _, text := range bytes.Split(readFile(objPath), []byte("\n")) {
+			for _, text := range bytes.Split(kotor.ReadFile(objPath), []byte("\n")) {
 				if bytes.HasPrefix(text, []byte("f ")) {
 					faces++
 				}
@@ -273,7 +211,7 @@ func models(items *summary) {
 			meshes := meshesPattern.FindSubmatch(result.Stdout)
 			loaded := facesPattern.FindSubmatch(result.Stdout)
 			if result.Status != 0 || meshes == nil || loaded == nil {
-				return line(file + " FAIL: assimp: " + firstLine(result))
+				return line(file + " FAIL: assimp: " + kotor.FirstLine(result.Stderr))
 			}
 
 			var errs []string
@@ -284,22 +222,22 @@ func models(items *summary) {
 				errs = append(errs, fmt.Sprintf("assimp loaded %s faces, file has %d", loaded[1], faces))
 			}
 
-			return line(fmt.Sprintf("%s meshes=%s faces=%s %s", file, meshes[1], loaded[1], kotor.Verdict(errs)))
+			return line(fmt.Sprintf("%s meshes=%s faces=%s %s", file, meshes[1], loaded[1], kotor.Verdict(errs...)))
 		})
 	}
-	items.tally("assimp_models", pool(jobs))
+	summary.Tally("assimp_models", pool(jobs))
 }
 
 // Textures: assets/TexturePacks/<pack>/*.png against the TPC textures in TexturePacks/<pack>.erf.
 // Each job decodes its TPC texture when it starts, so only one texture per job slot is held in memory.
-func textures(items *summary) {
+func textures(summary *kotor.Summary) {
 	for _, pack := range kotor.TexturePacks {
 		log("textures " + pack + "...")
 		dir := filepath.Join(kotor.Assets, "TexturePacks", pack)
-		erf := kotor.ReadErf(filepath.Join(kotor.Game, "TexturePacks", pack+".erf"))
+		entries := kotor.ReadErf(filepath.Join(kotor.Game, "TexturePacks", pack+".erf"))
 
 		var jobs []job
-		for _, entry := range erf.Entries {
+		for _, entry := range entries {
 			if entry.Ext != "tpc" {
 				continue
 			}
@@ -315,12 +253,12 @@ func textures(items *summary) {
 				return pngCheck(name, filepath.Join(dir, name), strconv.Itoa(image.Width), strconv.Itoa(image.Height), image.Rgba)
 			})
 		}
-		imageChecks(items, pack, dir, jobs)
+		imageChecks(summary, pack, dir, jobs)
 	}
 }
 
 // TGA images: assets/data/<group>/*.png and *.txi against the BIF archives they came from
-func tgaImages(items *summary) {
+func tgaImages(summary *kotor.Summary) {
 	key := kotor.ReadKey()
 	for _, group := range kotor.TgaGroups {
 		log("tga " + group.Name + "...")
@@ -355,7 +293,7 @@ func tgaImages(items *summary) {
 						if !exists(file) {
 							return line(name + " FAIL: output missing")
 						}
-						if !bytes.Equal(readFile(file), resource.Data) {
+						if !bytes.Equal(kotor.ReadFile(file), resource.Data) {
 							return line(name + " FAIL: differs from source")
 						}
 						return line(name + " PASS")
@@ -375,21 +313,21 @@ func tgaImages(items *summary) {
 			}
 		}
 
-		items.tally("txi_"+group.Name, pool(txiJobs))
-		imageChecks(items, group.Name, dir, jobs)
+		summary.Tally("txi_"+group.Name, pool(txiJobs))
+		imageChecks(summary, group.Name, dir, jobs)
 	}
 }
 
 // Stream audio: assets/streammusic, assets/streamsounds and assets/streamwaves
-func streamAudio(items *summary, stage, folder string) {
+func streamAudio(summary *kotor.Summary, stage, folder string) {
 	if !ffprobe {
-		items.note("ffprobe missing: " + stage + " UNVERIFIED")
+		summary.Note("ffprobe missing: " + stage + " UNVERIFIED")
 		return
 	}
 
 	log(stage + "...")
 	dir := filepath.Join(kotor.Assets, folder)
-	audioFiles := append(files(dir, ".mp3", true), files(dir, ".wav", true)...)
+	audioFiles := append(kotor.ListFiles(dir, ".mp3", true), kotor.ListFiles(dir, ".wav", true)...)
 	slices.Sort(audioFiles)
 
 	jobs := make([]job, len(audioFiles))
@@ -399,10 +337,10 @@ func streamAudio(items *summary, stage, folder string) {
 			if result.Status == 0 && strings.TrimSpace(result.Stderr) == "" {
 				return line(file + " PASS")
 			}
-			return line(file + " FAIL: " + firstLine(result))
+			return line(file + " FAIL: " + kotor.FirstLine(result.Stderr))
 		}
 	}
-	items.tally("ffprobe_"+stage, pool(jobs))
+	summary.Tally("ffprobe_"+stage, pool(jobs))
 }
 
 // Movies: assets/movies/*.mp4 against movies/*.bik. The probe and the PSNR comparison of one movie run
@@ -447,13 +385,12 @@ func optionalNumber(value *string) float64 {
 }
 
 var (
-	bikPattern  = regexp.MustCompile(`(?i)\.bik$`)
 	psnrPattern = regexp.MustCompile(`PSNR [^\n\r]*average:(\S+) min:(\S+)`)
 )
 
-func movies(items *summary) {
+func movies(summary *kotor.Summary) {
 	if !ffprobe || !kotor.Has("ffmpeg") {
-		items.note("ffmpeg or ffprobe missing: movies UNVERIFIED")
+		summary.Note("ffmpeg or ffprobe missing: movies UNVERIFIED")
 		return
 	}
 
@@ -461,12 +398,12 @@ func movies(items *summary) {
 	src := filepath.Join(kotor.Game, "movies")
 	dir := filepath.Join(kotor.Assets, "movies")
 	var jobs []job
-	for _, file := range files(src, ".bik", false) {
+	for _, file := range kotor.ListFiles(src, ".bik", false) {
 		jobs = append(jobs, func() []string {
-			name := bikPattern.ReplaceAllString(file, "")
+			name := strings.TrimSuffix(file, filepath.Ext(file))
 			inFile := filepath.Join(src, file)
 			outFile := filepath.Join(dir, name+".mp4")
-			movie := kotor.ParseBink(readFile(inFile))
+			movie := kotor.ParseBink(kotor.ReadFile(inFile))
 			if len(movie.Errors) > 0 {
 				return line(name + ".mp4 FAIL: source does not parse")
 			}
@@ -563,96 +500,47 @@ func movies(items *summary) {
 			}
 
 			return line(fmt.Sprintf("%s.mp4 %dx%d %d frames %s PSNR avg %s min %s %s",
-				name, header.Width, header.Height, header.Frames, audioInfo, average, minimum, kotor.Verdict(errs)))
+				name, header.Width, header.Height, header.Frames, audioInfo, average, minimum, kotor.Verdict(errs...)))
 		})
 	}
-	items.tally("ffprobe_movies", pool(jobs))
+	summary.Tally("ffprobe_movies", pool(jobs))
 }
 
 // GUI: assets/data/gui/*.json and assets/patch/*.json
-func gui(items *summary) {
+func gui(summary *kotor.Summary) {
 	if !kotor.Has("jq") {
-		items.note("jq missing: gui UNVERIFIED")
+		summary.Note("jq missing: gui UNVERIFIED")
 		return
 	}
 
 	log("gui...")
 	var jobs []job
 	for _, dir := range []string{"data/gui", "patch"} {
-		for _, file := range files(filepath.Join(kotor.Assets, dir), ".json", false) {
+		for _, file := range kotor.ListFiles(filepath.Join(kotor.Assets, dir), ".json", false) {
 			jobs = append(jobs, func() []string {
 				result := kotor.Exec("jq", []string{"empty", filepath.Join(kotor.Assets, dir, file)}, nil)
 				if result.Status == 0 {
 					return line(dir + "/" + file + " PASS")
 				}
-				return line(dir + "/" + file + " FAIL: jq: " + firstLine(result))
+				return line(dir + "/" + file + " FAIL: jq: " + kotor.FirstLine(result.Stderr))
 			})
 		}
 	}
-	items.tally("jq_gui", pool(jobs))
+	summary.Tally("jq_gui", pool(jobs))
 }
 
 // Movies queue their jobs first because each one takes longest, so short jobs fill the other slots.
-var stages = []struct {
-	name  string
-	check func(*summary)
-}{
-	{"movies", movies},
-	{"models", models},
-	{"textures", textures},
-	{"tga", tgaImages},
-	{"music", func(items *summary) { streamAudio(items, "music", "streammusic") }},
-	{"sounds", func(items *summary) { streamAudio(items, "sounds", "streamsounds") }},
-	{"waves", func(items *summary) { streamAudio(items, "waves", "streamwaves") }},
-	{"gui", gui},
+var stages = []kotor.Stage{
+	{Name: "movies", Run: movies},
+	{Name: "models", Run: models},
+	{Name: "textures", Run: textures},
+	{Name: "tga", Run: tgaImages},
+	{Name: "music", Run: func(summary *kotor.Summary) { streamAudio(summary, "music", "streammusic") }},
+	{Name: "sounds", Run: func(summary *kotor.Summary) { streamAudio(summary, "sounds", "streamsounds") }},
+	{Name: "waves", Run: func(summary *kotor.Summary) { streamAudio(summary, "waves", "streamwaves") }},
+	{Name: "gui", Run: gui},
 }
 
 func main() {
-	wanted := os.Args[1:]
-
-	results := map[string]*summary{}
-	var group sync.WaitGroup
-	for _, stage := range stages {
-		if len(wanted) > 0 && !slices.Contains(wanted, stage.name) {
-			continue
-		}
-
-		items := &summary{}
-		results[stage.name] = items
-		group.Go(func() { stage.check(items) })
-	}
-	group.Wait()
-
-	if err := os.MkdirAll(kotor.Reports, 0o755); err != nil {
-		kotor.Fatal(err.Error())
-	}
-
-	var output []string
-	for _, stage := range kotor.ReportOrder {
-		items, ok := results[stage]
-		if !ok {
-			continue
-		}
-
-		for _, entry := range *items {
-			if entry.name == "" {
-				output = append(output, entry.note)
-				continue
-			}
-
-			report := []byte(strings.Join(entry.lines, "\n") + "\n")
-			if err := os.WriteFile(filepath.Join(kotor.Reports, entry.name+".txt"), report, 0o644); err != nil {
-				kotor.Fatal(err.Error())
-			}
-
-			pass := 0
-			for _, text := range entry.lines {
-				if strings.HasSuffix(text, "PASS") {
-					pass++
-				}
-			}
-			output = append(output, fmt.Sprintf("%s: %d pass, %d fail", entry.name, pass, len(entry.lines)-pass))
-		}
-	}
-	fmt.Println(strings.Join(output, "\n"))
+	kotor.RunStages(stages, os.Args[1:])
 }

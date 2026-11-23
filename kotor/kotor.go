@@ -5,14 +5,18 @@ package kotor
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Root is the working directory ~/re. It is found from this source file, which is in kotor.
@@ -72,8 +76,8 @@ var TgaGroups = []TgaGroup{
 	{"legacy", regexp.MustCompile(`^data/legacy\.bif$`)},
 }
 
-// ReportOrder is the order in which convert and verify print their stage summaries.
-var ReportOrder = []string{"models", "textures", "tga", "music", "sounds", "waves", "movies", "gui"}
+// reportOrder is the order in which RunStages prints the stage summaries.
+var reportOrder = []string{"models", "textures", "tga", "music", "sounds", "waves", "movies", "gui"}
 
 // A resource reference (resref) is a resource name of at most 16 bytes, padded with NUL bytes.
 const ResrefLength = 16
@@ -107,12 +111,69 @@ func Fatal(message string) {
 	os.Exit(1)
 }
 
-// Verdict ends a report line: "PASS" when there are no errors, otherwise "FAIL: " and the errors.
-func Verdict(errors []string) string {
-	if len(errors) == 0 {
+// ReadFile reads a whole file and ends the process when it cannot.
+func ReadFile(path string) []byte {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		Fatal(err.Error())
+	}
+	return data
+}
+
+// WriteFile writes a whole file and ends the process when it cannot.
+func WriteFile(path string, data []byte) {
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		Fatal(err.Error())
+	}
+}
+
+// MakeDir creates a directory and its parents and ends the process when it cannot.
+func MakeDir(path string) {
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		Fatal(err.Error())
+	}
+}
+
+// ListFiles returns the files under dir whose extension is ext, ignoring case, as sorted paths relative to
+// dir. recursive includes subfolders. A missing dir yields no files.
+func ListFiles(dir, ext string, recursive bool) []string {
+	var names []string
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || path == dir {
+			return err
+		}
+
+		if entry.IsDir() && !recursive {
+			return filepath.SkipDir
+		}
+		if !entry.IsDir() && strings.EqualFold(filepath.Ext(path), ext) {
+			relative, _ := filepath.Rel(dir, path)
+			names = append(names, relative)
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		Fatal(err.Error())
+	}
+
+	slices.Sort(names)
+	return names
+}
+
+// Verdict ends a report line: "PASS" when there are no errors, otherwise "FAIL: " and the errors. Empty
+// strings are not errors, so a single error string that may be empty can be passed as it is.
+func Verdict(errors ...string) string {
+	var found []string
+	for _, text := range errors {
+		if text != "" {
+			found = append(found, text)
+		}
+	}
+
+	if len(found) == 0 {
 		return "PASS"
 	}
-	return "FAIL: " + strings.Join(errors, "; ")
+	return "FAIL: " + strings.Join(found, "; ")
 }
 
 // Latin1 decodes bytes as ISO 8859-1, which maps each byte to the code point of the same value.
@@ -166,10 +227,7 @@ type Key struct {
 // Key entry 22 bytes: char[16] resref, u16 type, u32 id (bif << 20 | index).
 func ReadKey() *Key {
 	file := filepath.Join(Game, "chitin.key")
-	data, err := os.ReadFile(file)
-	if err != nil {
-		Fatal(err.Error())
-	}
+	data := ReadFile(file)
 	if string(Slice(data, 0, signatureLength)) != keySignature {
 		Fatal(file + ": not KEY V1")
 	}
@@ -213,10 +271,7 @@ type BifEntry struct {
 // BIF: 8 magic, u32 varCount, u32 fixedCount, u32 tableOff.
 // Var entry 16 bytes: u32 id, u32 offset, u32 size, u32 type.
 func ReadBif(file string) ([]byte, []BifEntry) {
-	data, err := os.ReadFile(file)
-	if err != nil {
-		Fatal(err.Error())
-	}
+	data := ReadFile(file)
 	if string(Slice(data, 0, signatureLength)) != bifSignature {
 		Fatal(file + ": not BIFFV1")
 	}
@@ -315,19 +370,13 @@ func readAt(file *os.File, buffer []byte, offset int64) {
 	}
 }
 
-type Erf struct {
-	Signature string
-	Entries   []ErfEntry
-	Size      int64
-}
-
 var erfSignature = regexp.MustCompile(`^(ERF |MOD |HAK |SAV )V1\.0$`)
 
 // ReadErf reads the tables of an ERF V1.0 archive. Each entry reads its resource on demand, since the
 // texture packs are up to 400 MB. The file stays open for the life of the process.
 // ERF V1.0: 160-byte header. 0x10 u32 entryCount, 0x18 u32 keyListOff, 0x1C u32 resListOff.
 // Key entry 24 bytes: char[16] resref, u32 id, u16 type, u16 unused. Resource entry 8 bytes: u32 offset, u32 size.
-func ReadErf(path string) *Erf {
+func ReadErf(path string) []ErfEntry {
 	file, err := os.Open(path)
 	if err != nil {
 		Fatal(err.Error())
@@ -341,8 +390,7 @@ func ReadErf(path string) *Erf {
 	header := make([]byte, erfHeaderSize)
 	readAt(file, header, 0)
 
-	signature := Latin1(header[:signatureLength])
-	if !erfSignature.MatchString(signature) {
+	if !erfSignature.MatchString(Latin1(header[:signatureLength])) {
 		Fatal(path + ": not ERF V1.0")
 	}
 
@@ -354,7 +402,7 @@ func ReadErf(path string) *Erf {
 	readAt(file, keyList, keyListOffset)
 	readAt(file, resourceList, resourceListOffset)
 
-	erf := &Erf{Signature: signature, Size: info.Size()}
+	var entries []ErfEntry
 	for i := 0; i < entryCount; i++ {
 		resourceEntry := erfResourceEntrySize * i
 		keyEntry := erfKeyEntrySize * i
@@ -365,7 +413,7 @@ func ReadErf(path string) *Erf {
 		}
 
 		resourceType := u16(keyList, keyEntry+20)
-		erf.Entries = append(erf.Entries, ErfEntry{
+		entries = append(entries, ErfEntry{
 			Resref: strings.ToLower(CString(keyList[keyEntry : keyEntry+ResrefLength])),
 			Type:   resourceType,
 			Ext:    Ext(resourceType),
@@ -375,16 +423,15 @@ func ReadErf(path string) *Erf {
 		})
 	}
 
-	return erf
+	return entries
 }
 
 // ExecResult is the outcome of running a program. Status is -1 when the program did not start or was
-// ended by a signal. StartError is set only when the program could not be started.
+// ended by a signal. When the program could not be started, Stderr holds the reason.
 type ExecResult struct {
-	Status     int
-	StartError error
-	Stdout     []byte
-	Stderr     string
+	Status int
+	Stdout []byte
+	Stderr string
 }
 
 // Exec runs a program with input on its standard input and waits for it to end. A nil input gives the
@@ -401,13 +448,72 @@ func Exec(program string, args []string, input []byte) ExecResult {
 	if command.ProcessState != nil {
 		result.Status = command.ProcessState.ExitCode()
 	} else {
-		result.StartError = err
+		result.Stderr = err.Error()
 	}
 	return result
+}
+
+// FirstLine returns the first line of text after surrounding white space is removed.
+func FirstLine(text string) string {
+	return strings.SplitN(strings.TrimSpace(text), "\n", 2)[0]
 }
 
 // Has reports whether a program can be found on the search path.
 func Has(program string) bool {
 	_, err := exec.LookPath(program)
 	return err == nil
+}
+
+// Summary holds the summary lines of one stage of the convert or verify command.
+type Summary []string
+
+// Note adds a line to the summary.
+func (summary *Summary) Note(text string) {
+	*summary = append(*summary, text)
+}
+
+// Tally writes a report to Reports and adds its pass and fail counts to the summary.
+func (summary *Summary) Tally(name string, report []string) {
+	WriteFile(filepath.Join(Reports, name+".txt"), []byte(strings.Join(report, "\n")+"\n"))
+
+	pass := 0
+	for _, line := range report {
+		if strings.HasSuffix(line, "PASS") {
+			pass++
+		}
+	}
+	summary.Note(fmt.Sprintf("%s: %d pass, %d fail", name, pass, len(report)-pass))
+}
+
+// Stage is one named step of the convert or verify command.
+type Stage struct {
+	Name string
+	Run  func(*Summary)
+}
+
+// RunStages runs the stages whose names are given, or all of them when none are, at the same time. It then
+// prints their summaries in reportOrder.
+func RunStages(stages []Stage, names []string) {
+	MakeDir(Reports)
+
+	results := map[string]*Summary{}
+	var group sync.WaitGroup
+	for _, stage := range stages {
+		if len(names) > 0 && !slices.Contains(names, stage.Name) {
+			continue
+		}
+
+		summary := &Summary{}
+		results[stage.Name] = summary
+		group.Go(func() { stage.Run(summary) })
+	}
+	group.Wait()
+
+	var output []string
+	for _, name := range reportOrder {
+		if summary, ok := results[name]; ok {
+			output = append(output, *summary...)
+		}
+	}
+	fmt.Println(strings.Join(output, "\n"))
 }

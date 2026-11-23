@@ -16,15 +16,10 @@ func main() {
 		kotor.Fatal("usage: mdl2obj in.mdl in.mdx out.obj")
 	}
 
-	model, err := os.ReadFile(os.Args[1])
-	if err != nil {
-		kotor.Fatal(err.Error())
-	}
+	model := kotor.ReadFile(os.Args[1])
 	vertices, _ := os.ReadFile(os.Args[2])
 
 	result := kotor.ConvertMdl(model, vertices, os.Args[1], "")
-	if err := os.WriteFile(os.Args[3], []byte(result.Obj), 0o644); err != nil {
-		kotor.Fatal(err.Error())
-	}
+	kotor.WriteFile(os.Args[3], []byte(result.Obj))
 	fmt.Println(kotor.ReportMdl(os.Args[1], result))
 }

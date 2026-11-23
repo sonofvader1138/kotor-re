@@ -23,9 +23,7 @@ func main() {
 	for _, resref := range os.Args[3:] {
 		wanted[strings.ToLower(resref)] = true
 	}
-	if err := os.MkdirAll(out, 0o755); err != nil {
-		kotor.Fatal(err.Error())
-	}
+	kotor.MakeDir(out)
 
 	count := 0
 	for _, resource := range kotor.BifResources(bif, kotor.ReadKey()) {
@@ -33,9 +31,7 @@ func main() {
 			continue
 		}
 
-		if err := os.WriteFile(filepath.Join(out, resource.Resref+"."+resource.Ext), resource.Data, 0o644); err != nil {
-			kotor.Fatal(err.Error())
-		}
+		kotor.WriteFile(filepath.Join(out, resource.Resref+"."+resource.Ext), resource.Data)
 		count++
 	}
 

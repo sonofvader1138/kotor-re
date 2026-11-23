@@ -16,18 +16,13 @@ func main() {
 		kotor.Fatal("usage: tga2png in.tga out.png")
 	}
 
-	file, err := os.ReadFile(os.Args[1])
-	if err != nil {
-		kotor.Fatal(err.Error())
-	}
+	file := kotor.ReadFile(os.Args[1])
 
 	header := kotor.ParseTga(file)
 	image := kotor.DecodeTga(file, header)
 	fmt.Println(kotor.ReportTga(os.Args[1], header))
 
 	if image != nil {
-		if err := os.WriteFile(os.Args[2], kotor.EncodePng(image.Width, image.Height, image.Pix, image.Channels), 0o644); err != nil {
-			kotor.Fatal(err.Error())
-		}
+		kotor.WriteFile(os.Args[2], kotor.EncodePng(image.Width, image.Height, image.Pix, image.Channels))
 	}
 }

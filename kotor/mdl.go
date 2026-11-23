@@ -350,5 +350,5 @@ func ReportMdl(label string, result MdlResult) string {
 	stats := result.Stats
 	return fmt.Sprintf("%s nodes=%d meshes=%d hidden=%d verts=%d faces=%d mdl/mdx_mismatch=%d hdrnodes=%s normals_ok=%d/%d %s",
 		label, stats.Nodes, stats.Meshes, stats.Hidden, stats.Verts, stats.Faces, stats.Mismatch,
-		stats.HdrNodes, stats.NormalsMatching, stats.NormalsChecked, Verdict(result.Errors[:min(5, len(result.Errors))]))
+		stats.HdrNodes, stats.NormalsMatching, stats.NormalsChecked, Verdict(result.Errors[:min(5, len(result.Errors))]...))
 }

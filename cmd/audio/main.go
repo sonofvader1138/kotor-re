@@ -25,23 +25,12 @@ func main() {
 	}
 
 	for _, file := range args {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			kotor.Fatal(err.Error())
-		}
-
 		name := wavPattern.ReplaceAllString(filepath.Base(file), "")
-		result := kotor.UnwrapAudio(data)
-		verdict := "PASS"
-		if result.Err != "" {
-			verdict = "FAIL: " + result.Err
-		}
-		fmt.Printf("%-24s %s %-40s %s\n", name, result.Kind, result.Info, verdict)
+		result := kotor.UnwrapAudio(kotor.ReadFile(file))
+		fmt.Printf("%-24s %s %-40s %s\n", name, result.Kind, result.Info, kotor.Verdict(result.Err))
 
 		if out != "" && result.Err == "" {
-			if err := os.WriteFile(filepath.Join(out, name+"."+result.Kind), result.Payload, 0o644); err != nil {
-				kotor.Fatal(err.Error())
-			}
+			kotor.WriteFile(filepath.Join(out, name+"."+result.Kind), result.Payload)
 		}
 	}
 }

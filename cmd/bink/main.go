@@ -13,10 +13,6 @@ import (
 
 func main() {
 	for _, file := range os.Args[1:] {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			kotor.Fatal(err.Error())
-		}
-		fmt.Println(kotor.ReportBink(filepath.Base(file), kotor.ParseBink(data)))
+		fmt.Println(kotor.ReportBink(filepath.Base(file), kotor.ParseBink(kotor.ReadFile(file))))
 	}
 }

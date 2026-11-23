@@ -12,7 +12,6 @@ import (
 	"math"
 	"regexp"
 	"strconv"
-	"strings"
 )
 
 const TpcHeaderSize = 128
@@ -358,10 +357,10 @@ func DecodeTpc(file []byte, texture *TpcTexture) *TpcImage {
 
 func ReportTpc(label string, texture *TpcTexture) string {
 	if texture.Kind == "" {
-		return label + " FAIL: " + strings.Join(texture.Errors, "; ")
+		return label + " " + Verdict(texture.Errors...)
 	}
 
 	return fmt.Sprintf("%s %dx%d %s mips=%d layout=%s alpha=%.4f txi=%d %s",
 		label, texture.Width, texture.Height, texture.Kind, texture.Mips, texture.Layout,
-		texture.Alpha, len(texture.Txi), Verdict(texture.Errors))
+		texture.Alpha, len(texture.Txi), Verdict(texture.Errors...))
 }

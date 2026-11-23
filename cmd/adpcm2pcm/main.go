@@ -17,21 +17,12 @@ func main() {
 		kotor.Fatal("usage: adpcm2pcm in.wav out.wav")
 	}
 
-	file, err := os.ReadFile(os.Args[1])
-	if err != nil {
-		kotor.Fatal(err.Error())
-	}
+	file := kotor.ReadFile(os.Args[1])
 
 	result := kotor.DecodeAdpcm(file)
 	if result.Out != nil {
-		if err := os.WriteFile(os.Args[2], result.Out, 0o644); err != nil {
-			kotor.Fatal(err.Error())
-		}
+		kotor.WriteFile(os.Args[2], result.Out)
 	}
 
-	verdict := "PASS"
-	if result.Err != "" {
-		verdict = "FAIL: " + result.Err
-	}
-	fmt.Printf("%s %s %s\n", filepath.Base(os.Args[1]), result.Info, verdict)
+	fmt.Printf("%s %s %s\n", filepath.Base(os.Args[1]), result.Info, kotor.Verdict(result.Err))
 }
