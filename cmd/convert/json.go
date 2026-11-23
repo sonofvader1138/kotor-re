@@ -3,17 +3,14 @@ package main
 import (
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 
 	"re/kotor"
 )
 
-// A GUI file becomes JSON the way JSON.stringify(value, null, 1) wrote it in the JS converter. The rules
-// that matter here: an object lists keys that are array indices first, in numeric order, and then the
-// other keys in insertion order; assigning an existing key keeps its position; numbers use
-// Number.prototype.toString, and NaN and infinities become null.
+// A GUI file becomes JSON with one-space indentation. Object keys keep the order of the fields in the file,
+// and assigning an existing key keeps its position. NaN and infinities have no JSON form and become null.
 
 const (
 	jsonNumber = iota
@@ -22,13 +19,13 @@ const (
 	jsonArray
 )
 
-// jsonValue is a number, a string, an object (keys and items in parallel) or an array (items).
+// jsonValue is a number or a string (text), an object (keys and items in parallel) or an array (items).
+// A number's text is already formatted.
 type jsonValue struct {
-	kind   int
-	number float64
-	text   string
-	keys   []string
-	items  []jsonValue
+	kind  int
+	text  string
+	keys  []string
+	items []jsonValue
 }
 
 // set assigns a key of an object, keeping the position of a key that already exists.
@@ -43,16 +40,12 @@ func (object *jsonValue) set(key string, value jsonValue) {
 	object.items = append(object.items, value)
 }
 
-// The largest array index is 2^32 - 2.
-const maxArrayIndex = math.MaxUint32 - 1
-
-// arrayIndex reports whether a key is the canonical decimal form of an array index, and its value.
-func arrayIndex(key string) (uint64, bool) {
-	index, err := strconv.ParseUint(key, 10, 64)
-	if err != nil || index > maxArrayIndex || strconv.FormatUint(index, 10) != key {
-		return 0, false
+// number formats a value with the fewest digits that read back as the same value at the given bit size.
+func number(value float64, bitSize int) jsonValue {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return jsonValue{kind: jsonNumber, text: "null"}
 	}
-	return index, true
+	return jsonValue{kind: jsonNumber, text: strconv.FormatFloat(value, 'f', -1, bitSize)}
 }
 
 // quote writes a string as a JSON string literal: quotes, backslashes and control characters are escaped.
@@ -88,11 +81,7 @@ func quote(out *strings.Builder, text string) {
 func writeJson(out *strings.Builder, value jsonValue, depth int) {
 	switch value.kind {
 	case jsonNumber:
-		if math.IsNaN(value.number) || math.IsInf(value.number, 0) {
-			out.WriteString("null")
-		} else {
-			out.WriteString(kotor.NumberString(value.number))
-		}
+		out.WriteString(value.text)
 		return
 
 	case jsonString:
@@ -109,25 +98,10 @@ func writeJson(out *strings.Builder, value jsonValue, depth int) {
 		return
 	}
 
-	order := make([]int, len(value.items))
-	for i := range order {
-		order[i] = i
-	}
-	if value.kind == jsonObject {
-		sort.SliceStable(order, func(a, b int) bool {
-			indexA, isIndexA := arrayIndex(value.keys[order[a]])
-			indexB, isIndexB := arrayIndex(value.keys[order[b]])
-			if isIndexA && isIndexB {
-				return indexA < indexB
-			}
-			return isIndexA && !isIndexB
-		})
-	}
-
 	inner := strings.Repeat(" ", depth+1)
 	out.WriteString(opening + "\n")
-	for n, i := range order {
-		if n > 0 {
+	for i, item := range value.items {
+		if i > 0 {
 			out.WriteString(",\n")
 		}
 		out.WriteString(inner)
@@ -135,32 +109,18 @@ func writeJson(out *strings.Builder, value jsonValue, depth int) {
 			quote(out, value.keys[i])
 			out.WriteString(": ")
 		}
-		writeJson(out, value.items[i], depth+1)
+		writeJson(out, item, depth+1)
 	}
 	out.WriteString("\n" + strings.Repeat(" ", depth) + closing)
 }
 
-// Nine significant digits always round-trip an f32.
-const f32MaxDigits = 9
-
-// shortestF32 returns the decimal with the fewest significant digits that rounds to the same f32.
-func shortestF32(value float64) jsonValue {
-	for digits := 1; digits <= f32MaxDigits; digits++ {
-		shortest := kotor.RoundSignificant(value, digits)
-		if float64(float32(shortest)) == value {
-			return jsonValue{kind: jsonNumber, number: shortest}
-		}
-	}
-	return jsonValue{kind: jsonNumber, number: value}
-}
-
 // guiJson turns a struct into an object keyed by field label, in file order. A struct type other than 0 is
 // kept as "__struct_type". Lists become arrays of objects, vectors become 3-element arrays, and f32 values
-// use the shortest decimal that round-trips.
+// use the shortest decimal that round-trips as an f32.
 func guiJson(structValue *kotor.GffStructValue) jsonValue {
 	object := jsonValue{kind: jsonObject}
 	if structValue.StructType != 0 {
-		object.set("__struct_type", jsonValue{kind: jsonNumber, number: float64(structValue.StructType)})
+		object.set("__struct_type", number(float64(structValue.StructType), 64))
 	}
 
 	for _, field := range structValue.Fields {
@@ -176,19 +136,19 @@ func guiJson(structValue *kotor.GffStructValue) jsonValue {
 			}
 
 		case kotor.GffF32:
-			value = shortestF32(field.Value.Number)
+			value = number(field.Value.Number, 32)
 
 		case kotor.GffVector:
 			value = jsonValue{kind: jsonArray}
 			for _, component := range field.Value.Vector {
-				value.items = append(value.items, shortestF32(component))
+				value.items = append(value.items, number(component, 32))
 			}
 
 		case kotor.GffString, kotor.GffResref:
 			value = jsonValue{kind: jsonString, text: field.Value.Text}
 
 		default:
-			value = jsonValue{kind: jsonNumber, number: field.Value.Number}
+			value = number(field.Value.Number, 64)
 		}
 		object.set(field.Label, value)
 	}

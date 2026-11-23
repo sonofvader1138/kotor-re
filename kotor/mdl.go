@@ -75,30 +75,8 @@ func qmul(a, b quat) quat {
 	}
 }
 
-// hypot3 is V8's Math.hypot for three finite values: each value is divided by the largest, and the
-// squares are added with Kahan summation. It can differ from a plain square root in the last bit.
-func hypot3(v vec3) float64 {
-	largest := 0.0
-	for _, value := range v {
-		largest = max(largest, math.Abs(value))
-	}
-	if largest == 0 {
-		return 0
-	}
-
-	sum, compensation := 0.0, 0.0
-	for _, value := range v {
-		n := math.Abs(value) / largest
-		summand := n*n - compensation
-		preliminary := sum + summand
-		compensation = (preliminary - sum) - summand
-		sum = preliminary
-	}
-	return math.Sqrt(sum) * largest
-}
-
 func formatNumber(value float64) string {
-	return ToFixed(value, 6)
+	return strconv.FormatFloat(value, 'f', 6, 64)
 }
 
 type MdlStats struct {
@@ -111,7 +89,7 @@ type MdlStats struct {
 	NormalsMatching int
 	NormalsChecked  int
 
-	// HdrNodes is the node count field of the header, as text: "undefined" when it lies outside the file.
+	// HdrNodes is the node count field of the header, as text: "?" when it lies outside the file.
 	HdrNodes string
 }
 
@@ -173,7 +151,7 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 	}
 
 	root, _ := u32(0x28)
-	stats.HdrNodes = "undefined"
+	stats.HdrNodes = "?"
 	if hdrNodes, ok := u32(0x2c); ok {
 		stats.HdrNodes = strconv.Itoa(hdrNodes)
 	}
@@ -296,7 +274,7 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 				edge1[2]*edge2[0] - edge1[0]*edge2[2],
 				edge1[0]*edge2[1] - edge1[1]*edge2[0],
 			}
-			length := hypot3(cross)
+			length := math.Sqrt(cross[0]*cross[0] + cross[1]*cross[1] + cross[2]*cross[2])
 			if length > minCrossLength {
 				stats.NormalsChecked++
 				if (cross[0]*normal[0]+cross[1]*normal[1]+cross[2]*normal[2])/length > minNormalCosine {

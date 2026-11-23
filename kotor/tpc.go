@@ -37,13 +37,10 @@ const (
 	printableLast  = 126
 )
 
-// Line breaks and white space as JavaScript regular expressions define them, limited to Latin-1. The
-// flipbook counts were found with /^\s*numx\s+(\d+)/im, whose ^ also matches after a carriage return.
-const jsSpace = `[\t\n\v\f\r \x{A0}]`
-
+// The TXI trailer gives a flipbook's frame grid in "numx <columns>" and "numy <rows>" lines.
 var (
-	numxPattern = regexp.MustCompile(`(?i)(?:^|[\n\r])` + jsSpace + `*numx` + jsSpace + `+(\d+)`)
-	numyPattern = regexp.MustCompile(`(?i)(?:^|[\n\r])` + jsSpace + `*numy` + jsSpace + `+(\d+)`)
+	numxPattern = regexp.MustCompile(`(?im)^\s*numx\s+(\d+)`)
+	numyPattern = regexp.MustCompile(`(?im)^\s*numy\s+(\d+)`)
 )
 
 func blocksAcross(pixels int) int {
@@ -89,13 +86,13 @@ type TpcTexture struct {
 	Errors   []string
 }
 
-// countIn returns the count that pattern captures in text, or NaN when it does not match.
-func countIn(pattern *regexp.Regexp, text string) float64 {
+// countIn returns the count that pattern captures in text, or 0 when it does not match.
+func countIn(pattern *regexp.Regexp, text string) int {
 	match := pattern.FindStringSubmatch(text)
 	if match == nil {
-		return math.NaN()
+		return 0
 	}
-	count, _ := strconv.ParseFloat(match[1], 64)
+	count, _ := strconv.Atoi(match[1])
 	return count
 }
 
@@ -155,14 +152,14 @@ func ParseTpc(file []byte) *TpcTexture {
 		txiText := Latin1(file[TpcHeaderSize+dataSize:])
 		columns := countIn(numxPattern, txiText)
 		rows := countIn(numyPattern, txiText)
-		if columns > 0 && rows > 0 && math.Mod(float64(width), columns) == 0 && math.Mod(float64(height), rows) == 0 {
-			frameWidth := int(float64(width) / columns)
-			frameHeight := int(float64(height) / rows)
+		if columns > 0 && rows > 0 && width%columns == 0 && height%rows == 0 {
+			frameWidth := width / columns
+			frameHeight := height / rows
 			levels := math.Log2(float64(max(frameWidth, frameHeight))) + 1
 			layout = "flipbook"
 			images = nil
-			for j := 0; j < int(rows); j++ {
-				for i := 0; i < int(columns); i++ {
+			for j := 0; j < rows; j++ {
+				for i := 0; i < columns; i++ {
 					images = append(images, SubImage{
 						X:      i * frameWidth,
 						Y:      j * frameHeight,
@@ -364,7 +361,7 @@ func ReportTpc(label string, texture *TpcTexture) string {
 		return label + " FAIL: " + strings.Join(texture.Errors, "; ")
 	}
 
-	return fmt.Sprintf("%s %dx%d %s mips=%d layout=%s alpha=%s txi=%d %s",
+	return fmt.Sprintf("%s %dx%d %s mips=%d layout=%s alpha=%.4f txi=%d %s",
 		label, texture.Width, texture.Height, texture.Kind, texture.Mips, texture.Layout,
-		ToFixed(texture.Alpha, 4), len(texture.Txi), Verdict(texture.Errors))
+		texture.Alpha, len(texture.Txi), Verdict(texture.Errors))
 }

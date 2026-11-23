@@ -133,17 +133,6 @@ func CString(data []byte) string {
 	return Latin1(data)
 }
 
-// cutNulLine cuts a NUL-padded Latin-1 field at its first NUL byte that has no line feed or carriage
-// return after it. The JS readers used /\0.*$/ without the s flag, whose "." stops at line breaks.
-func cutNulLine(data []byte) string {
-	lastBreak := bytes.LastIndexAny(data, "\n\r")
-	end := bytes.IndexByte(data[lastBreak+1:], 0)
-	if end >= 0 {
-		data = data[:lastBreak+1+end]
-	}
-	return Latin1(data)
-}
-
 // Slice returns data[start:end] with both bounds clamped to the data, like Buffer.subarray.
 func Slice(data []byte, start, end int) []byte {
 	end = min(max(end, 0), len(data))
@@ -195,7 +184,7 @@ func ReadKey() *Key {
 		entry := bifTable + keyBifEntrySize*i
 		nameOffset := int(u32(data, entry+4))
 		nameLength := int(u16(data, entry+8))
-		name := cutNulLine(Slice(data, nameOffset, nameOffset+nameLength))
+		name := CString(Slice(data, nameOffset, nameOffset+nameLength))
 		key.Bifs = append(key.Bifs, strings.ReplaceAll(name, `\`, "/"))
 	}
 
@@ -203,7 +192,7 @@ func ReadKey() *Key {
 		entry := keyTable + keyEntrySize*i
 		id := u32(data, entry+18)
 		key.Keys = append(key.Keys, KeyEntry{
-			Resref: strings.ToLower(cutNulLine(data[entry : entry+ResrefLength])),
+			Resref: strings.ToLower(CString(data[entry : entry+ResrefLength])),
 			Type:   u16(data, entry+ResrefLength),
 			Bif:    id >> resourceIndexBits,
 			Index:  id & ResourceIndexMask,

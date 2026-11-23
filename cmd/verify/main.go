@@ -139,19 +139,6 @@ func files(dir, ext string, recursive bool) []string {
 	return names
 }
 
-// jsNumber converts text to a number like JavaScript's Number(): NaN when it is not a number.
-func jsNumber(text string) float64 {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return 0
-	}
-	value, err := strconv.ParseFloat(text, 64)
-	if err != nil {
-		return math.NaN()
-	}
-	return value
-}
-
 type decodedImage struct {
 	err  string
 	size string
@@ -290,10 +277,10 @@ func models(items *summary) {
 			}
 
 			var errs []string
-			if jsNumber(string(meshes[1])) == 0 {
+			if count, _ := strconv.Atoi(string(meshes[1])); count == 0 {
 				errs = append(errs, "no meshes")
 			}
-			if jsNumber(string(loaded[1])) != float64(faces) {
+			if count, _ := strconv.Atoi(string(loaded[1])); count != faces {
 				errs = append(errs, fmt.Sprintf("assimp loaded %s faces, file has %d", loaded[1], faces))
 			}
 
@@ -440,10 +427,10 @@ type probeStream struct {
 	Duration     *string `json:"duration"`
 }
 
-// optional formats a missing ffprobe field as "undefined", as the JS check printed it.
+// optional formats a missing ffprobe field as "?".
 func optional[T any](value *T) string {
 	if value == nil {
-		return "undefined"
+		return "?"
 	}
 	return fmt.Sprint(*value)
 }
@@ -452,7 +439,11 @@ func optionalNumber(value *string) float64 {
 	if value == nil {
 		return math.NaN()
 	}
-	return jsNumber(*value)
+	number, err := strconv.ParseFloat(*value, 64)
+	if err != nil {
+		return math.NaN()
+	}
+	return number
 }
 
 var (
@@ -552,9 +543,9 @@ func movies(items *summary) {
 						errs = append(errs, fmt.Sprintf("%s channels, Bink %d", optional(sound.Channels), channels))
 					}
 					if math.Abs(optionalNumber(sound.Duration)-durationS) > audioDurationToleranceS {
-						errs = append(errs, fmt.Sprintf("audio %s s, Bink %s s", optional(sound.Duration), kotor.ToFixed(durationS, 3)))
+						errs = append(errs, fmt.Sprintf("audio %s s, Bink %.3f s", optional(sound.Duration), durationS))
 					}
-					audioInfo = fmt.Sprintf("%dHz %dch %ss", track.SampleRate, channels, kotor.ToFixed(durationS, 3))
+					audioInfo = fmt.Sprintf("%dHz %dch %.3fs", track.SampleRate, channels, durationS)
 				}
 			}
 
@@ -563,7 +554,9 @@ func movies(items *summary) {
 			psnrMin := math.NaN()
 			if psnr := psnrPattern.FindStringSubmatch(compare.Stderr); psnr != nil {
 				average, minimum, measured = psnr[1], psnr[2], psnr[2]
-				psnrMin = jsNumber(strings.Replace(psnr[2], "inf", "Infinity", 1))
+				if value, err := strconv.ParseFloat(psnr[2], 64); err == nil {
+					psnrMin = value
+				}
 			}
 			if !(psnrMin >= minPsnr) {
 				errs = append(errs, "minimum PSNR "+measured)

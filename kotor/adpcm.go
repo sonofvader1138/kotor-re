@@ -198,7 +198,7 @@ func DecodeAdpcm(file []byte) AdpcmDecoded {
 	if partial != 0 {
 		err = "partial block"
 	}
-	info := fmt.Sprintf("blocks=%d partial=%d samples=%d boundary_err avg=%s max=%d clips=%d",
-		blocks, partial, sampleCount, ToFixed(float64(errSum)/float64(errCount), 2), maxErr, clips)
+	info := fmt.Sprintf("blocks=%d partial=%d samples=%d boundary_err avg=%.2f max=%d clips=%d",
+		blocks, partial, sampleCount, float64(errSum)/float64(errCount), maxErr, clips)
 	return AdpcmDecoded{pcmWav(pcm, channels, rate, sampleCount*channels*pcmBytesPerSample), info, err}
 }

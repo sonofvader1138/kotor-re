@@ -201,7 +201,7 @@ func ReportBink(name string, result *BinkResult) string {
 
 	tracks := make([]string, len(header.Tracks))
 	for i, track := range header.Tracks {
-		packetMax := "undefined"
+		packetMax := "?"
 		if result.Indexed {
 			packetMax = strconv.Itoa(result.MaxPacketDecoded[i])
 		}
@@ -209,10 +209,10 @@ func ReportBink(name string, result *BinkResult) string {
 			track.SampleRate, track.Flags, track.ID, track.MaxDecoded, packetMax)
 	}
 
-	// The JS version printed missing statistics as "undefined" when the frame index lay past the end.
+	// Statistics are unknown when the frame index lies past the end of the file.
 	statistic := func(value int) string {
 		if !result.Indexed {
-			return "undefined"
+			return "?"
 		}
 		return strconv.Itoa(value)
 	}
