@@ -1,4 +1,4 @@
-// Package kotor holds the readers and converters for the game's file formats (KEY, BIF, ERF, GFF, TPC, TGA, MDL,
+// Package kotor holds the readers and converters for the game's file formats (KEY, BIF, ERF, RIM, GFF, TPC, TGA, MDL,
 // LIP, stream audio, IMA ADPCM and Bink), a minimal PNG encoder, the project paths, and helpers that every command uses.
 package kotor
 
@@ -51,6 +51,12 @@ var extensions = map[uint32]string{
 	TypeLip: "lip",
 	TypeTpc: "tpc",
 	TypeMdx: "mdx",
+
+	// These types are named after the lowercase file type at the start of the resource. Each type has
+	// one signature in every module archive.
+	2010: "ncs", 2012: "are", 2014: "ifo", 2023: "git", 2025: "uti", 2027: "utc", 2029: "dlg", 2032: "utt",
+	2035: "uts", 2038: "fac", 2040: "ute", 2042: "utd", 2044: "utp", 2051: "utm", 2056: "jrl", 2058: "utw",
+	3003: "pth",
 }
 
 // Ext returns the file extension of a resource type, or the type code in decimal when the type is unknown.
@@ -428,6 +434,80 @@ func ReadErf(path string) []ErfEntry {
 	return entries
 }
 
+const (
+	rimSignature     = "RIM V1.0"
+	rimHeaderSize    = 120
+	rimEntrySize     = 32
+	rimResourceAlign = 4
+)
+
+// RimEntry is one resource of a RIM archive. Data is a slice of the archive's bytes.
+type RimEntry struct {
+	Resref string
+	Type   uint32
+	Ext    string
+	Offset uint32
+	Data   []byte
+}
+
+// Rim is a parsed RIM archive. Flag is the u32 at 0x14, which is 1 only in the "dx" archives of rims/.
+type Rim struct {
+	Flag    uint32
+	Entries []RimEntry
+}
+
+// ReadRim parses a RIM V1.0 archive and returns an error text when the file breaks any of the rules below.
+// RIM V1.0: 120-byte header. 0x08 u32 zero, 0x0C u32 entryCount, 0x10 u32 tableOff (120), 0x14 u32 flag,
+// 0x18 96 zero bytes. Entry 32 bytes: char[16] resref, u32 type, u32 id (= index), u32 offset, u32 size.
+// Strict: resources lie inside the file in table order, start on a multiple of 4, do not overlap, and every
+// byte between them and after the last one is zero.
+func ReadRim(data []byte) (*Rim, string) {
+	if len(data) < rimHeaderSize || string(data[:signatureLength]) != rimSignature {
+		return nil, "not RIM V1.0"
+	}
+
+	entryCount := int(u32(data, 0x0c))
+	tableOffset := int(u32(data, 0x10))
+	if u32(data, 0x08) != 0 || tableOffset != rimHeaderSize || !allZero(data[0x18:rimHeaderSize]) {
+		return nil, "unexpected header values"
+	}
+	if tableOffset+rimEntrySize*entryCount > len(data) {
+		return nil, "table past end of file"
+	}
+
+	rim := &Rim{Flag: u32(data, 0x14)}
+	position := tableOffset + rimEntrySize*entryCount
+	for i := range entryCount {
+		entry := tableOffset + rimEntrySize*i
+		resourceType := u32(data, entry+16)
+		offset := int(u32(data, entry+24))
+		size := int(u32(data, entry+28))
+		if int(u32(data, entry+20)) != i {
+			return nil, fmt.Sprintf("entry %d has id %d", i, u32(data, entry+20))
+		}
+		if offset < position || offset%rimResourceAlign != 0 || offset+size > len(data) {
+			return nil, fmt.Sprintf("entry %d at %d+%d is misplaced", i, offset, size)
+		}
+		if !allZero(data[position:offset]) {
+			return nil, fmt.Sprintf("nonzero bytes before entry %d", i)
+		}
+
+		rim.Entries = append(rim.Entries, RimEntry{
+			Resref: strings.ToLower(CString(data[entry : entry+ResrefLength])),
+			Type:   resourceType,
+			Ext:    Ext(resourceType),
+			Offset: uint32(offset),
+			Data:   data[offset : offset+size],
+		})
+		position = offset + size
+	}
+
+	if !allZero(data[position:]) {
+		return nil, "nonzero bytes after last entry"
+	}
+	return rim, ""
+}
+
 // ExecResult is the outcome of running a program. Status is -1 when the program did not start or was
 // ended by a signal. When the program could not be started, Stderr holds the reason.
 type ExecResult struct {
@@ -518,4 +598,8 @@ func RunStages(stages []Stage, names []string) {
 		}
 	}
 	fmt.Println(strings.Join(output, "\n"))
+}
+
+func allZero(data []byte) bool {
+	return bytes.Count(data, []byte{0}) == len(data)
 }

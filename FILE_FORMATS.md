@@ -150,7 +150,7 @@ The tpb and tpc packs are likely the lower texture quality settings. Only tpa an
 
 ## RIM archive
 
-A RIM archive is a self-contained archive like ERF, with a simpler header and a single table. All 246 files in `modules/` and `rims/` begin with "RIM V1.0". They hold 22,511 resources in total. The layout below was established only to search them for GUI resources. There is no reader in `kotor/kotor.go` yet. Apart from their signatures (see below), the resources have not been examined.
+A RIM archive is a self-contained archive like ERF, with a simpler header and a single table. All 246 files in `modules/` and `rims/` begin with "RIM V1.0". They hold 22,511 resources in total. The reader is `ReadRim` in `kotor/kotor.go`, and `cmd/unpack` writes the resources of one RIM archive to a folder. `ReadRim` checks that every resource lies inside the file in table order, starts on a multiple of 4 and does not overlap the next one, and that every byte between resources and after the last one is zero. All 246 files pass. The contents of the 234 archives in `modules/` are described in the section on modules below. The 12 archives in `rims/` have not been examined beyond their tables.
 
 A RIM archive begins with a 120-byte header.
 
@@ -191,7 +191,137 @@ The 246 archives hold the 22 resource types below. The table gives the number of
 | 2029 | 1,135  | DLG V3.2  | 3003 | 132   | PTH V3.2            |
 | 2032 | 1,100  | UTT V3.2  | 3008 | 252   | none, 153 are empty |
 
-Types 2012, 2014 and 2023 each occur 117 times, which equals the number of `_loc.mod` archives in `lips/` and suggests one area description per module. This has not been verified.
+Types 2012, 2014 and 2023 each occur 117 times, once in each of the 117 main module archives (see the section on modules below). Types 4, 2002, 2017, 2060 and 3008 occur only in `rims/`.
+
+# Modules: modules/\*.rim
+
+A module is one playable location of the game, such as one district of a planet. The folder `modules/` holds 117 modules in 234 RIM archives, 70 MB in total. Each module consists of two archives: `<module>.rim`, called the main archive here, and `<module>_s.rim`, called the support archive here. The main archive describes the area and the objects placed in it. The support archive holds the templates, dialogs and scripts that those objects use. The area's 3D geometry is not in the module; it is in the BIF archives (see "Links to other files" below).
+
+The reader is `ReadRim` in `kotor/kotor.go`, and every resource except the scripts is read with `ReadGff` in `kotor/gff.go`. The scratch program `temp/rimreport` writes one line per archive to `temp/reports/modules.txt`. All 234 archives pass: each RIM table parses, all 9,712 GFF resources parse with the signature that matches their resource type and version "V3.2", and all 10,863 scripts have a valid header. No resource has been converted to `assets/` yet.
+
+## Archive pairs
+
+The two archives of a module divide the resource types without overlap. The table below gives the number of resources of each type in the 117 main archives and the 117 support archives. The extension is the lowercase content type at the start of the resource. Each type has exactly one signature in all 234 archives.
+
+| Type | Extension | Main | Support | Probable content (see below) |
+| ---- | --------- | ---- | ------- | ---------------------------- |
+| 2010 | ncs       | 0    | 10,863  | Compiled script              |
+| 2012 | are       | 117  | 0       | Area properties              |
+| 2014 | ifo       | 117  | 0       | Module information           |
+| 2023 | git       | 117  | 0       | Instances placed in the area |
+| 2025 | uti       | 0    | 436     | Item template                |
+| 2027 | utc       | 0    | 1,753   | Creature template            |
+| 2029 | dlg       | 0    | 1,135   | Dialog                       |
+| 2032 | utt       | 0    | 1,100   | Trigger template             |
+| 2035 | uts       | 0    | 635     | Sound template               |
+| 2038 | fac       | 0    | 20      | Factions                     |
+| 2040 | ute       | 0    | 68      | Encounter template           |
+| 2042 | utd       | 0    | 525     | Door template                |
+| 2044 | utp       | 0    | 1,467   | Placeable object template    |
+| 2051 | utm       | 0    | 38      | Store (merchant) template    |
+| 2056 | jrl       | 0    | 3       | Journal                      |
+| 2058 | utw       | 0    | 2,049   | Waypoint template            |
+| 3003 | pth       | 0    | 132     | Path network                 |
+
+Every main archive holds exactly three resources: `module.ifo`, `<area>.are` and `<area>.git`. A support archive holds between 5 and 513 resources; the median is 163. No archive holds the same name and type twice. In all 234 archives the header field at 0x14 is 0, and the first resource starts 8 bytes after the resource table.
+
+The 20,575 resources have 16,059 distinct contents. 14,642 distinct name and type pairs occur. Of these, 12,569 occur in only one module, and 1,236 have different contents in different modules. For example, `invisible001.utp` occurs in 59 modules with 45 different contents. `module.ifo` occurs in all 117 modules with 117 different contents. A module therefore cannot rely on another module's copy of a resource with the same name.
+
+## Module and area names
+
+A module name begins with a prefix, followed in most cases by "m", a two-digit number and two letters, for example `tar_m02aa`. The prefixes and their counts are `tar` (23), `STUNT` (20), `tat` (12), `man` (11), `korr` (9), `unk` (9), `dan` (8), `kas` (8), `ebo` (5), `lev` (4), `sta` (4), `end` (2), `liv` (1) and `M12ab` (1). The prefixes probably name the planet or location, but this has not been confirmed. Fifteen of the 20 `STUNT` modules list one room with the placeholder name `****` among their rooms (see below). The `STUNT` modules may be stages for cutscenes, but this has not been confirmed.
+
+The IFO file names the module's area in three places: the single entry of `Mod_Area_list` (Area_Name), `Mod_Entry_Area`, and the resrefs of the ARE and GIT files. These four names agree in all 117 modules, and `Mod_Area_list` has exactly one entry in all 117. Each module therefore has exactly one area.
+
+In 86 modules, the area name is the module name without its prefix, for example area `m02aa` in module `tar_m02aa`. The other 31 are the 20 `STUNT` modules, whose areas have names such as `stunt_ebocom` or reuse another area's name such as `m40ad`, and 11 others: `danm13`, `danm15` and `danm16` (areas `m13aa`, `m15aa`, `m16aa`), `ebo_m40aa`, `ebo_m40ad` and `ebo_m41aa` (all area `m12aa`), `ebo_m46ab` (`m46aa`), `korr_m38aa` (`m38ab`), `korr_m38ab` (`m38aa`), `liv_m99aa` (`m50aa`) and `tat_m17ag` (`m17ae`). Several modules thus share an area name and its geometry.
+
+Each of the 117 modules has a matching lip sync archive `lips/<module>_loc.mod`. The IFO field `Mod_VO_ID` equals the area name in 76 modules. Its role, probably the folder of voice files, has not been verified.
+
+## GFF field types in module files
+
+Module files use five GFF field types that GUI files do not use. The table below describes them. All five were added to `ReadGff`. The evidence is that all 9,712 files parse under the strict rules of the reader: every field and every non-root struct is used exactly once, no byte of the three data regions is used twice, and no read leaves its region.
+
+| Type | Count  | Value                                                                                  | Evidence                                                                                                                                                                                         | Confidence |
+| ---- | ------ | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| 2    | 34,944 | u16 stored in the field entry                                                          | All values are at most 0xFFFF. Labels include Feat, Spell and PortraitId.                                                                                                                        | medium     |
+| 3    | 19,768 | 16-bit integer stored in the field entry, probably signed                              | All values lie between 0 and 1,000. Labels are hit points and levels, such as HitPoints and ClassLevel. No negative value occurs, so signed and unsigned readings cannot be told apart.          | low        |
+| 12   | 77,261 | Localized string: offset into field data (layout below)                                | The size field matches the content in all 77,261 fields. Labels include Text, Description and LocalizedName.                                                                                     | high       |
+| 13   | 117    | Binary data: offset into field data, where a u32 length is followed by that many bytes | Used only by Mod_ID in the IFO files, where the length is always 16. The field data region is covered exactly.                                                                                   | medium     |
+| 16   | 1,137  | Orientation: offset into field data, where four f32 values are stored                  | Used only by Orientation in the GIT camera lists. The squared length of every value lies between 0.99999 and 1.00001, so the four values are probably a unit quaternion. Their order is UNKNOWN. | medium     |
+
+A localized string stores a string number and any number of literal substrings. Its layout in the field data is described below.
+
+| Offset | Type   | Meaning                                         | Evidence                                                                                           | Confidence |
+| ------ | ------ | ----------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | u32    | Number of bytes that follow this field          | Equals the length of the rest of the value in all 77,261 fields.                                   | high       |
+| 0x04   | u32    | String number in `dialog.tlk`, or 0xFFFFFFFF    | Values such as 35,782 for an area name, and 0xFFFFFFFF where a literal substring is given instead. | medium     |
+| 0x08   | u32    | Number of substrings                            | The value is 0 in 77,091 fields and 1 in 170 fields.                                               | high       |
+| 0x0C   | varies | Substrings: u32 ID, u32 length, then characters | All 170 substrings have ID 0. Their text is plausible, for example the IFO Mod_Name "tar_m02aa".   | medium     |
+
+The meaning of the substring ID is UNKNOWN, because only the value 0 occurs. It may encode a language.
+
+In 29 files, some bytes of the field index or list index region are not referenced by any struct or list. These are 2 DLG, 11 GIT and 16 UTM files, with between 32 and 476 unreferenced bytes each. The field data region never has unreferenced bytes. The unreferenced bytes are probably left over from editing, but this has not been confirmed. `ReadGff` therefore counts unreferenced bytes instead of rejecting the file. The GUI stage of `cmd/convert` still rejects them, and all 91 GUI files have none.
+
+The struct type (the u32 at 0x00 of a struct entry) is 0xFFFFFFFF for the root of all 9,712 files. Within a list, the struct type follows one of three patterns. In 30 list labels it is the same for every item of a list, in 11 it equals the item's index in the list, and in `Equip_ItemList` of the UTC files it takes values that are single bits, such as 2, 16 and 131,072. The last pattern suggests flags for equipment slots. The meaning of the struct type is otherwise UNKNOWN.
+
+## Contents of the module files
+
+The probable content of each resource type in the table above comes from two sources: the field labels, and the GIT list that refers to the type. For example, the items of the GIT list "Creature List" name UTC templates, and a UTC file has fields such as FirstName, HitPoints and FeatList. The contents have not been confirmed in the running game. Only the main structure is described below; the individual fields are UNKNOWN unless stated.
+
+The IFO file (module information) holds the entry area and the entry position (Mod_Entry_X, Mod_Entry_Y, Mod_Entry_Z) and direction (Mod_Entry_Dir_X, Mod_Entry_Dir_Y), the area list, a 16-byte Mod_ID, time settings such as Mod_DawnHour, and module script hooks such as Mod_OnPlrDeath.
+
+The ARE file (area properties) holds the area name as a string number, map calibration points (the Map struct), fog, lighting and weather settings, script hooks such as OnEnter, and the Rooms list. Each Rooms item has a RoomName, which names a room model (see "Links to other files" below).
+
+The GIT file (instances) lists the objects placed in the area. Each list holds items of one kind. The table below gives the list label, the struct type of its items, the number of items in all 117 files, and the template type that the items name. The items name their template in TemplateResRef, or in ResRef for stores.
+
+| List label     | Struct type | Items | Template type |
+| -------------- | ----------- | ----- | ------------- |
+| Creature List  | 4           | 1,619 | utc           |
+| Door List      | 8           | 724   | utd           |
+| Encounter List | 7           | 51    | ute           |
+| List           | 0           | 50    | uti           |
+| Placeable List | 9           | 3,214 | utp           |
+| SoundList      | 6           | 1,103 | uts           |
+| StoreList      | 11          | 36    | utm           |
+| TriggerList    | 1           | 996   | utt           |
+| WaypointList   | 5           | 4,064 | utw           |
+| CameraList     | 14          | 1,137 | none (camera) |
+
+All 117 GIT files have all ten lists, some of them empty. The list "List" probably holds items lying in the area, because all 50 of its entries name UTI templates. CameraList items hold a Position vector and an Orientation (type 16) and name no template.
+
+The DLG file (dialog) holds the lists EntriesList and RepliesList, with fields such as Speaker, Listener, Text (a localized string), VO_ResRef and Script. The FAC file holds FactionList and RepList, the JRL file holds Categories, and the PTH file holds Path_Points and Path_Conections. These spellings, including "Conections", are those of the files.
+
+## Links to other files
+
+Module files refer to other resources by resref. The table below shows where these references lead. "Module" means the module's own two archives, "key" means a resource listed in `chitin.key`, and "missing" means that neither these nor the archives in `rims/` hold the resource.
+
+| Reference                                             | Count  | Module | Key    | Missing |
+| ----------------------------------------------------- | ------ | ------ | ------ | ------- |
+| GIT template (TemplateResRef or ResRef)               | 11,857 | 8,272  | 3,585  | 0       |
+| Script (resref fields named On\*, Script\* or Active) | 37,806 | 13,365 | 24,380 | 61      |
+| Conversation (Conversation fields)                    | 1,278  | 1,215  | 59     | 4       |
+| ARE room model (RoomName as an MDL resource)          | 1,308  | 0      | 1,293  | 15      |
+
+The 15 rooms without a model all have the placeholder name `****`, and all are in `STUNT` modules. Every other room name resolves to an MDL resource in `chitin.key`. The 61 missing scripts and 4 missing conversations are probably unused references. For example, `dan13_cort.dlg` in `danm13` names scripts such as `k_pdan_cort01` that exist nowhere.
+
+The area's geometry and layout are in BIF archives under the area name. The resource types below were found by name and checked only on a few samples. They have not been examined further.
+
+| Type | Archive               | Content                                                                                                                         |
+| ---- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 3000 | `data/layouts.bif`    | Text beginning with "#MAXLAYOUT ASCII". It lists the rooms with three coordinates each, for example `M02aa_03a 75.0 150.0 0.0`. |
+| 3001 | `data/lightmaps*.bif` | Text that lists, for each room, a count and the names of other rooms. This is probably the set of rooms visible from that room. |
+| 2016 | `data/models.bif`     | Binary data beginning with "BWM V1.0", one per room model. This is probably the walkable surface.                               |
+
+## Compiled scripts: NCS
+
+An NCS resource (type 2010) is a compiled script. Only its 13-byte header has been examined. Unlike the other structures in this document, the size field is big-endian.
+
+| Offset | Type    | Meaning                       | Evidence                                        | Confidence |
+| ------ | ------- | ----------------------------- | ----------------------------------------------- | ---------- |
+| 0x00   | char[8] | Signature "NCS V1.0"          | Present in all 10,863 scripts.                  | high       |
+| 0x08   | u8      | UNKNOWN, always 0x42          | The value is 0x42 ("B") in all 10,863 scripts.  | low        |
+| 0x09   | u32 BE  | Size of the resource in bytes | Equals the resource size in all 10,863 scripts. | high       |
+| 0x0D   | varies  | Bytecode                      | The instruction format is UNKNOWN.              | UNKNOWN    |
 
 # 3D models: MDL and MDX
 
@@ -452,7 +582,7 @@ Five of the seven `patch.erf` resources have the same name as a `gui.bif` resour
 
 The changes are small. `abilities`, `character`, `equip` and `inventory` each gain two buttons, BTN_CHARLEFT and BTN_CHARRIGHT, which are 28x28 pixels at the same positions in all four files. The names suggest buttons that step between party members. The patched `mainmenu` has the same 13 controls, with BTN_WARP and BTN_EXIT in swapped order, and its panel is 800x600 instead of 640x480.
 
-The file is a generic tree container. The layout data is not fixed; each value is a field that carries its own type and its own label. The first four bytes of the file name the content type ("GUI "). This suggests that other resource types use the same container with a different content type. That has not been examined.
+The file is a generic tree container. The layout data is not fixed; each value is a field that carries its own type and its own label. The first four bytes of the file name the content type ("GUI "). The same container, called GFF (generic file format) in the reader, holds 15 other resource types in the module archives, with content types such as "ARE " and "UTC " (see the section on modules below).
 
 The parser passes on all 91 files. In every file the six regions chain from offset 56 and the last one ends exactly at the end of the file. Every byte of the field data, field index and list index regions is used exactly once. Every field is used exactly once, and every struct except the root is referenced exactly once. Every label is referenced.
 
@@ -493,7 +623,7 @@ A struct is a group of fields. Struct 0 is the root of the tree. Each entry of t
 | 0x04   | u32  | Byte offset into the field index region | The region holds the struct's field indices at this offset, and all structs together cover it exactly.                        | high       |
 | 0x08   | u32  | Number of fields                        | Every struct has between 4 and 14 fields, and the indices it reads are all valid.                                             | high       |
 
-No struct in these files has fewer than 4 fields. The encoding of a struct with one or zero fields is therefore UNKNOWN. The parser assumes that a struct with one field stores the field index directly at 0x04, but no file tests this assumption.
+No struct in these files has fewer than 4 fields. The module files have 40,631 structs with exactly one field. They confirm that such a struct stores the field index directly at 0x04: under that reading, all 9,712 module GFF files parse with every field used exactly once. No struct in any file has zero fields, so that encoding is UNKNOWN.
 
 Each entry of the field table is 12 bytes.
 
@@ -521,7 +651,7 @@ The nine field types that occur are listed below. Types 0, 4, 5 and 8 store thei
 | 15   | 84     | List: offset into the list index region, where a u32 count is followed by that many struct indices | Used only by CONTROLS. The list index region is covered exactly.                     | high       |
 | 17   | 5,549  | Vector: offset into field data, where three f32 values are stored                                  | Used only by COLOR. Components lie between 0 and 1, except the value (-1, -1, -1).   | high       |
 
-The type numbers between 0 and 17 that do not occur (1, 2, 3, 6, 7, 9, 12, 13 and 16) are UNKNOWN.
+Types 2, 3, 12, 13 and 16 do not occur in GUI files but occur in module files (see the section on modules below). Types 1, 6, 7 and 9 occur in no file examined and are UNKNOWN.
 
 ## GUI layout content
 

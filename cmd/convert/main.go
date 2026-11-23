@@ -374,7 +374,18 @@ func convertGui(summary *kotor.Summary) {
 
 		written := map[string]bool{}
 		for _, resource := range src.resources {
-			gff := kotor.ReadGff(resource.Data, resource.Resref)
+			gff, problem := kotor.ReadGff(resource.Data)
+			if problem == "" {
+				for region, count := range gff.Counts.UnusedBytes {
+					if count > 0 {
+						problem = fmt.Sprintf("%d unused bytes in %s region", count, region)
+					}
+				}
+			}
+			if problem != "" {
+				report = append(report, src.dir+"/"+resource.Resref+" FAIL: "+problem)
+				continue
+			}
 			if gff.FileType != "GUI " || gff.Version != "V3.2" {
 				report = append(report, src.dir+"/"+resource.Resref+" FAIL: unexpected "+gff.FileType+gff.Version)
 				continue
