@@ -334,7 +334,7 @@ func ParseNcs(data []byte, routines []NcsRoutine) *Ncs {
 func NcsListing(ncs *Ncs, routines []NcsRoutine) []byte {
 	var out strings.Builder
 	for _, warning := range ncs.Warnings {
-		out.WriteString("; warning: " + warning + "\n")
+		fmt.Fprintf(&out, "; warning: %s\n", warning)
 	}
 
 	for _, instruction := range ncs.Instructions {
@@ -366,7 +366,7 @@ func NcsListing(ncs *Ncs, routines []NcsRoutine) []byte {
 		if comment != "" {
 			text = fmt.Sprintf("%-40s ; %s", text, comment)
 		}
-		out.WriteString(strings.TrimRight(text, " ") + "\n")
+		fmt.Fprintf(&out, "%s\n", strings.TrimRight(text, " "))
 	}
 	return []byte(out.String())
 }
