@@ -75,9 +75,12 @@ func Ext(resourceType uint32) string {
 	return ext
 }
 
-// TexturePacks lists the texture packs used for model materials, in priority order. tpb and tpc hold the
-// same textures at lower resolution and are not converted.
-var TexturePacks = []string{"swpc_tex_tpa", "swpc_tex_gui"}
+// TexturePacks lists the texture packs that are converted. tpb and tpc hold the textures of tpa at lower
+// resolution.
+var TexturePacks = []string{"swpc_tex_tpa", "swpc_tex_tpb", "swpc_tex_tpc", "swpc_tex_gui"}
+
+// MaterialPacks lists the texture packs that model materials refer to, in priority order.
+var MaterialPacks = []string{"swpc_tex_tpa", "swpc_tex_gui"}
 
 // TgaGroup is a group of BIF archives that hold TGA images, with the output folder name of the group.
 type TgaGroup struct {

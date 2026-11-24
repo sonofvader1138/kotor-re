@@ -50,7 +50,7 @@ func prune(dir string, keep map[string]bool, exts []string) {
 // levels below assets. The first pack in priority order wins, so the packs are read in reverse.
 func texturePaths() map[string]string {
 	paths := map[string]string{}
-	for _, pack := range slices.Backward(kotor.TexturePacks) {
+	for _, pack := range slices.Backward(kotor.MaterialPacks) {
 
 		for _, entry := range packErf(pack) {
 			if entry.Ext == "tpc" {

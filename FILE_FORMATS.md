@@ -146,7 +146,7 @@ The contents of the texture packs are listed below.
 | swpc_tex_tpc.erf | 3,294     | The same 3,294 names as tpa. 2,712 are a quarter of the width and height, 12 are half, and 570 are the same size. |
 | swpc_tex_gui.erf | 1,571     | 1,570 TPC textures for the user interface and one resource of type 2022.                                          |
 
-The tpb and tpc packs are likely the lower texture quality settings. Only tpa and gui are converted, because tpb and tpc hold no additional images.
+The tpb and tpc packs hold reduced copies of the tpa textures and are probably the lower texture quality settings. Most reduced textures are the lower mipmap levels of the tpa texture. All four packs are converted. The section "Reduced texture packs: tpb and tpc" below gives the details.
 
 ## RIM archive
 
@@ -909,7 +909,7 @@ The archive also contains resources of types 2016 (1,202), 2052 (156) and 2053 (
 
 A TPC file (resource type 3007) is a texture. It holds pixel data for one image, or for several sub-images, each with its own mipmap chain. A mipmap chain is a series of copies of an image, each half the width and height of the previous one. The file ends with an optional TXI trailer. TXI (texture information) is plain ASCII text that sets rendering options. The converter is `cmd/tpc2png`. It writes the top mipmap level as an 8-bit RGBA PNG.
 
-All 11,452 TPC files in the four texture packs parse completely. In each file, the header, the pixel data and an ASCII trailer together account for every byte. The converted PNG files are verified with two independent tools. ImageMagick decodes each PNG to exactly the pixels of the decoded TPC texture, and pngcheck accepts each file. This holds for all 3,294 textures of tpa and all 1,570 textures of gui.
+All 11,452 TPC files in the four texture packs parse completely. In each file, the header, the pixel data and an ASCII trailer together account for every byte. The converted PNG files are verified with two independent tools. ImageMagick decodes each PNG to exactly the pixels of the decoded TPC texture, and pngcheck accepts each file. This holds for all 3,294 textures of each of tpa, tpb and tpc and for all 1,570 textures of gui.
 
 ## TPC header
 
@@ -958,6 +958,37 @@ Each image is stored with its bottom row first. In other words, the first stored
 ## TXI trailer
 
 The TXI trailer is ASCII text with one "keyword value" pair per line, separated by CRLF line breaks. It is sometimes followed by NUL bytes. 1,576 of the 3,294 tpa textures have one. The converter writes it beside the PNG as a .txi file. Keywords seen include "proceduretype", "numx", "numy", "fps", "blending", "decal" and "cube". Only numx, numy and cube are used by the converter. The meaning of the other keywords has not been examined.
+
+## Reduced texture packs: tpb and tpc
+
+The packs `swpc_tex_tpb.erf` and `swpc_tex_tpc.erf` hold reduced copies of the textures in `swpc_tex_tpa.erf`. They are probably the medium and low texture quality settings, but the game's choice between packs has not been observed. A program written for this comparison (`temp/packcompare`) parses every texture of the three packs and compares each tpb and tpc texture with the tpa texture of the same name. Every one of the 6,588 reduced-pack textures parses completely.
+
+The following properties hold for both reduced packs.
+
+| Property                               | Evidence                                                                                                                                   | Confidence |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| Same names in the same order           | Each pack has the same 3,294 resrefs as tpa, and each resref has the same index in the key table.                                          | high       |
+| Same encoding and layout               | Every texture keeps the pixel format (gray, RGB, RGBA, DXT1 or DXT5) and the layout (plain, cube or flipbook) of its tpa version.         | high       |
+| Same header float at 0x04              | The value at offset 0x04 equals the tpa value in all 3,294 textures of each pack.                                                          | high       |
+| Same TXI trailer                       | The trailer, with trailing NUL bytes removed, equals the tpa trailer in all 3,294 textures of each pack.                                   | high       |
+| Width and height scale by one factor   | The width and the height of each texture shrink by the same factor of 1, 2 or 4. No reduced side is smaller than 2 pixels.                 | high       |
+
+The scale factors are listed below. "Unchanged" means that the file is byte-for-byte identical to the tpa file.
+
+| Pack | Unchanged | Half size | Quarter size |
+| ---- | --------- | --------- | ------------ |
+| tpb  | 570       | 2,724     | 0            |
+| tpc  | 570       | 12        | 2,712        |
+
+The 12 textures that tpc reduces only to half size are all 4x4 pixels in tpa. A quarter-size copy would be 1x1, so the reduction appears to stop at 2 pixels per side.
+
+The same 570 textures are unchanged in both packs. They are mostly area textures with the prefixes m50 (300 textures), plc (98), lts (80), lhr (24) and lsi (24), along with sky textures such as lda_dsky01 and lma_sky01. Their sizes range from 4x4 to 1024x1024. Why these textures are not reduced is UNKNOWN.
+
+Most reduced textures are cut from the tpa mipmap chain. A texture reduced by a factor of 2 drops the top mipmap level, and one reduced by a factor of 4 drops the top two levels. The header mipmap count shrinks by the same number of levels, and the remaining pixel data is byte-for-byte identical to the lower levels of the tpa file. This holds for plain textures, for each of the six faces of cube textures and for each frame of flipbook textures. It applies to 2,689 of the 2,724 reduced textures in tpb and to 2,689 of the 2,724 in tpc.
+
+The other 35 reduced textures in each pack are plain textures with a single mipmap level in tpa, so no lower level exists to copy. Their reduced pixels were computed in some other way, and the resampling filter is UNKNOWN. Examples are biowarelogo, plc_water01b and lta_tech01b.
+
+The reduced packs are converted the same way as tpa, to `assets/TexturePacks/swpc_tex_tpb/` and `assets/TexturePacks/swpc_tex_tpc/`. Model materials still refer to the tpa and gui PNG files.
 
 ## Conversion to model materials
 
