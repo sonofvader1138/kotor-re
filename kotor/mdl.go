@@ -1,4 +1,4 @@
-// This file converts MDL models with their MDX vertex data to Wavefront OBJ. Layout: see FILE_FORMATS.md.
+// This file converts MDL models with their MDX vertex data to Wavefront OBJ. Layout: see README.md.
 // MDL offsets are relative to file offset 12.
 
 package kotor

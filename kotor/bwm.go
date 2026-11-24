@@ -2,7 +2,7 @@
 // 2016 (area room, wok), 2052 (door, dwk) and 2053 (placeable, pwk), all in data/models.bif. A 136-byte
 // header holds the walkmesh type, two use points in relative and absolute form, a position and nine table
 // descriptors. The tables
-// follow in a fixed order and end exactly at the end of the file. Layout: see FILE_FORMATS.md.
+// follow in a fixed order and end exactly at the end of the file. Layout: see README.md.
 package kotor
 
 import (

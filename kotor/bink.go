@@ -1,5 +1,5 @@
 // This file parses the header and frame index of Bink video files (signature "BIKi"). Layout: see
-// FILE_FORMATS.md. A file passes when the header size field matches the file size, the frame index is
+// README.md. A file passes when the header size field matches the file size, the frame index is
 // increasing and ends exactly at end of file, the largest frame field equals the largest frame, and every
 // frame's audio packets fit inside the frame.
 

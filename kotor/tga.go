@@ -1,4 +1,4 @@
-// This file reads TGA (Truevision) images. Layout: see FILE_FORMATS.md.
+// This file reads TGA (Truevision) images. Layout: see README.md.
 // It supports the layouts that occur in the game: uncompressed true color (image type 2) at 24 or 32 bits
 // per pixel, and uncompressed grayscale (image type 3) at 8 bits per pixel, with no color map.
 // An 18-byte header and an optional image ID precede the pixels. An optional TGA 2.0 extension area

@@ -1,7 +1,7 @@
 // Package kotor holds the readers and converters for the game's file formats, a minimal PNG encoder, the project
 // paths, and helpers that every command uses. The formats are the archives (KEY, BIF, ERF and RIM), GFF, TLK, 2DA,
 // SSF, LTR, NCS, TPC, TGA, MDL, BWM, LYT, VIS, LIP, the saved game variables, stream audio, IMA ADPCM and Bink.
-// FILE_FORMATS.md describes each layout.
+// README.md describes each layout.
 package kotor
 
 import (
