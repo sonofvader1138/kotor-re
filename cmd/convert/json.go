@@ -184,3 +184,40 @@ func ssfJson(ssf *kotor.Ssf, tlk *kotor.Tlk, unresolved *int) *orderedObject {
 	object.set("slots", slots)
 	return object
 }
+
+// ltrJson turns a letter table into an object with "letters", the alphabet in table order; "single", the
+// tables for single letters; "double", an object keyed by the preceding letter; and "triple", an object
+// keyed by the preceding pair of letters. Each set of tables is an object with "start", "middle" and
+// "end", each an array of the values in file order, one per letter. The values are the stored cumulative
+// probabilities, written with the shortest decimal that round-trips as an f32.
+func ltrJson(ltr *kotor.Ltr) *orderedObject {
+	setJson := func(set kotor.LtrSet) *orderedObject {
+		object := &orderedObject{}
+		for i, position := range kotor.LtrPositions {
+			values := make([]any, len(set[i]))
+			for j, value := range set[i] {
+				values[j] = number(float64(value), 32)
+			}
+			object.set(position, values)
+		}
+		return object
+	}
+
+	double := &orderedObject{}
+	for i, set := range ltr.Double {
+		double.set(kotor.LtrLetters[i:i+1], setJson(set))
+	}
+
+	triple := &orderedObject{}
+	for i, set := range ltr.Triple {
+		first, second := i/ltr.Letters, i%ltr.Letters
+		triple.set(kotor.LtrLetters[first:first+1]+kotor.LtrLetters[second:second+1], setJson(set))
+	}
+
+	object := &orderedObject{}
+	object.set("letters", kotor.LtrLetters)
+	object.set("single", setJson(ltr.Single))
+	object.set("double", double)
+	object.set("triple", triple)
+	return object
+}

@@ -3,10 +3,11 @@
 // Movies require ffmpeg. All stages run at the same time. Each stage writes its own outputs and reports
 // and keeps its own summary lines, which are printed in stage order at the end.
 //
-// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules] [rims] [tlk]   (default: all)
+// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules] [rims] [bifs] [tlk]   (default: all)
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -562,19 +563,136 @@ func convertModules(summary *kotor.Summary) {
 	summary.Tally("modules", report)
 }
 
+// resourceInputs holds what writeResource needs besides the resource: the string table for localized
+// strings and sound sets, the engine routines for script listings, the texture paths for model materials,
+// and the counts of what the models leave out.
+type resourceInputs struct {
+	tlk         *kotor.Tlk
+	routines    []kotor.NcsRoutine
+	texturePath map[string]string
+	counts      *modelCounts
+}
+
+func newResourceInputs() *resourceInputs {
+	return &resourceInputs{
+		tlk:         dialogTlk(),
+		routines:    kotor.ReadNwscript(kotor.ReadKey()),
+		texturePath: texturePaths(),
+		counts:      &modelCounts{missing: map[string]bool{}},
+	}
+}
+
+// writeResource converts one resource of a RIM or BIF archive into dir and returns its report line and the
+// names of the files it wrote. mdx is the MDX data of a model and is ignored for other types.
+//
+//   - A model becomes <resref>.obj and <resref>.mtl (see writeModel).
+//   - A sound becomes <resref>.wav as 16-bit PCM: 16-bit PCM files are copied, and IMA ADPCM and 8-bit PCM
+//     files are converted (see kotor.DecodeAdpcm).
+//   - A 2DA table becomes <resref>.2da.csv (see kotor.TwoDaCsv).
+//   - A sound set becomes <resref>.ssf.json (see ssfJson).
+//   - A compiled script becomes <resref>.ncs.txt, its disassembly listing.
+//   - A script source becomes <resref>.nss, its text decoded as Windows-1252 and written as UTF-8. The line
+//     breaks are kept.
+//   - A TXI file is copied to <resref>.txi.
+//   - A letter table becomes <resref>.ltr.json (see ltrJson).
+//   - Every other type is a GFF file and becomes <resref>.<ext>.json (see gffFile).
+func writeResource(dir, label string, resource kotor.Resource, mdx []byte, inputs *resourceInputs) (string, []string) {
+	var line string
+	var output []byte
+	file := resource.Resref + "." + resource.Ext
+	switch resource.Ext {
+	case "mdl":
+		return writeModel(dir, label, resource.Resref, resource.Data, mdx, inputs.texturePath, inputs.counts)
+
+	case "wav":
+		problem := kotor.RiffWalk(resource.Data)
+		decoded := kotor.DecodeAdpcm(resource.Data)
+		line = label + " " + decoded.Info + " " + kotor.Verdict(problem, decoded.Err)
+		if problem == "" && decoded.Err == "" {
+			output = decoded.Out
+		}
+
+	case "2da":
+		table := kotor.ParseTwoDa(resource.Data)
+		line = kotor.ReportTwoDa(label, table)
+		file += ".csv"
+		if len(table.Errors) == 0 {
+			output = kotor.TwoDaCsv(table)
+		}
+
+	case "ssf":
+		ssf := kotor.ParseSsf(resource.Data)
+		line = kotor.ReportSsf(label, ssf)
+		file += ".json"
+		unresolved := 0
+		text, err := json.MarshalIndent(ssfJson(ssf, inputs.tlk, &unresolved), "", "\t")
+		if err == nil && unresolved > 0 {
+			err = fmt.Errorf("%d string numbers past dialog.tlk", unresolved)
+		}
+		if err != nil {
+			line = label + " FAIL: " + err.Error()
+		}
+		if len(ssf.Errors) == 0 && err == nil {
+			output = append(text, '\n')
+		}
+
+	case "ncs":
+		ncs := kotor.ParseNcs(resource.Data, inputs.routines)
+		line = kotor.ReportNcs(label, ncs)
+		file += ".txt"
+		if len(ncs.Errors) == 0 {
+			output = kotor.NcsListing(ncs, inputs.routines)
+		}
+
+	case "nss":
+		problem := ""
+		if bytes.IndexByte(resource.Data, 0) >= 0 {
+			problem = "NUL byte in source text"
+		}
+		line = fmt.Sprintf("%s bytes=%d %s", label, len(resource.Data), kotor.Verdict(problem))
+		if problem == "" {
+			output = []byte(kotor.Windows1252(resource.Data))
+		}
+
+	case "txi":
+		line = fmt.Sprintf("%s bytes=%d PASS", label, len(resource.Data))
+		output = resource.Data
+
+	case "ltr":
+		ltr := kotor.ParseLtr(resource.Data)
+		line = kotor.ReportLtr(label, ltr)
+		file += ".json"
+		if len(ltr.Errors) == 0 {
+			text, err := json.MarshalIndent(ltrJson(ltr), "", "\t")
+			if err != nil {
+				line = label + " FAIL: " + err.Error()
+			} else {
+				output = append(text, '\n')
+			}
+		}
+
+	default:
+		text, notes, problem := gffFile(resource.Data, resource.Ext, inputs.tlk)
+		line = label + notes + " " + kotor.Verdict(problem)
+		file += ".json"
+		output = text
+	}
+
+	if output == nil {
+		return line, nil
+	}
+	kotor.WriteFile(filepath.Join(dir, file), output)
+	return line, []string{file}
+}
+
 // Rims: rims/<archive>.rim -> assets/rims/<archive>/, one folder per archive. Every archive whose name
 // ends in "dx" holds the MDX data of the models in the archive of the same name without "dx", and no other
-// resources. A model becomes <resref>.obj and <resref>.mtl. A sound becomes <resref>.wav as 16-bit PCM:
-// PCM files are copied, and IMA ADPCM files are decoded. A 2DA table becomes <resref>.2da.csv (see
-// kotor.TwoDaCsv), a sound set becomes <resref>.ssf.json (see ssfJson), an item template becomes
-// <resref>.uti.json (see gffFile), and a compiled script becomes <resref>.ncs.txt. Each archive also gets
-// a report line with its resource count, so that the four empty archives are reported too. MDX data
-// without a model in the partner archive is counted in the summary and not converted.
+// resources. Each resource is converted by writeResource. Each archive also gets a report line with its
+// resource count, so that the four empty archives are reported too. MDX data without a model in the
+// partner archive is counted in the summary and not converted.
 func convertRims(summary *kotor.Summary) {
 	fmt.Println("rims...")
-	tlk := dialogTlk()
-	routines := kotor.ReadNwscript(kotor.ReadKey())
-	texturePath := texturePaths()
+	inputs := newResourceInputs()
 	src := filepath.Join(kotor.Game, "rims")
 	out := filepath.Join(kotor.Assets, "rims")
 	kotor.MakeDir(out)
@@ -594,7 +712,6 @@ func convertRims(summary *kotor.Summary) {
 	}
 
 	written := map[string]bool{}
-	counts := &modelCounts{missing: map[string]bool{}}
 	orphans := []string{}
 	for _, name := range slices.Sorted(maps.Keys(archives)) {
 		if strings.HasSuffix(name, "dx") {
@@ -617,61 +734,10 @@ func convertRims(summary *kotor.Summary) {
 		kotor.MakeDir(dir)
 		for _, entry := range archives[name].Entries {
 			label := name + "/" + entry.Resref + "." + entry.Ext
-			var files []string
-			var line string
-			switch entry.Ext {
-			case "mdl":
-				line, files = writeModel(dir, label, entry.Resref, entry.Data, mdx[entry.Resref], texturePath, counts)
+			resource := kotor.Resource{Resref: entry.Resref, Type: entry.Type, Ext: entry.Ext, Data: entry.Data}
+			line, files := writeResource(dir, label, resource, mdx[entry.Resref], inputs)
+			if entry.Ext == "mdl" {
 				used[entry.Resref] = true
-
-			case "wav":
-				problem := kotor.RiffWalk(entry.Data)
-				decoded := kotor.DecodeAdpcm(entry.Data)
-				line = label + " " + decoded.Info + " " + kotor.Verdict(problem, decoded.Err)
-				if problem == "" && decoded.Err == "" {
-					kotor.WriteFile(filepath.Join(dir, entry.Resref+".wav"), decoded.Out)
-					files = []string{entry.Resref + ".wav"}
-				}
-
-			case "2da":
-				table := kotor.ParseTwoDa(entry.Data)
-				line = kotor.ReportTwoDa(label, table)
-				if len(table.Errors) == 0 {
-					kotor.WriteFile(filepath.Join(dir, entry.Resref+".2da.csv"), kotor.TwoDaCsv(table))
-					files = []string{entry.Resref + ".2da.csv"}
-				}
-
-			case "ssf":
-				ssf := kotor.ParseSsf(entry.Data)
-				line = kotor.ReportSsf(label, ssf)
-				unresolved := 0
-				text, err := json.MarshalIndent(ssfJson(ssf, tlk, &unresolved), "", "\t")
-				if err == nil && unresolved > 0 {
-					err = fmt.Errorf("%d string numbers past dialog.tlk", unresolved)
-				}
-				if err != nil {
-					line = label + " FAIL: " + err.Error()
-				}
-				if len(ssf.Errors) == 0 && err == nil {
-					kotor.WriteFile(filepath.Join(dir, entry.Resref+".ssf.json"), append(text, '\n'))
-					files = []string{entry.Resref + ".ssf.json"}
-				}
-
-			case "ncs":
-				ncs := kotor.ParseNcs(entry.Data, routines)
-				line = kotor.ReportNcs(label, ncs)
-				if len(ncs.Errors) == 0 {
-					kotor.WriteFile(filepath.Join(dir, entry.Resref+".ncs.txt"), kotor.NcsListing(ncs, routines))
-					files = []string{entry.Resref + ".ncs.txt"}
-				}
-
-			default:
-				text, notes, problem := gffFile(entry.Data, entry.Ext, tlk)
-				line = label + notes + " " + kotor.Verdict(problem)
-				if problem == "" {
-					kotor.WriteFile(filepath.Join(dir, entry.Resref+"."+entry.Ext+".json"), text)
-					files = []string{entry.Resref + "." + entry.Ext + ".json"}
-				}
 			}
 
 			report = append(report, line)
@@ -689,9 +755,35 @@ func convertRims(summary *kotor.Summary) {
 
 	prune(out, written, []string{".obj", ".mtl", ".wav", ".csv", ".json", ".txt"})
 	summary.Tally("rims", report)
-	noteModels(summary, "rims", counts)
+	noteModels(summary, "rims", inputs.counts)
 	slices.Sort(orphans)
 	summary.Note(fmt.Sprintf("rims: MDX data without a model, not converted: %d (%s)", len(orphans), strings.Join(orphans, " ")))
+}
+
+// Bifs: data/<archive>.bif -> assets/data/<archive>/, one folder per archive in kotor.ResourceBifs. Each resource
+// is converted by writeResource.
+func convertBifs(summary *kotor.Summary) {
+	fmt.Println("bifs...")
+	inputs := newResourceInputs()
+	key := kotor.ReadKey()
+
+	var report []string
+	for _, name := range kotor.ResourceBifs {
+		out := filepath.Join(kotor.Assets, "data", name)
+		kotor.MakeDir(out)
+
+		written := map[string]bool{}
+		for _, resource := range kotor.BifResources("data/"+name+".bif", key) {
+			label := name + "/" + resource.Resref + "." + resource.Ext
+			line, files := writeResource(out, label, resource, nil, inputs)
+			report = append(report, line)
+			for _, file := range files {
+				written[file] = true
+			}
+		}
+		prune(out, written, []string{".wav", ".csv", ".json", ".txt", ".nss", ".txi"})
+	}
+	summary.Tally("bifs", report)
 }
 
 // Tlk: dialog.tlk -> assets/dialog.tlk.json, the string table as an object with "language", the u32 at
@@ -747,6 +839,7 @@ var stages = []kotor.Stage{
 	{Name: "lips", Run: convertLips},
 	{Name: "modules", Run: convertModules},
 	{Name: "rims", Run: convertRims},
+	{Name: "bifs", Run: convertBifs},
 	{Name: "tlk", Run: convertTlk},
 }
 

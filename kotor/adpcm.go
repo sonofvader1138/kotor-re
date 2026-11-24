@@ -1,5 +1,5 @@
-// This file converts IMA ADPCM WAV files (format 0x11) to 16-bit PCM WAV. Other formats are copied
-// unchanged. As a check, it compares each block header's predictor with the last decoded sample of the
+// This file converts IMA ADPCM WAV files (format 0x11) and 8-bit PCM WAV files to 16-bit PCM WAV. Other
+// formats are copied unchanged. As a check, it compares each block header's predictor with the last decoded sample of the
 // previous block.
 
 package kotor
@@ -80,6 +80,23 @@ func pcmWav(pcm []int16, channels, rate, size int) []byte {
 	return out
 }
 
+// 8-bit PCM samples are unsigned, with silence at 128.
+const (
+	pcm8BitsPerSample = 8
+	pcm8Silence       = 128
+)
+
+// widenPcm8 converts 8-bit unsigned PCM samples to 16-bit signed samples by moving silence to 0 and
+// shifting each sample into the high byte. The conversion loses nothing.
+func widenPcm8(data []byte, channels, rate int) AdpcmDecoded {
+	pcm := make([]int16, len(data))
+	for i, sample := range data {
+		pcm[i] = int16(int(sample)-pcm8Silence) << 8
+	}
+	info := fmt.Sprintf("widened 8-bit PCM samples=%d", len(data)/channels)
+	return AdpcmDecoded{pcmWav(pcm, channels, rate, len(pcm)*pcmBytesPerSample), info, ""}
+}
+
 // AdpcmDecoded holds the converted file, or nil Out when Err explains why there is none.
 type AdpcmDecoded struct {
 	Out  []byte
@@ -94,6 +111,9 @@ func DecodeAdpcm(file []byte) AdpcmDecoded {
 	channels := int(binary.LittleEndian.Uint16(format[2:]))
 	rate := int(binary.LittleEndian.Uint32(format[4:]))
 	blockAlign := int(binary.LittleEndian.Uint16(format[12:]))
+	if tag == formatPcm && binary.LittleEndian.Uint16(format[14:]) == pcm8BitsPerSample {
+		return widenPcm8(data, channels, rate)
+	}
 	if tag != formatImaAdpcm {
 		return AdpcmDecoded{file, fmt.Sprintf("copied (fmt=%d)", tag), ""}
 	}

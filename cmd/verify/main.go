@@ -21,12 +21,13 @@
 // modules: jq must parse each JSON file. No independent tool reads NCS, so each script listing is
 // assembled again from its text and must equal the source script byte for byte. The assembler shares only
 // the opcode, type and operand tables with the disassembler.
-// rims: assimp must load each OBJ and ffprobe must read each WAV as 16-bit PCM. Each 2DA CSV file and the
-// string numbers of each SSF JSON file, read with jq, must build again into the source resource. jq must
-// parse each UTI JSON file, and each script listing must assemble to the source script.
+// rims: assimp must load each OBJ file. Every other resource is checked as addResourceChecks describes:
+// WAV files with ffprobe and ffmpeg, 2DA CSV files with encoding/csv, SSF and LTR JSON files rebuilt from
+// jq's output, other JSON files with jq, NSS files with iconv, and script listings by assembling them.
+// bifs: the resources of the BIF archives in kotor.ResourceBifs, checked as addResourceChecks describes.
 // tlk: the string table JSON, read with jq, must build again into dialog.tlk byte for byte.
 //
-// usage: go run ./cmd/verify [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules] [rims] [tlk]   (default: all)
+// usage: go run ./cmd/verify [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules] [rims] [bifs] [tlk]   (default: all)
 package main
 
 import (
@@ -637,82 +638,250 @@ func modules(summary *kotor.Summary) {
 	summary.Tally("jq_modules", pool(jsonJobs))
 }
 
-// Rims: assets/rims/<archive>/ against rims/<archive>.rim. Each OBJ file must load with assimp, and each
-// WAV file must be read by ffprobe as 16-bit PCM. Each 2DA CSV file, read with Go's encoding/csv reader,
-// and each SSF JSON file, read with jq, must build again into the source resource byte for byte. Each UTI
-// JSON file must parse with jq, and each script listing must assemble to the source script.
+// checkTools names the tool that each kind of resource check runs, in report order. A check without a
+// tool runs in Go and builds the source resource again from the converted file.
+var checkTools = []struct{ kind, program string }{
+	{"assimp", "assimp"}, {"ffprobe", "ffprobe"}, {"csv", ""}, {"ncs", ""}, {"jq", "jq"}, {"iconv", "iconv"},
+	{"copy", ""},
+}
+
+// addResourceChecks adds the check of one converted resource to jobs, keyed by the kind of check. path is
+// the converted file without the extensions that writeResource adds, and label is the same path relative
+// to the folder of the report. Models are not added here, because their OBJ files are checked by listing.
+//
+//   - A WAV file must be read by ffprobe as 16-bit PCM.
+//   - A 2DA CSV file, read with Go's encoding/csv reader, must build again into the source table.
+//   - A script listing must assemble to the source script.
+//   - The string numbers of an SSF JSON file, read with jq, must build again into the source sound set.
+//   - A letter table JSON file, read with jq, must build again into the source letter table.
+//   - A script source, converted back to Windows-1252 by iconv, must equal the source bytes.
+//   - A TXI file must equal the source bytes.
+//   - Every other JSON file must parse with jq.
+func addResourceChecks(jobs map[string][]job, label, path, ext string, source []byte) {
+	add := func(kind, file string, check func(path string) string) {
+		jobs[kind] = append(jobs[kind], func() []string {
+			return line(label + file + " " + kotor.Verdict(check(path+file)))
+		})
+	}
+
+	switch ext {
+	case "mdl", "mdx":
+
+	case "wav":
+		add("ffprobe", ".wav", func(path string) string {
+			result := kotor.Exec("ffprobe", []string{"-v", "error", "-show_entries", "stream=codec_name",
+				"-of", "csv=p=0", path}, nil)
+			codec := strings.TrimSpace(string(result.Stdout))
+			if result.Status != 0 || strings.TrimSpace(result.Stderr) != "" {
+				return kotor.FirstLine(result.Stderr)
+			}
+			if codec != pcmCodec {
+				return "codec " + codec
+			}
+
+			converted, err := os.ReadFile(path)
+			if err != nil {
+				return err.Error()
+			}
+			want, problem := ffmpegSamples(source)
+			got, otherProblem := ffmpegSamples(converted)
+			if problem != "" || otherProblem != "" {
+				return problem + otherProblem
+			}
+			return compareSamples(want, got, isImaAdpcm(source))
+		})
+
+	case "2da":
+		add("csv", ".2da.csv", func(path string) string { return checkTwoDaCsv(path, source) })
+
+	case "ncs":
+		add("ncs", ".ncs.txt", func(path string) string { return checkNcsListing(path, source) })
+
+	case "ssf":
+		add("jq", ".ssf.json", func(path string) string { return checkSsfJson(path, source) })
+
+	case "ltr":
+		add("jq", ".ltr.json", func(path string) string { return checkLtrJson(path, source) })
+
+	case "nss":
+		add("iconv", ".nss", func(path string) string {
+			result := kotor.Exec("iconv", []string{"-f", "UTF-8", "-t", "WINDOWS-1252", path}, nil)
+			if result.Status != 0 {
+				return "iconv: " + kotor.FirstLine(result.Stderr)
+			}
+			if !bytes.Equal(result.Stdout, source) {
+				return fmt.Sprintf("%d bytes differ from the %d source bytes", len(result.Stdout), len(source))
+			}
+			return ""
+		})
+
+	case "txi":
+		add("copy", ".txi", func(path string) string {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err.Error()
+			}
+			if !bytes.Equal(data, source) {
+				return "differs from the source"
+			}
+			return ""
+		})
+
+	default:
+		add("jq", "."+ext+".json", func(path string) string {
+			result := kotor.Exec("jq", []string{"empty", path}, nil)
+			if result.Status != 0 {
+				return "jq: " + kotor.FirstLine(result.Stderr)
+			}
+			return ""
+		})
+	}
+}
+
+// ffmpegSamples decodes a WAV file with ffmpeg into raw 16-bit little-endian samples.
+func ffmpegSamples(wav []byte) ([]byte, string) {
+	result := kotor.Exec("ffmpeg", []string{"-v", "error", "-i", "-", "-f", "s16le", "-acodec", pcmCodec, "-"}, wav)
+	if result.Status != 0 || strings.TrimSpace(result.Stderr) != "" {
+		return nil, "ffmpeg: " + kotor.FirstLine(result.Stderr)
+	}
+	return result.Stdout, ""
+}
+
+// WAV header offsets of the first chunk id and of the format tag, when the fmt chunk comes first, and the
+// IMA ADPCM format tag.
+const (
+	wavFirstChunkOffset = 12
+	wavFormatTagOffset  = 20
+	wavFormatImaAdpcm   = 0x11
+)
+
+func isImaAdpcm(wav []byte) bool {
+	return len(wav) > wavFormatTagOffset+2 &&
+		string(wav[wavFirstChunkOffset:wavFirstChunkOffset+4]) == "fmt " &&
+		binary.LittleEndian.Uint16(wav[wavFormatTagOffset:]) == wavFormatImaAdpcm
+}
+
+// adpcmToleranceSamples is the largest difference allowed between a sample decoded by kotor.DecodeAdpcm
+// and the same sample decoded by ffmpeg. kotor.DecodeAdpcm adds shifted step sizes, as the IMA reference
+// decoder does, and ffmpeg multiplies exactly, so the decoded values drift apart within a block by up to
+// 86 in the game files. The first sample of every block is stored in the block header and agrees exactly.
+const adpcmToleranceSamples = 128
+
+// compareSamples compares the 16-bit samples of a converted WAV file with those of its source, both decoded
+// by ffmpeg. PCM sources must match exactly. For an IMA ADPCM source, the converted file holds the sample
+// count of the fact chunk, which can be fewer than ffmpeg decodes from the whole last block, so the
+// converted samples must match the start of the source samples within adpcmToleranceSamples.
+func compareSamples(want, got []byte, adpcm bool) string {
+	if !adpcm {
+		if !bytes.Equal(want, got) {
+			return fmt.Sprintf("%d sample bytes differ from the %d of the source", len(got), len(want))
+		}
+		return ""
+	}
+
+	if len(got) > len(want) {
+		return fmt.Sprintf("%d sample bytes, more than the %d of the source", len(got), len(want))
+	}
+	largest := 0
+	for i := 0; i+1 < len(got); i += 2 {
+		difference := int(int16(binary.LittleEndian.Uint16(got[i:]))) - int(int16(binary.LittleEndian.Uint16(want[i:])))
+		largest = max(largest, difference, -difference)
+	}
+	if largest > adpcmToleranceSamples {
+		return fmt.Sprintf("sample difference %d above %d", largest, adpcmToleranceSamples)
+	}
+	return ""
+}
+
+// runResourceChecks runs the jobs of each kind of check and tallies them in the report <kind>_<stage>. A
+// kind whose tool is missing is reported as UNVERIFIED. Kinds without jobs write no report.
+func runResourceChecks(summary *kotor.Summary, stage string, jobs map[string][]job) {
+	for _, tool := range checkTools {
+		if len(jobs[tool.kind]) == 0 {
+			continue
+		}
+
+		report := tool.kind + "_" + stage
+		if tool.program != "" && !kotor.Has(tool.program) {
+			summary.Note(tool.program + " missing: " + report + " UNVERIFIED")
+			continue
+		}
+		summary.Tally(report, pool(jobs[tool.kind]))
+	}
+}
+
+// Rims: assets/rims/<archive>/ against rims/<archive>.rim. Each OBJ file must load with assimp, and every
+// other resource is checked as addResourceChecks describes.
 func rims(summary *kotor.Summary) {
 	log("rims...")
 	src := filepath.Join(kotor.Game, "rims")
 	out := filepath.Join(kotor.Assets, "rims")
-	var objJobs, wavJobs, jsonJobs []job
-	var tableReport, scriptReport []string
+	jobs := map[string][]job{}
+	var archiveReport []string
 	for _, archive := range kotor.ListFiles(src, ".rim", false) {
 		name := strings.TrimSuffix(archive, filepath.Ext(archive))
 		rim, problem := kotor.ReadRim(kotor.ReadFile(filepath.Join(src, archive)))
 		if problem != "" {
-			tableReport = append(tableReport, archive+" FAIL: "+problem)
+			archiveReport = append(archiveReport, archive+" FAIL: "+problem)
 			continue
 		}
 
 		dir := filepath.Join(out, name)
 		for _, file := range kotor.ListFiles(dir, ".obj", false) {
-			objJobs = append(objJobs, func() []string { return assimpObj(out, filepath.Join(name, file)) })
+			jobs["assimp"] = append(jobs["assimp"], func() []string { return assimpObj(out, filepath.Join(name, file)) })
 		}
 
 		for _, entry := range rim.Entries {
 			label := filepath.Join(name, entry.Resref)
-			path := filepath.Join(out, label)
-			switch entry.Ext {
-			case "wav":
-				wavJobs = append(wavJobs, func() []string {
-					result := kotor.Exec("ffprobe", []string{"-v", "error", "-show_entries", "stream=codec_name",
-						"-of", "csv=p=0", path + ".wav"}, nil)
-					codec := strings.TrimSpace(string(result.Stdout))
-					if result.Status != 0 || strings.TrimSpace(result.Stderr) != "" {
-						return line(label + ".wav FAIL: " + kotor.FirstLine(result.Stderr))
-					}
-					if codec != pcmCodec {
-						return line(label + ".wav FAIL: codec " + codec)
-					}
-					return line(label + ".wav PASS")
-				})
-
-			case "2da":
-				tableReport = append(tableReport, label+".2da.csv "+kotor.Verdict(checkTwoDaCsv(path+".2da.csv", entry.Data)))
-
-			case "ssf":
-				jsonJobs = append(jsonJobs, func() []string {
-					return line(label + ".ssf.json " + kotor.Verdict(checkSsfJson(path+".ssf.json", entry.Data)))
-				})
-
-			case "ncs":
-				scriptReport = append(scriptReport, label+".ncs.txt "+kotor.Verdict(checkNcsListing(path+".ncs.txt", entry.Data)))
-
-			case "uti":
-				jsonJobs = append(jsonJobs, func() []string {
-					result := kotor.Exec("jq", []string{"empty", path + ".uti.json"}, nil)
-					if result.Status == 0 {
-						return line(label + ".uti.json PASS")
-					}
-					return line(label + ".uti.json FAIL: jq: " + kotor.FirstLine(result.Stderr))
-				})
-			}
+			addResourceChecks(jobs, label, filepath.Join(out, label), entry.Ext, entry.Data)
 		}
 	}
-	summary.Tally("csv_rims", tableReport)
-	summary.Tally("ncs_rims", scriptReport)
 
-	for _, tool := range []struct {
-		program, report string
-		jobs            []job
-	}{{"assimp", "assimp_rims", objJobs}, {"ffprobe", "ffprobe_rims", wavJobs}, {"jq", "jq_rims", jsonJobs}} {
-		if !kotor.Has(tool.program) {
-			summary.Note(tool.program + " missing: " + tool.report + " UNVERIFIED")
-			continue
-		}
-		summary.Tally(tool.report, pool(tool.jobs))
+	if len(archiveReport) > 0 {
+		summary.Tally("archives_rims", archiveReport)
 	}
+	runResourceChecks(summary, "rims", jobs)
+}
+
+// Bifs: assets/data/<archive>/ against data/<archive>.bif for each archive in kotor.ResourceBifs. Each resource is
+// checked as addResourceChecks describes.
+func bifs(summary *kotor.Summary) {
+	log("bifs...")
+	key := kotor.ReadKey()
+	jobs := map[string][]job{}
+	for _, name := range kotor.ResourceBifs {
+		for _, resource := range kotor.BifResources("data/"+name+".bif", key) {
+			label := filepath.Join(name, resource.Resref)
+			addResourceChecks(jobs, label, filepath.Join(kotor.Assets, "data", label), resource.Ext, resource.Data)
+		}
+	}
+	runResourceChecks(summary, "bifs", jobs)
+}
+
+// checkLtrJson reads the values of a converted letter table with jq, in the order letters, single, each
+// double set and each triple set, and builds the letter table again: the signature, the letter count and
+// one f32 per value. It returns an error message when the result differs from the source, or an empty
+// string when it matches.
+func checkLtrJson(path string, source []byte) string {
+	result := kotor.Exec("jq", []string{"-r", `.letters, (.single, .double[], .triple[] | .start[], .middle[], .end[])`, path}, nil)
+	if result.Status != 0 {
+		return "jq: " + kotor.FirstLine(result.Stderr)
+	}
+
+	fields := strings.Split(strings.TrimSuffix(string(result.Stdout), "\n"), "\n")
+	built := append([]byte("LTR V1.0"), byte(len(fields[0])))
+	for _, text := range fields[1:] {
+		value, err := strconv.ParseFloat(text, 32)
+		if err != nil {
+			return "bad value " + text
+		}
+		built = binary.LittleEndian.AppendUint32(built, math.Float32bits(float32(value)))
+	}
+
+	if !bytes.Equal(built, source) {
+		return fmt.Sprintf("built %d bytes differ from the %d source bytes", len(built), len(source))
+	}
+	return ""
 }
 
 // pcmCodec is ffprobe's name for 16-bit little-endian PCM.
@@ -1052,6 +1221,7 @@ var stages = []kotor.Stage{
 	{Name: "lips", Run: lips},
 	{Name: "modules", Run: modules},
 	{Name: "rims", Run: rims},
+	{Name: "bifs", Run: bifs},
 	{Name: "tlk", Run: tlk},
 }
 

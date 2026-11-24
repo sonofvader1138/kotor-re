@@ -70,7 +70,7 @@ The entry table has one 16-byte entry per resource.
 
 Resource data follows the entry table directly. The resources are stored in order, without gaps or overlaps, and the last one ends exactly at the end of the file. This holds for all 26 archives. The data is not compressed.
 
-The archives contain 29 resource types. Six are described in this document: 2002 is an MDL model, 3008 is its MDX vertex data, 2047 is a GUI layout, 3 is a TGA image, 2022 is a TXI text file of texture options, and 3001 is a text file that probably lists visible rooms. Type 3007 (TPC texture) does not occur in the BIF archives; it occurs in the ERF texture packs. The number of resources of each type is listed below.
+The archives contain 29 resource types. Six are described in this document: 2002 is an MDL model, 3008 is its MDX vertex data, 2047 is a GUI layout, 3 is a TGA image, 2022 is a TXI text file of texture options, and 3001 is a text file that probably lists visible rooms. Type 3007 (TPC texture) does not occur in the BIF archives; it occurs in the ERF texture packs. The tables, sounds, scripts and templates of five archives are described in the section "Tables, sounds, scripts and templates in the BIF archives". The number of resources of each type is listed below.
 
 | Type | Count | Type | Count | Type | Count | Type | Count |
 | ---- | ----- | ---- | ----- | ---- | ----- | ---- | ----- |
@@ -93,7 +93,7 @@ Many of the other types begin with a signature of four characters followed by a 
 | SSF V1.1  | 2060 (106)                                                                                                                                                                                                     |
 | LTR V1.0  | 2036 (3)                                                                                                                                                                                                       |
 
-In the "V3.2" row, the four characters before the version differ by type and are given beside each type number. Every resource of these types carries its signature. Types 4, 2009, 2017 and 3000 carry no such signature, and their formats are UNKNOWN.
+In the "V3.2" row, the four characters before the version differ by type and are given beside each type number. Every resource of these types carries its signature. Types 4, 2009, 2017 and 3000 carry no such signature. Type 4 is a RIFF WAVE sound, type 2009 is NWScript source text and type 2017 is a binary 2DA table; these are described in the sections on global resources and on the BIF archives. The format of type 3000 is UNKNOWN.
 
 ## ERF archive
 
@@ -578,7 +578,133 @@ The models refer to textures by the same relative path as the models of `data/mo
 2,JEDI,1121,1114,5
 ```
 
-The `rims` stage of `cmd/verify` writes five reports, and every line passes. In `temp/reports/assimp_rims.txt`, assimp loads all 88 OBJ files with the face count of the file. In `temp/reports/ffprobe_rims.txt`, ffprobe reads all 375 WAV files as 16-bit PCM (`pcm_s16le`). In `temp/reports/csv_rims.txt`, Go's `encoding/csv` reader reads each of the 306 CSV files, and the table built again from it must equal the source table byte for byte. The builder is part of `cmd/verify` and shares no code with the parser; it takes the separator byte from the source. A test in which one cell of `aiscripts.2da.csv` was altered made that file fail. In `temp/reports/jq_rims.txt`, jq reads the string numbers of all 210 SSF JSON files, which must build again into the source sound set, and parses all 62 UTI JSON files. In `temp/reports/ncs_rims.txt`, all 492 script listings assemble to their source scripts.
+The `rims` stage of `cmd/verify` writes five reports, and every line passes. In `temp/reports/assimp_rims.txt`, assimp loads all 88 OBJ files with the face count of the file. In `temp/reports/ffprobe_rims.txt`, ffprobe reads all 375 WAV files as 16-bit PCM (`pcm_s16le`), and ffmpeg decodes each output and its source to 16-bit samples, which must be equal. For the four IMA ADPCM sources, the samples may differ by rounding (see "Conversion and verification" under "Tables, sounds, scripts and templates in the BIF archives"). In `temp/reports/csv_rims.txt`, Go's `encoding/csv` reader reads each of the 306 CSV files, and the table built again from it must equal the source table byte for byte. The builder is part of `cmd/verify` and shares no code with the parser; it takes the separator byte from the source. A test in which one cell of `aiscripts.2da.csv` was altered made that file fail. In `temp/reports/jq_rims.txt`, jq reads the string numbers of all 210 SSF JSON files, which must build again into the source sound set, and parses all 62 UTI JSON files. In `temp/reports/ncs_rims.txt`, all 492 script listings assemble to their source scripts.
+
+# Tables, sounds, scripts and templates in the BIF archives
+
+Five BIF archives hold rule tables, sound effects, scripts, object templates and the quest journal. Most of their formats are already described under modules and global resources; this section gives what is specific to these archives and describes two formats that occur only here, the NWScript source and the LTR letter table. The `bifs` stage of `cmd/convert` converts every resource of the five archives. The table below lists the archives and their contents.
+
+| Archive         | Resources | Contents                                                     | Output                    |
+| --------------- | --------- | ------------------------------------------------------------ | ------------------------- |
+| `2da.bif`       | 209       | 209 2DA tables                                               | `assets/data/2da/`        |
+| `sounds.bif`    | 1,928     | 1,928 WAV sounds                                             | `assets/data/sounds/`     |
+| `scripts.bif`   | 3,558     | 1,784 compiled scripts (NCS) and 1,774 script sources (NSS)  | `assets/data/scripts/`    |
+| `templates.bif` | 1,387     | 1,277 GFF files of 12 types, 106 SSF sound sets, 3 LTR, 1 TXI | `assets/data/templates/` |
+| `_newbif.bif`   | 1         | 1 journal (JRL), `global`                                    | `assets/data/_newbif/`    |
+
+## 2DA tables
+
+All 209 tables use the binary form "2DA V2.b" described under global resources, and all parse with `ParseTwoDa`. All 209 use a tab as the separator; the NUL separator occurs only in the RIM copies. The tables have between 1 and 80 columns (median 4) and between 0 and 1,185 rows (median 11). Four tables have no rows: `iprp_base1`, `iprp_slotscost`, `iprp_staminacost` and `iprp_terraintype`.
+
+153 tables also occur in `rims/global.rim`, and their CSV files are identical to the CSV files of the RIM copies. The other 56 occur only here. Examples are `actions`, `dialogtokens`, `keymap`, `soundeax` and `xpbaseconst`.
+
+## WAV sounds
+
+All 1,928 sounds are ordinary RIFF WAVE files. In every file the RIFF size equals the file size minus 8, the fmt chunk comes first, and the chunks end exactly at the end of the file. The table below gives the encodings, as reported by ffprobe.
+
+| Encoding                     | Sample rate | Channels | Files |
+| ---------------------------- | ----------- | -------- | ----- |
+| 16-bit PCM (format 1)        | 22,050 Hz   | 1        | 1,839 |
+| 16-bit PCM (format 1)        | 22,050 Hz   | 2        | 1     |
+| 16-bit PCM (format 1)        | 44,100 Hz   | 1        | 72    |
+| 16-bit PCM (format 1)        | 44,100 Hz   | 2        | 8     |
+| 16-bit PCM (format 1)        | 11,025 Hz   | 1        | 3     |
+| 8-bit PCM (format 1)         | 11,025 Hz   | 1        | 1     |
+| IMA ADPCM (format 17), 4-bit | 44,100 Hz   | 1        | 4     |
+
+The nine stereo files are named `mgs_`, such as `mgs_bigship`. The 8-bit file is `mgs_sith_hit`. Its samples are unsigned, with silence at 128, as is usual for 8-bit WAV. The four IMA ADPCM files are the same four as in `global.rim`.
+
+The 246 sounds of `global.rim` are copies of sounds in this archive. 797 sounds have the name of a file in `streamsounds/`, compared without regard to case. For 785 of them, the converted file is identical to the converted stream sound. The other 12 differ, for example `c_drdmk1_atk1`, which has the same size, and `mgs_engine_01l`, which is 12 bytes shorter. Which copy the game plays is UNKNOWN. The most common name prefixes are `as_` (593 files), `p_` (419) and `n_` (246).
+
+## NWScript sources: NSS
+
+A resource of type 2009 is the source text of a script in NWScript, the scripting language that the compiled NCS scripts are built from. The type is named "nss" after the file `nwscript.nss`, which is one of these resources (see "Engine routines: nwscript.nss"). The text has no header or signature.
+
+All 1,774 sources are text with CRLF line breaks, and none contains a NUL byte. 1,772 end with a line break. Seven files contain bytes of 0x80 or above. Five contain 0xA9 in the line "Copyright © 2002 Bioware Corp.", and two, `k_sup_bands` and `nwscript`, contain 0x92 where an apostrophe belongs, as in "don’t". In Windows-1252, 0xA9 is the copyright sign and 0x92 is the right single quotation mark; in Latin-1, 0x92 is a control character. The text is therefore probably Windows-1252. The confidence is medium, because only these two byte values occur.
+
+1,754 names have both a source and a compiled script. Twenty sources have no compiled script. Seventeen of them are include files named `k_inc_*`, such as `k_inc_debug`, which other sources include with an `#include` directive; 964 sources contain such a directive, 615 of them for `k_inc_debug`; the other three are `nwscript`, `e3_scripts` and `fightback`. Five other include files, such as `k_inc_generic`, do have a compiled script of the same name; why is UNKNOWN. Thirty compiled scripts have no source. Ten of them are named `qa_*`, and others are named `test` and `asd`, so they are probably test scripts. Whether every compiled script matches its source has not been checked; one known mismatch, `nw_s0_lghtnbolt`, is described under "Engine routines: nwscript.nss".
+
+## Templates
+
+`templates.bif` holds the templates that the game creates objects from, together with the palettes and the name tables that support them. All 1,277 GFF files carry the signature of their type with version "V3.2" and parse with `ReadGff`. Five of them have unreferenced bytes in the field index or list index region, as described for the module files: the BIC file (44 bytes) and four ITP files (8 to 252 bytes). The table below lists the types. The types that do not occur in the modules are named after their signatures; their meanings come from their field labels and are not confirmed.
+
+| Type | Ext | Files | Probable content                                                                                                     | Confidence |
+| ---- | --- | ----- | -------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 2015 | bic | 1     | A character, `temp_char`. It has the creature fields of a UTC file, such as Race, ClassList and Equip_ItemList.     | low        |
+| 2024 | bti | 1     | An item, `nw_wblhvy001`. It has the item fields of a UTI file, such as BaseItem, PropertiesList and Cost.            | low        |
+| 2026 | btc | 3     | Creatures, such as `sw_krayt`. They have creature fields, such as FactionID, ScriptSpawn and SaveFortitude.           | low        |
+| 2030 | itp | 16    | Palettes, described below.                                                                                           | medium     |
+| 2029 | dlg | 32    | Dialogs, as in the modules.                                                                                          | high       |
+| 2027 | utc | 205   | Creature templates, as in the modules.                                                                               | high       |
+| 2042 | utd | 50    | Door templates, as in the modules.                                                                                   | high       |
+| 2040 | ute | 65    | Encounter templates, as in the modules.                                                                              | high       |
+| 2025 | uti | 557   | Item templates, as in the modules.                                                                                   | high       |
+| 2044 | utp | 317   | Placeable templates, as in the modules.                                                                              | high       |
+| 2032 | utt | 21    | Trigger templates, as in the modules.                                                                                | high       |
+| 2058 | utw | 9     | Waypoint templates, as in the modules.                                                                               | high       |
+
+The 16 ITP files form two groups. Nine are named `<kind>pal`, such as `creaturepal`, and hold a field RESTYPE with a resource type number, such as 2027 (UTC) in `creaturepal`, and a list MAIN of categories. Each category has the field DELETE_ME and some of the fields ID, TYPE and LIST; a LIST holds nested categories. The other seven are named `<kind>palstd`, such as `creaturepalstd`. Their categories hold lists of entries with the fields NAME, RESREF and, for creatures, CR. The seven files name 1,093 distinct resrefs, and all but one name a template in `templates.bif`. For example, `creaturepalstd` lists "Bantha" with the resref `c_bantha`. The palettes are probably the template lists of BioWare's level editor, because the game itself does not need them to create objects. This has not been confirmed.
+
+The archive also holds the TXI file `grass`, which contains the two lines "downsamplemax 0" and "downsamplemin 0", and the three LTR files described below.
+
+## LTR letter tables
+
+An LTR file (type 2036) holds the letter probabilities for a random name generator. The three files are `humanf`, `humanm` and `humanl`, probably human female first names, male first names and last names, which the character creation screen can generate. This use is not confirmed. The parser is `ParseLtr` in `kotor/ltr.go`.
+
+The file has a 9-byte header followed by tables of 28 f32 values, one value per letter. The letters are "a" to "z", the apostrophe and the hyphen, in this order. The tables come in sets of three: one for the start of a name, one for the middle and one for the end. The table below describes the layout.
+
+| Offset | Type                  | Meaning                                                                                           | Evidence                                                                                                       | Confidence |
+| ------ | --------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | char[8]               | Signature "LTR V1.0"                                                                              | Present in all three files.                                                                                    | high       |
+| 0x08   | u8                    | Number of letters n                                                                               | The value is 28 in all three files, and the size of each file is 9 + 4 × 3n × (1 + n + n²) = 273,177 bytes.    | high       |
+| 0x09   | f32[3][n]             | The set for single letters: start, middle and end                                                 | See the evidence below.                                                                                        | high       |
+| 0x159  | f32[n][3][n]          | One set per preceding letter, in letter order, giving the next letter                             | See the evidence below.                                                                                        | high       |
+| 0x2619 | f32[n][n][3][n]       | One set per preceding pair of letters, the first letter varying slowest, giving the next letter    | The tables end exactly at the end of all three files.                                                          | high       |
+
+Each nonzero value is the cumulative probability of the letters up to and including that letter, and 0 means that the letter cannot occur there. Of the 2,439 tables per file, 217 (`humanf`), 225 (`humanm`) and 192 (`humanl`) contain a nonzero value. In each of these tables except two per file, the nonzero values never decrease, and the last one is 1 within 0.0001. The largest value is 1.0000001, which is the rounding of a sum. The two exceptions in each file are the middle and the end tables of the single-letter set. In them, the values restart at a small value several times; for example, the middle table of `humanf` reaches 0.472 at "i" and continues with 0.009 at "k". The meaning of these two tables is UNKNOWN.
+
+The order of the sets and of the letters follows from three checks, which hold in all three files. The start table after the letter "q" in `humanf` and `humanm` allows only "u", which is the 21st letter. The start table after a letter contains a nonzero value exactly when that letter has a nonzero value in the single-letter start table, for all 28 letters. The tables after a pair of letters contain nonzero values only when the tables after the first letter allow the second letter, for all 114, 127 and 103 such pairs.
+
+## Conversion and verification
+
+The `bifs` stage of `cmd/convert` writes one folder `assets/data/<archive>/` per archive and the report `temp/reports/bifs.txt`. All 7,083 lines pass. The resources become the files below. The 2DA, SSF, NCS and GFF resources use the same forms as in `rims/` and the modules.
+
+| Resource | Output                    | Form                                                                                                                                       |
+| -------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| WAV      | `<resref>.wav`            | 16-bit PCM. 16-bit PCM files are copied unchanged. The IMA ADPCM files are decoded, and the 8-bit file is widened: each sample becomes (s − 128) × 256. |
+| 2DA      | `<resref>.2da.csv`        | CSV, as for `rims/`.                                                                                                                      |
+| NCS      | `<resref>.ncs.txt`        | The disassembly listing of the module files.                                                                                              |
+| NSS      | `<resref>.nss`            | The source text, decoded as Windows-1252 and written as UTF-8. The line breaks are kept.                                                  |
+| SSF      | `<resref>.ssf.json`       | JSON, as for `rims/`.                                                                                                                     |
+| LTR      | `<resref>.ltr.json`       | JSON, described below.                                                                                                                    |
+| TXI      | `<resref>.txi`            | Copied unchanged.                                                                                                                         |
+| GFF      | `<resref>.<ext>.json`     | The JSON form of the module files, for all 13 GFF types including the journal.                                                            |
+
+The JSON form of an LTR file is an object with "letters", the 28 letters in table order; "single", the single-letter set; "double", an object keyed by the preceding letter; and "triple", an object keyed by the preceding pair. Each set is an object with "start", "middle" and "end", each an array of the 28 stored values in file order. The values are the stored cumulative probabilities, written with the shortest decimal that reads back as the same f32. The example below shows the start of `assets/data/templates/humanf.ltr.json`.
+
+```json
+{
+	"letters": "abcdefghijklmnopqrstuvwxyz'-",
+	"single": {
+		"start": [
+			0.06557377,
+			0.114754096,
+```
+
+The `bifs` stage of `cmd/verify` writes six reports, and every line passes. The table below lists them.
+
+| Report             | Files | Check                                                                                                                                             |
+| ------------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ffprobe_bifs.txt` | 1,928 | ffprobe reads the WAV file as 16-bit PCM, and ffmpeg decodes the output and the source to the same 16-bit samples (see the note on ADPCM below).  |
+| `csv_bifs.txt`     | 209   | Go's `encoding/csv` reader reads the CSV file, and the table built again from it equals the source table byte for byte.                          |
+| `ncs_bifs.txt`     | 1,784 | The listing assembles to the source script.                                                                                                       |
+| `jq_bifs.txt`      | 1,387 | jq parses the 1,278 GFF JSON files. For the 106 SSF and 3 LTR files, the values that jq reads build again into the source file byte for byte.    |
+| `iconv_bifs.txt`   | 1,774 | iconv converts the NSS file from UTF-8 back to Windows-1252, and the result equals the source bytes.                                             |
+| `copy_bifs.txt`    | 1     | The TXI file equals the source bytes.                                                                                                             |
+
+A test altered one value in `humanf.ltr.json`, one character in `k_pman_casamad_s.nss` and one sample byte in `mgs_sith_hit.wav`. Each of the three files then failed its check, and no other file did.
+
+The four IMA ADPCM files cannot be compared exactly with ffmpeg. `DecodeAdpcm` computes each step as a sum of shifted step sizes, as the IMA reference decoder does, while ffmpeg multiplies exactly. The two decodings agree exactly at the first sample of every block, which the block header stores, and drift apart by up to 29, 53, 86 and 65 within a block in the four files. The check therefore allows a difference of at most 128 for ADPCM sources. It also requires the output to hold exactly the number of samples in the fact chunk, which is fewer than ffmpeg decodes from the whole last block. Which rounding the game uses is UNKNOWN. The same check applies to the WAV files of `rims/`.
 
 # String table: dialog.tlk
 

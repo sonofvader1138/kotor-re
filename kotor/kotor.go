@@ -1,5 +1,5 @@
 // Package kotor holds the readers and converters for the game's file formats (KEY, BIF, ERF, RIM, GFF, TPC, TGA, MDL,
-// LIP, stream audio, IMA ADPCM and Bink), a minimal PNG encoder, the project paths, and helpers that every command uses.
+// LIP, LTR, stream audio, IMA ADPCM and Bink), a minimal PNG encoder, the project paths, and helpers that every command uses.
 package kotor
 
 import (
@@ -58,9 +58,12 @@ var extensions = map[uint32]string{
 	2035: "uts", 2038: "fac", 2040: "ute", 2042: "utd", 2044: "utp", 2051: "utm", 2056: "jrl", 2058: "utw",
 	3003: "pth",
 
-	// These types are named after their content: a RIFF WAVE file, and the signatures "2DA V2.b" and
-	// "SSF V1.1".
-	4: "wav", 2017: "2da", 2060: "ssf",
+	// These types occur only in data/templates.bif and are named after their signatures in the same way.
+	2015: "bic", 2024: "bti", 2026: "btc", 2030: "itp", 2036: "ltr",
+
+	// These types are named after their content: a RIFF WAVE file, the signatures "2DA V2.b" and
+	// "SSF V1.1", and NWScript source text, whose routine declarations nwscript.nss holds.
+	4: "wav", 2017: "2da", 2060: "ssf", TypeNss: "nss",
 }
 
 // Ext returns the file extension of a resource type, or the type code in decimal when the type is unknown.
@@ -82,6 +85,10 @@ type TgaGroup struct {
 	Pattern *regexp.Regexp
 }
 
+// ResourceBifs lists the BIF archives whose resources are converted one by one, without models: tables,
+// sounds, scripts, templates and the journal. Each archive becomes the folder assets/data/<name>.
+var ResourceBifs = []string{"2da", "sounds", "scripts", "templates", "_newbif"}
+
 var TgaGroups = []TgaGroup{
 	{"lightmaps", regexp.MustCompile(`^data/lightmaps\d*\.bif$`)},
 	{"textures", regexp.MustCompile(`^data/textures\.bif$`)},
@@ -89,7 +96,7 @@ var TgaGroups = []TgaGroup{
 }
 
 // reportOrder is the order in which RunStages prints the stage summaries.
-var reportOrder = []string{"models", "textures", "tga", "music", "sounds", "waves", "movies", "gui", "lips", "modules", "rims", "tlk"}
+var reportOrder = []string{"models", "textures", "tga", "music", "sounds", "waves", "movies", "gui", "lips", "modules", "rims", "bifs", "tlk"}
 
 // A resource reference (resref) is a resource name of at most 16 bytes, padded with NUL bytes.
 const ResrefLength = 16
@@ -193,6 +200,27 @@ func Latin1(data []byte) string {
 	text := make([]rune, len(data))
 	for i, b := range data {
 		text[i] = rune(b)
+	}
+	return string(text)
+}
+
+// windows1252High holds the code points of bytes 0x80 to 0x9F in Windows-1252. The five bytes that
+// Windows-1252 leaves undefined keep the code point of the same value, as in Latin-1.
+var windows1252High = [32]rune{
+	0x20AC, 0x81, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+	0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x8D, 0x017D, 0x8F,
+	0x90, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+	0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x9D, 0x017E, 0x0178,
+}
+
+// Windows1252 decodes bytes as Windows-1252, which differs from Latin-1 only in bytes 0x80 to 0x9F.
+func Windows1252(data []byte) string {
+	text := make([]rune, len(data))
+	for i, b := range data {
+		text[i] = rune(b)
+		if b >= 0x80 && b < 0xA0 {
+			text[i] = windows1252High[b-0x80]
+		}
 	}
 	return string(text)
 }
