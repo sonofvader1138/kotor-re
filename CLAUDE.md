@@ -48,3 +48,4 @@ The following tools are installed:
   - Give every number its meaning. Write "all 26 archives end exactly at end of file", not "26/26".
   - State uncertainty in a plain sentence, e.g. "The purpose of this field is unknown."
   - Use tables for field layouts and sentences to explain them. Introduce each table with a sentence saying what it describes.
+  - Do not use a colon to join two clauses in a sentence, as in "Most of the effort isn't code: it's checking deployed config." Write two sentences or join the clauses with a word such as "because" or "but". This applies to documentation, comments and replies. A colon is still fine when it refers to the colon character itself or is part of a real title, such as "Star Wars: Knights of the Old Republic".
