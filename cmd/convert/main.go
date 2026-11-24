@@ -3,7 +3,7 @@
 // Movies require ffmpeg. All stages run at the same time. Each stage writes its own outputs and reports
 // and keeps its own summary lines, which are printed in stage order at the end.
 //
-// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules] [rims]   (default: all)
+// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules] [rims] [tlk]   (default: all)
 package main
 
 import (
@@ -694,6 +694,46 @@ func convertRims(summary *kotor.Summary) {
 	summary.Note(fmt.Sprintf("rims: MDX data without a model, not converted: %d (%s)", len(orphans), strings.Join(orphans, " ")))
 }
 
+// Tlk: dialog.tlk -> assets/dialog.tlk.json, the string table as an object with "language", the u32 at
+// header offset 8, and "entries", one object per entry in file order. Each entry has "strref", its
+// position in the table; "flags"; "sound", the sound resref; and "text". The sound and text are empty
+// strings when the entry has none. ReadTlk rejects every value this form leaves out.
+func convertTlk(summary *kotor.Summary) {
+	fmt.Println("tlk...")
+	tlk := dialogTlk()
+
+	entries := make([]any, len(tlk.Entries))
+	withText, withSound := 0, 0
+	for i, entry := range tlk.Entries {
+		object := &orderedObject{}
+		object.set("strref", number(float64(i), 64))
+		object.set("flags", number(float64(entry.Flags), 64))
+		object.set("sound", entry.Sound)
+		object.set("text", entry.Text)
+		entries[i] = object
+
+		if entry.Text != "" {
+			withText++
+		}
+		if entry.Sound != "" {
+			withSound++
+		}
+	}
+
+	object := &orderedObject{}
+	object.set("language", number(float64(tlk.Language), 64))
+	object.set("entries", entries)
+	text, err := json.MarshalIndent(object, "", "\t")
+	if err != nil {
+		summary.Tally("tlk", []string{"dialog.tlk FAIL: " + err.Error()})
+		return
+	}
+
+	kotor.WriteFile(filepath.Join(kotor.Assets, "dialog.tlk.json"), append(text, '\n'))
+	line := fmt.Sprintf("dialog.tlk entries=%d text=%d sound=%d PASS", len(tlk.Entries), withText, withSound)
+	summary.Tally("tlk", []string{line})
+}
+
 // Movies start first because they take longest.
 var stages = []kotor.Stage{
 	{Name: "movies", Run: convertMovies},
@@ -707,6 +747,7 @@ var stages = []kotor.Stage{
 	{Name: "lips", Run: convertLips},
 	{Name: "modules", Run: convertModules},
 	{Name: "rims", Run: convertRims},
+	{Name: "tlk", Run: convertTlk},
 }
 
 func main() {

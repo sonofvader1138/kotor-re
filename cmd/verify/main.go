@@ -24,12 +24,14 @@
 // rims: assimp must load each OBJ and ffprobe must read each WAV as 16-bit PCM. Each 2DA CSV file and the
 // string numbers of each SSF JSON file, read with jq, must build again into the source resource. jq must
 // parse each UTI JSON file, and each script listing must assemble to the source script.
+// tlk: the string table JSON, read with jq, must build again into dialog.tlk byte for byte.
 //
-// usage: go run ./cmd/verify [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules] [rims]   (default: all)
+// usage: go run ./cmd/verify [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules] [rims] [tlk]   (default: all)
 package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/csv"
 	"encoding/json"
@@ -948,6 +950,95 @@ func checkNcsListing(path string, source []byte) string {
 	return ""
 }
 
+// tlkLine is the jq program that prints the language and then one line per entry: the string number, the
+// flags, and the sound and text in base64, so that line feeds in the text cannot split a line.
+const tlkLine = `.language, (.entries[] | "\(.strref) \(.flags) \(.sound | @base64) \(.text | @base64)")`
+
+// Tlk: assets/dialog.tlk.json against dialog.tlk.
+func tlk(summary *kotor.Summary) {
+	if !kotor.Has("jq") {
+		summary.Note("jq missing: tlk UNVERIFIED")
+		return
+	}
+
+	log("tlk...")
+	source := kotor.ReadFile(filepath.Join(kotor.Game, "dialog.tlk"))
+	problem := checkTlkJson(filepath.Join(kotor.Assets, "dialog.tlk.json"), source)
+	summary.Tally("jq_tlk", line("dialog.tlk.json "+kotor.Verdict(problem)))
+}
+
+// latin1Bytes encodes text as Latin-1 and reports whether every character fits in one byte.
+func latin1Bytes(text string) ([]byte, bool) {
+	out := []byte{}
+	for _, character := range text {
+		if character > 0xff {
+			return nil, false
+		}
+		out = append(out, byte(character))
+	}
+	return out, true
+}
+
+// checkTlkJson builds a TLK file from jq's reading of the JSON form and returns an error message when the
+// result differs from the source, or an empty string when it matches. Texts are laid out in entry order,
+// an entry without text has offset 0, and the three unknown fields are 0.
+func checkTlkJson(path string, source []byte) string {
+	result := kotor.Exec("jq", []string{"-r", tlkLine, path}, nil)
+	if result.Status != 0 {
+		return "jq: " + kotor.FirstLine(result.Stderr)
+	}
+
+	lines := strings.Split(strings.TrimSuffix(string(result.Stdout), "\n"), "\n")
+	language, err := strconv.ParseUint(lines[0], 10, 32)
+	if err != nil {
+		return "bad language " + lines[0]
+	}
+
+	count := len(lines) - 1
+	table := []byte(kotor.TlkSignature)
+	table = binary.LittleEndian.AppendUint32(table, uint32(language))
+	table = binary.LittleEndian.AppendUint32(table, uint32(count))
+	table = binary.LittleEndian.AppendUint32(table, uint32(kotor.TlkHeaderSize+kotor.TlkEntrySize*count))
+
+	var texts []byte
+	for i, text := range lines[1:] {
+		fields := strings.Split(text, " ")
+		if len(fields) != 4 || fields[0] != strconv.Itoa(i) {
+			return fmt.Sprintf("entry %d is malformed: %s", i, text)
+		}
+
+		flags, flagsErr := strconv.ParseUint(fields[1], 10, 32)
+		soundText, soundErr := base64.StdEncoding.DecodeString(fields[2])
+		entryText, textErr := base64.StdEncoding.DecodeString(fields[3])
+		sound, soundFits := latin1Bytes(string(soundText))
+		body, bodyFits := latin1Bytes(string(entryText))
+		if flagsErr != nil || soundErr != nil || textErr != nil || !soundFits || !bodyFits || len(sound) > kotor.ResrefLength {
+			return fmt.Sprintf("entry %d has a bad value", i)
+		}
+
+		offset := len(texts)
+		if len(body) == 0 {
+			offset = 0
+		}
+
+		table = binary.LittleEndian.AppendUint32(table, uint32(flags))
+		table = append(table, sound...)
+		table = append(table, make([]byte, kotor.ResrefLength-len(sound))...)
+		table = binary.LittleEndian.AppendUint32(table, 0)
+		table = binary.LittleEndian.AppendUint32(table, 0)
+		table = binary.LittleEndian.AppendUint32(table, uint32(offset))
+		table = binary.LittleEndian.AppendUint32(table, uint32(len(body)))
+		table = binary.LittleEndian.AppendUint32(table, 0)
+		texts = append(texts, body...)
+	}
+
+	built := append(table, texts...)
+	if !bytes.Equal(built, source) {
+		return fmt.Sprintf("built %d bytes differ from the %d source bytes", len(built), len(source))
+	}
+	return ""
+}
+
 // Movies queue their jobs first because each one takes longest, so short jobs fill the other slots.
 var stages = []kotor.Stage{
 	{Name: "movies", Run: movies},
@@ -961,6 +1052,7 @@ var stages = []kotor.Stage{
 	{Name: "lips", Run: lips},
 	{Name: "modules", Run: modules},
 	{Name: "rims", Run: rims},
+	{Name: "tlk", Run: tlk},
 }
 
 func main() {

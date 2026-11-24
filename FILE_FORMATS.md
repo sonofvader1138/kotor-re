@@ -582,7 +582,7 @@ The `rims` stage of `cmd/verify` writes five reports, and every line passes. In 
 
 # String table: dialog.tlk
 
-The file `dialog.tlk` is the string table of the game. It holds 49,265 entries, numbered from 0. A localized string in a GFF file names an entry by this number. An entry holds a text and the name of a sound, which is usually the voice file that speaks the text. The reader is `ReadTlk` in `kotor/tlk.go`. Only one TLK file exists, so the format could not be compared across samples. The 49,265 entries were compared instead.
+The file `dialog.tlk` is the string table of the game. It holds 49,265 entries, numbered from 0. A localized string in a GFF file and a slot of an SSF sound set name an entry by this number, the string reference (strref). An entry holds a text and the name of a sound, which is usually the voice file that speaks the text. The reader is `ReadTlk` in `kotor/tlk.go`. Only one TLK file exists, so the format could not be compared across files. The 49,265 entries were compared instead.
 
 The file begins with a 20-byte header, described in the table below.
 
@@ -595,19 +595,63 @@ The file begins with a 20-byte header, described in the table below.
 
 Each entry is 40 bytes long and is laid out as described in the table below.
 
-| Offset | Type     | Meaning                                  | Evidence                                                                                                                            | Confidence |
-| ------ | -------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | u32      | Flags                                    | The values are 7 (48,560 entries), 6 (398) and 0x8000 (307). Bit 0 is set exactly in the 48,560 entries that have text.             | medium     |
-| 0x04   | char[16] | Sound resref, padded with NUL bytes      | 32,853 entries name a sound. 20,320 of the names match a file in `streamwaves/` or `streamsounds/`, for example `nglobeband01000_`. | medium     |
-| 0x14   | u32      | UNKNOWN, always 0                        | The value is 0 in all entries. It may be a volume variance.                                                                         | low        |
-| 0x18   | u32      | UNKNOWN, always 0                        | The value is 0 in all entries. It may be a pitch variance.                                                                          | low        |
-| 0x1C   | u32      | Offset of the text, from the string data | The texts lie in entry order with no gap or overlap, and the last ends exactly at the end of the file.                              | high       |
-| 0x20   | u32      | Length of the text in bytes              | See above. The length is 0 exactly when bit 0 of the flags is clear.                                                                | high       |
-| 0x24   | f32      | UNKNOWN, always 0.0                      | The value is 0.0 in all entries. It may be the length of the sound.                                                                 | low        |
+| Offset | Type     | Meaning                                  | Evidence                                                                                                                                      | Confidence |
+| ------ | -------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | u32      | Flags                                    | The values are 7 (48,560 entries), 6 (398) and 0x8000 (307). Bit 0 is set exactly in the 48,560 entries that have text.                       | medium     |
+| 0x04   | char[16] | Sound resref, padded with NUL bytes      | 32,853 entries name a sound. Every byte after the name is NUL. The names use only digits, letters and the underscore.                         | high       |
+| 0x14   | u32      | UNKNOWN, always 0                        | The value is 0 in all entries. It may be a volume variance.                                                                                   | low        |
+| 0x18   | u32      | UNKNOWN, always 0                        | The value is 0 in all entries. It may be a pitch variance.                                                                                    | low        |
+| 0x1C   | u32      | Offset of the text, from the string data | The texts lie in entry order with no gap or overlap, and the last ends exactly at the end of the file. All 705 entries without text hold 0.   | high       |
+| 0x20   | u32      | Length of the text in bytes              | See above. The length is 0 exactly when bit 0 of the flags is clear.                                                                          | high       |
+| 0x24   | f32      | UNKNOWN, always 0.0                      | The bits are 0 in all entries. It may be the length of the sound.                                                                             | low        |
 
 The text is not terminated by a NUL byte. All bytes of the texts are below 0x80, and the only control character is the line feed (5,191 times), so the code page does not matter. Entry 0 is "Bad StrRef", and entry 35,782 is "Taris - South Apartments", the area name of `tar_m02aa`.
 
-The meaning of flag bits 1 and 2 (value 6) is UNKNOWN. They are set in all entries with text and in 398 entries without text, of which 359 name a sound. The 307 entries with flag 0x8000 have neither text nor sound. The 12,533 sound names that match no stream audio file include `move2` and `droid2`. These may name resources in the BIF archives, but this has not been checked.
+## Flags
+
+The flag values combine with text and sound as shown in the table below. A referenced entry is one whose number occurs as a strref in the converted module and global resources (`assets/modules` and `assets/rims`), which name 34,651 distinct entries. Resources in the BIF archives were not searched.
+
+| Flags  | Text | Sound | Entries | Referenced |
+| ------ | ---- | ----- | ------- | ---------- |
+| 7      | yes  | yes   | 32,494  | 25,464     |
+| 7      | yes  | no    | 16,066  | 9,158      |
+| 6      | no   | yes   | 359     | 28         |
+| 6      | no   | no    | 39      | 0          |
+| 0x8000 | no   | no    | 307     | 1          |
+
+Bit 0 means that the entry has text. Bits 1 and 2 are set together in every entry except the 307 with flag 0x8000, even when the entry has no sound, so their meaning is UNKNOWN. The meaning of flag 0x8000 is UNKNOWN. These entries are scattered from entry 369 to entry 49,248, and they include the 100 consecutive entries 49,145 to 49,244. The one referenced entry, 42,058, is a slot of the sound set `p_trask.ssf` in `rims/global.rim` and `rims/miniglobal.rim`. The flag may mark removed entries, but this has not been confirmed.
+
+## Sound names
+
+The sound resref names a WAV file without its extension, compared without regard to case. The 32,853 entries with a sound resolve as described in the table below.
+
+| Where the sound is found                                                       | Entries |
+| ------------------------------------------------------------------------------ | ------- |
+| A file in `streamwaves/`, `streamsounds/` or `streammusic/`                    | 20,320  |
+| Only a WAV resource (type 4) in `data/sounds.bif`, for example `cs_footsteps`  | 5       |
+| Nowhere: not in the stream folders, the KEY file, the RIM files or `patch.erf` | 12,528  |
+
+Another 647 entries name a sound that exists both in `data/sounds.bif` and in `streamsounds/`, such as `p_bastila_bat1`. They are counted in the first row.
+
+Most names without a file are player replies. Voiced lines start with `n`, for example `nglobeband01000_`. A player reply starts with `_` in the same position, for example `_m35aabast06535_`, and has no sound file because the player character is not voiced. The evidence comes from the 1,135 dialog (DLG) files in `assets/modules`. Their NPC lines (EntryList) name 17,343 distinct entries whose sound starts with `n` and 1 whose sound starts with `_`. Their player replies (ReplyList) name 7,439 distinct entries whose sound starts with `_` and none whose sound starts with `n`. Of the 10,065 entries whose sound starts with `_`, only one has a file. The remaining 2,464 names without a file mostly start with `n` (2,351), and include `move2` and `droid2`. Why these files are missing is UNKNOWN.
+
+## Conversion and verification
+
+The `tlk` stage of `cmd/convert` writes `assets/dialog.tlk.json`. It is an object with "language", the u32 at header offset 0x08, and "entries", one object per entry in file order. Each entry has "strref", its number; "flags"; "sound"; and "text". The sound and the text are empty strings when the entry has none. The form leaves out the three unknown fields and the text offsets, so `ReadTlk` rejects a file in which an unknown field is not 0 or an entry without text has an offset other than 0. The example below shows the start of the file.
+
+```json
+{
+	"language": 0,
+	"entries": [
+		{
+			"strref": 0,
+			"flags": 7,
+			"sound": "",
+			"text": "Bad StrRef"
+		},
+```
+
+The parser passes on the only sample: `temp/reports/tlk.txt` reports 49,265 entries, 48,560 with text and 32,853 with a sound. The `tlk` stage of `cmd/verify` reads the JSON file with jq and builds the TLK file again from jq's output: the header, the entries with offsets in text order, and the texts encoded as Latin-1. The result equals `dialog.tlk` byte for byte, as `temp/reports/jq_tlk.txt` reports. A test in which one character of the text of entry 0 was altered made the check fail.
 
 # 3D models: MDL and MDX
 

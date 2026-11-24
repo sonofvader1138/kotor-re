@@ -89,7 +89,7 @@ var TgaGroups = []TgaGroup{
 }
 
 // reportOrder is the order in which RunStages prints the stage summaries.
-var reportOrder = []string{"models", "textures", "tga", "music", "sounds", "waves", "movies", "gui", "lips", "modules", "rims"}
+var reportOrder = []string{"models", "textures", "tga", "music", "sounds", "waves", "movies", "gui", "lips", "modules", "rims", "tlk"}
 
 // A resource reference (resref) is a resource name of at most 16 bytes, padded with NUL bytes.
 const ResrefLength = 16
