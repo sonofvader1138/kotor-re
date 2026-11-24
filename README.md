@@ -776,7 +776,7 @@ The `rims` stage of `cmd/extract` writes one folder `extracted/rims/<archive>/` 
 
 | Resource     | Output                         | Form                                                                                                                           |
 | ------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| MDL with MDX | `<resref>.obj`, `<resref>.mtl` | As for `data/models.bif` (see "3D models: MDL and MDX"). 151 models have no rendered geometry and are not written.             |
+| MDL with MDX | `<resref>.obj`, `<resref>.mtl`, `<resref>.json`, `<resref>.faces.csv` | As for `data/models.bif` (see "3D models: MDL and MDX"). 151 models have no rendered geometry and are not written.             |
 | WAV          | `<resref>.wav`                 | 16-bit PCM. PCM files are copied unchanged, and the four IMA ADPCM files are decoded.                                          |
 | 2DA          | `<resref>.2da.csv`             | CSV. The first line holds an empty cell and the column labels. Each further line holds the row label and the cells.            |
 | SSF          | `<resref>.ssf.json`            | JSON with an array `slots`. Each slot has `strref` (null when empty) and the `text` and `sound` of that entry in `dialog.tlk`. |
@@ -995,7 +995,7 @@ The parser passes on the only sample. The report `temp/reports/tlk.txt` lists 49
 
 # 3D models: MDL and MDX
 
-Each 3D model is stored as two resources with the same resref. The MDL resource (type 2002) holds the model's structure: a tree of nodes, some of which carry meshes. The MDX resource (type 3008) holds the vertex data for those meshes. The converter is `ConvertMdl` in `kotor/mdl.go`, which writes Wavefront OBJ files. The `models` stage of `cmd/extract` runs it on every model of the four BIF archives that hold models, and `cmd/mdl2obj` runs it on one model.
+Each 3D model is stored as two resources with the same resref. The MDL resource (type 2002) holds the model's structure: a tree of nodes, some of which carry meshes. The MDX resource (type 3008) holds the vertex data for those meshes. The converter is `ConvertMdl` in `kotor/mdl.go`, which writes Wavefront OBJ files, the decoded mesh headers as JSON and the face fields as CSV. The `models` stage of `cmd/extract` runs it on every model of the four BIF archives that hold models, and `cmd/mdl2obj` runs it on one model.
 
 Four BIF archives hold models. Each holds one MDX resource for every MDL resource and no other resources, except that `models.bif` also holds the walkmeshes (see "Walkmeshes: BWM"). The table below lists the archives, what their model names suggest they hold, and their counts.
 
@@ -1012,9 +1012,20 @@ Unless a statement names another archive, the field statistics in the tables bel
 
 All 2,832 models of the four archives pass the converter's checks. Every read stays inside the file, every face index refers to an existing vertex, and the vertex positions stored in the MDL match those stored in the MDX. In `models.bif` this was checked for all 11,248,282 vertices. In the other three archives it was checked for the 217,294 vertices of the rendered meshes, because the converter checks only the meshes it writes. Of the models of `models.bif`, 368 contain no meshes.
 
-The converter omits meshes whose render flag is 0 (see the mesh header). This removes 18,058 meshes: 14,055 in `models.bif`, 1,394 in `items.bif`, 737 in `party.bif` and 1,872 in `player.bif`. After this, 492 models have no meshes left and are not written, and 2,340 models are written. The 19 such models in `items.bif` are `i_null`, `w_null_001`, the laser bolts `w_laserfire` and `w_lfire_pb_*`, and six blaster models whose names end in `_006` or `_004`. Each archive becomes the folder `extracted/data/<archive>/`, which holds `<resref>.obj` and `<resref>.mtl` for each written model. Each OBJ file refers to its MTL file, which lists its textures (see "Conversion to model materials" in the texture section).
+The converter omits meshes whose render flag is 0 (see the mesh header). This removes 18,058 meshes: 14,055 in `models.bif`, 1,394 in `items.bif`, 737 in `party.bif` and 1,872 in `player.bif`. After this, 492 models have no meshes left and are not written, and 2,340 models are written. The 19 such models in `items.bif` are `i_null`, `w_null_001`, the laser bolts `w_laserfire` and `w_lfire_pb_*`, and six blaster models whose names end in `_006` or `_004`. Each archive becomes the folder `extracted/data/<archive>/`, which holds four files for each written model. The table below lists them.
+
+| File                  | Content                                                                                                                                        |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<resref>.obj`        | The rendered meshes, with positions in model coordinates and the first set of texture coordinates.                                             |
+| `<resref>.mtl`        | The textures of the OBJ file (see "Conversion to model materials" in the texture section).                                                    |
+| `<resref>.json`       | The decoded mesh header of every mesh, including the meshes that are not rendered, in the order of a depth-first walk of the node tree.        |
+| `<resref>.faces.csv`  | One row per face of each mesh in the OBJ file, in OBJ order: the mesh name, the face number within the mesh, the material and the three adjacent faces, with -1 for none. |
+
+The JSON file holds the fields described in the section "Mesh header" under these names: `kind` (`trimesh`, `aabb`, `lightsaber`, `dangly` or `skin`), `render`, `shadow`, `lightmapped`, `texture`, `lightmap`, `diffuse`, `ambient`, `transparency_hint`, `uv_scroll` (present only when the scroll flag is set), `bounds_min`, `bounds_max`, `radius`, `average_point`, `surface_area`, `vertex_count`, `face_count` and `vertex_components`. Fields whose meaning is UNKNOWN are not written. The face normal and plane distance are not written to the CSV file, because both follow from the vertices of the OBJ file (see "Face"). The faces of the non-rendered AABB meshes are not written either. Their materials are the same as those of the area walkmeshes, which are converted separately. The models of `rims/` and `patch.erf` are written in the same way.
 
 The OBJ files are verified with assimp, an independent model loader. `cmd/verify` imports each of the 2,340 model OBJ files and requires at least one mesh and the same face count as the file. All 2,340 pass, together with the 1,258 walkmesh OBJ files.
+
+The JSON and CSV files are verified against the source MDL. `cmd/verify` walks the node tree of the source on its own. It reads each JSON file with jq, an independent JSON processor, and compares every field with the source bytes. Floats must match bit for bit after rounding to f32. It reads each CSV file with Go's `encoding/csv` reader, builds the material and adjacent face bytes of each face again, and compares them with the source. All 2,340 JSON files and all 2,340 CSV files pass. The 88 models of `rims/` and the model of `patch.erf` pass the same checks. A pass means that the files hold the source values. It does not show that the meanings given to those values are correct.
 
 ## MDL file header
 
@@ -1072,7 +1083,10 @@ The known flag bits are listed below.
 | ---- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------- |
 | 0x01 | Set on every node                                               | Set on all 107,605 nodes. Its meaning is not known.                                                              | medium     |
 | 0x20 | The node has a mesh header directly after the node              | Meshes parse correctly in all 2,445 models.                                                                      | high       |
-| 0x40 | Probably a skinned mesh, that is, one deformed by several bones | Set on 649 nodes in 220 models, always together with 0x20. Most of these models are creatures, such as c_bantha. | low        |
+| 0x40 | Probably a skinned mesh, that is, one deformed by several bones | Set on 649 nodes in 220 models, always together with 0x20. Most of these models are creatures, such as c_bantha. Its mesh headers carry their own class addresses, and its vertex records are 32 bytes longer (see "Mesh header"). | medium     |
+| 0x100 | A mesh of a second subclass, probably a dangly mesh, which sways with movement | Set on 2,586 nodes, always together with 0x20. Its mesh headers carry their own class addresses. In all four archives 2,619 meshes have it. 2,433 of them are named "branchie" with an optional number and lie in the Kashyyyk rooms `m14aa` to `m14ad`, and the rest include tarps, wires, hair and hoods. The name is not verified. | low        |
+| 0x200 | A mesh with an AABB tree, which is a tree of axis-aligned bounding boxes used for collision | Each of its faces stores a row of `surfacemat.2da` as its material, and the materials equal those of the room's walkmesh (see "Face"). | medium     |
+| 0x800 | A lightsaber blade mesh                                         | Set on 64 nodes in `items.bif`, all in the 22 lightsaber models `w_lghtsbr_*`, `w_dblsbr_*` and `w_shortsbr_*`. These meshes have no MDX vertex records and no index list. | medium     |
 
 The flags take eight combinations in models.bif. The table below counts the nodes with each combination.
 
@@ -1083,48 +1097,113 @@ The flags take eight combinations in models.bif. The table below counts the node
 | 0x005 | 8,848  | 0x121 | 2,586  |
 | 0x011 | 1,954  | 0x221 | 1,102  |
 
-Bits 0x02, 0x04 and 0x10 never occur together with 0x20, so these nodes carry no mesh. Bits 0x100 and 0x200 occur only together with 0x20. Bit 0x200 probably marks the walkmesh node of a room model. Each of the 980 room models whose area walkmesh has faces has exactly one node with this bit, and that node's position is stored in the walkmesh header (see "Walkmeshes: BWM"). The names of these nodes vary, and 698 contain "walk", such as `walkmesh_12` and `01awalkmesh`, and the others have generic names such as `Object125`. The other 122 nodes with bit 0x200 are one each in 122 models that have no area walkmesh, such as the swoop race obstacles `m03mg_mgo01` to `m03mg_mgo22` and the rooms `m12ad_01a` to `m12ah_01a`. The meanings of bits 0x02, 0x04, 0x10 and 0x100 are UNKNOWN. The converter treats all nodes with 0x20 alike, and it does not read any additional data that the other bits may announce.
+Bits 0x02, 0x04 and 0x10 never occur together with 0x20, so these nodes carry no mesh. Bits 0x100 and 0x200 occur only together with 0x20. Bit 0x200 probably marks the walkmesh node of a room model. Each of the 980 room models whose area walkmesh has faces has exactly one node with this bit, and that node's position is stored in the walkmesh header (see "Walkmeshes: BWM"). The names of these nodes vary, and 698 contain "walk", such as `walkmesh_12` and `01awalkmesh`, and the others have generic names such as `Object125`. The other 122 nodes with bit 0x200 are one each in 122 models that have no area walkmesh, such as the swoop race obstacles `m03mg_mgo01` to `m03mg_mgo22` and the rooms `m12ad_01a` to `m12ah_01a`. The meanings of bits 0x02, 0x04 and 0x10 are UNKNOWN. The converter decodes the mesh header of every node with 0x20 and names its kind after bits 0x40, 0x100, 0x200 and 0x800. It does not read the additional data that follows the mesh header of skinned, dangly, AABB and lightsaber meshes, so the layout of that data is UNKNOWN.
 
 ## Mesh header
 
-A mesh header is a 332-byte structure. It follows a node that has the 0x20 flag set.
+A mesh header is a 332-byte (0x14C) structure. It follows each node that has the 0x20 flag set. It holds the mesh's array descriptors, its bounding volume, its material values and texture names, and the layout of its MDX vertex records.
 
-| Offset | Type     | Meaning                                                                            | Evidence                                                                                                | Confidence |
-| ------ | -------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x08   | u32      | Offset of the face array                                                           | Face normals match the vertices (see the face table).                                                   | high       |
-| 0x0C   | u32      | Number of faces                                                                    | Face normals match the vertices (see the face table).                                                   | high       |
-| 0x58   | char[32] | Name of the texture                                                                | Contains texture names such as PLC_SithFlag.                                                            | high       |
-| 0xFC   | u32      | Size of one vertex record in the MDX file                                          | MDX positions match MDL positions for every vertex.                                                     | high       |
-| 0x100  | u32      | Bit field describing the vertex record                                             | The value 0x23 appears with position, normal and texture coordinates present. Its bits are not decoded. | low        |
-| 0x104  | u32      | Offset of the position within a vertex record                                      | MDX positions match MDL positions for every vertex.                                                     | high       |
-| 0x108  | u32      | Offset of the normal within a vertex record, or 0xFFFFFFFF if absent               | Face orientation agrees with these normals in the c_bantha meshes.                                      | medium     |
-| 0x110  | u32      | Offset of the texture coordinates within a vertex record, or 0xFFFFFFFF if absent  | Textured models display plausible coordinates.                                                          | medium     |
-| 0x130  | u16      | Number of vertices                                                                 | Every face index is below this value.                                                                   | high       |
-| 0x139  | u8       | Render flag: 1 if the game draws the mesh, 0 if not                                | See below.                                                                                              | medium     |
-| 0x144  | u32      | Offset of this mesh's vertex records in the MDX file                               | MDX positions match MDL positions for every vertex.                                                     | high       |
-| 0x148  | u32      | Offset of the vertex positions in the MDL file. Each position is three f32 values. | MDX positions match MDL positions for every vertex.                                                     | high       |
+The statistics in this section and in "Face" cover all four BIF archives: 76,782 meshes in 2,832 models. Of these, 15 meshes have no vertices and no faces. Several fields are array descriptors, each of which consists of three u32 values: an offset, a count and a capacity. The count equals the capacity in all four descriptors of all 76,782 meshes.
 
-The render flag at 0x139 is 0 or 1 in all 71,568 meshes. Of the 57,513 meshes with the value 1, 56,359 have a texture. Of the 14,055 meshes with the value 0, 13,381 have no texture. Most meshes with the value 0 are named with the suffix "\_g" or are walkmeshes and boxes; these look like helper geometry for animation and collision. Rendering one head model (p_bastilah) with and without these meshes shows untextured plates over the face when they are included. The flag has not been tested in the game itself.
+The first two words identify the class of the mesh. They take one of three pairs of values, and each pair goes with node flags as the table below shows. The values lie in the address range of the game executable, like the constants of the model header.
 
-The remaining bytes of the mesh header are UNKNOWN.
+| Words at 0x00 and 0x04   | Node flags                      | Meshes | Class                   |
+| ------------------------ | ------------------------------- | ------ | ----------------------- |
+| 0x00405750, 0x00405760   | 0x021, 0x221 (AABB), 0x821 (lightsaber) | 73,195 | Plain triangle mesh |
+| 0x00405740, 0x00405730   | 0x121                           | 2,619  | Dangly mesh             |
+| 0x00405710, 0x00405720   | 0x061                           | 968    | Skinned mesh            |
+
+The table below lists the fields of the mesh header.
+
+| Offset | Type     | Meaning | Evidence | Confidence |
+| ------ | -------- | ------- | -------- | ---------- |
+| 0x00   | u32[2]   | Class addresses | See the table above. True in all 76,782 meshes. | high |
+| 0x08   | u32[3]   | Face array descriptor | Face normals and plane distances match the vertices (see "Face"). | high |
+| 0x14   | f32[3]   | Bounding box minimum | See below. | high |
+| 0x20   | f32[3]   | Bounding box maximum | See below. | high |
+| 0x2C   | f32      | Radius of a bounding sphere around the average point | Equals the largest distance of a vertex from the point at 0x30 within 0.001 in 76,692 of the 76,767 meshes with vertices. | high |
+| 0x30   | f32[3]   | Average point, probably the centre of the bounding sphere | Lies inside the bounding box in 76,765 of 76,767 meshes. It equals the mean of the vertices in 31,096 meshes and the area-weighted centroid of the faces in 14,880, so how it is computed is UNKNOWN. | medium |
+| 0x3C   | f32[3]   | Probably the diffuse colour, as red, green and blue | Every component lies from 0 to 1 in all 76,767 meshes with vertices. Only 78 distinct colours occur. The most common are (1, 1, 1) in 56,909 meshes and (0.8, 0.8, 0.8) in 8,815. | low |
+| 0x48   | f32[3]   | Probably the ambient colour, as red, green and blue | Every component lies from 0 to 1 in all 76,767 meshes with vertices. The value (0.2, 0.2, 0.2) occurs in exactly the 8,815 meshes whose diffuse colour is (0.8, 0.8, 0.8). | low |
+| 0x54   | u32      | Probably a transparency hint | 0 in 76,110 meshes. The value 1 occurs in 483 meshes, whose textures are mostly named after leaves, plants, nets and grates, such as `lka_leaf03`, `lka_plant02` and `lts_grate01`. The value 7 occurs in 111 meshes, all with the texture `lkofx_clouds`. The values 2, 3, 4, 5, 8 and 13 occur in 78 meshes in total. | low |
+| 0x58   | char[32] | Texture name, or "NULL" or empty for none | Contains texture names such as PLC_SithFlag. In 72,862 meshes the bytes after the terminating NUL byte are not zero, so a reader must stop at the first NUL byte. | high |
+| 0x78   | char[32] | Lightmap texture name, or empty for none | Set in 41,554 meshes. 39,243 of these names contain `_lm`, and 39,198 name an image that was converted to `extracted`. It is set exactly when the second set of texture coordinates is present. | high |
+| 0x98   | bytes[24] | UNKNOWN, always 0 | 0 in all meshes. These bytes may hold two further texture names of 12 bytes each, but no file uses them. | low |
+| 0xB0   | u32[3]   | Descriptor of the index count array | The count is 1 in 76,703 meshes and 0 in the 79 meshes without an index list. The offset points to one u32, which equals 3 × the face count in all 76,703 meshes. | high |
+| 0xBC   | u32[3]   | Descriptor of the index offset array | The offset points to one u32, which is the offset of a u16 list of vertex indices in the MDL. The list equals the vertex indices of the faces, in face order, in all 76,703 meshes. | high |
+| 0xC8   | u32[3]   | Descriptor of an array that holds a counter | See below. | medium |
+| 0xD4   | u32[2]   | UNKNOWN, 0xFFFFFFFF | Both are 0xFFFFFFFF in 76,767 meshes. In the 15 meshes without vertices the first word holds 0 or other values. | low |
+| 0xDC   | u32      | UNKNOWN, always 0 | 0 in all meshes. | low |
+| 0xE0   | u32      | UNKNOWN, usually 3 | 3 in 76,704 meshes. | low |
+| 0xE4   | u32      | UNKNOWN, usually 0 | 0 in 76,718 meshes. | low |
+| 0xE8   | u32      | Texture scroll flag | 1 in 191 meshes of 108 models and 0 in the others. The textures of these meshes are mostly named after clouds, water and waterfalls, such as `lkofx_clouds`, `lma_sea04` and `lma_waterfall`, which fits scrolling textures. | medium |
+| 0xEC   | f32[2]   | Texture scroll direction in u and v | In the meshes with the scroll flag, u lies from -0.006 to 0.03 and v from -0.05 to 0.1. Not tested in the game. | low |
+| 0xF4   | f32      | Probably the amount of jitter of the scrolling | Lies from 0.01 to 4 in the meshes with the scroll flag. Not tested in the game. | low |
+| 0xF8   | f32      | Probably the speed of the jitter | Lies from 0 to 1 in the meshes with the scroll flag. Not tested in the game. | low |
+| 0xFC   | u32      | Size of one vertex record in the MDX file | Equals the sum of the component sizes in all meshes with vertex components (see "MDX file"). | high |
+| 0x100  | u32      | Vertex component flags | Each bit goes with one of the component offsets that follow, as the table in "MDX file" shows. A bit is set exactly when its offset is not 0xFFFFFFFF, in all meshes. | high |
+| 0x104  | u32      | Offset of the position within a vertex record | MDX positions match MDL positions for every vertex. | high |
+| 0x108  | u32      | Offset of the normal within a vertex record, or 0xFFFFFFFF | 76,064 of 76,703 meshes whose first five normals were tested hold normals of unit length. | high |
+| 0x10C  | u32      | UNKNOWN, always 0xFFFFFFFF | Probably the offset of a vertex colour, which no file uses. | low |
+| 0x110  | u32      | Offset of the first texture coordinates within a vertex record, or 0xFFFFFFFF | Textured models display plausible coordinates. | medium |
+| 0x114  | u32      | Offset of the second texture coordinates within a vertex record, or 0xFFFFFFFF | Present in 41,554 meshes, exactly the meshes with a lightmap name. These are probably the lightmap coordinates. | medium |
+| 0x118  | u32[2]   | UNKNOWN, always 0xFFFFFFFF | Probably the offsets of a third and fourth set of texture coordinates, which no file uses. | low |
+| 0x120  | u32      | Offset of the tangent space within a vertex record, or 0xFFFFFFFF | Present in 4,914 meshes. The component is 36 bytes long, which fits three f32[3] vectors. Its content is not tested. | low |
+| 0x124  | u32[3]   | UNKNOWN, always 0xFFFFFFFF | 0xFFFFFFFF in all meshes. | low |
+| 0x130  | u16      | Number of vertices | Every face index is below this value. | high |
+| 0x132  | u16      | Number of texture coordinate sets | Equals the number of present texture coordinate offsets in all meshes except the 64 lightsaber meshes, which hold 1 without any. | high |
+| 0x134  | u8       | Lightmap flag | 1 in 41,555 meshes. All of them have a lightmap name except one. | high |
+| 0x135  | u8[2]    | UNKNOWN, always 0 | 0 in all meshes. | low |
+| 0x137  | u8       | Probably the shadow flag | 1 in 11,373 meshes. Of these, 7,942 are not rendered, and 7,668 of those also have no texture. Most of the meshes that are not rendered are body-part helper meshes such as `head_g`, `pelvis_g` and `neck_g`. These may be the geometry that casts the shadow of a creature. Not tested in the game. | low |
+| 0x138  | u8       | UNKNOWN, always 0 | 0 in all meshes. | low |
+| 0x139  | u8       | Render flag: 1 if the game draws the mesh, 0 if not | See below. | medium |
+| 0x13A  | u8[2]    | UNKNOWN, probably padding | The values vary without a pattern. The value 0 occurs in 31,206 meshes at 0x13A and in 48,213 meshes at 0x13B. | low |
+| 0x13C  | f32      | Surface area | Equals the sum of the face areas in all 73,131 plain and AABB meshes, within 0.1% or, for areas below 1, within 0.001. It is 0 in all 3,651 lightsaber, dangly and skinned meshes. | high |
+| 0x140  | u32      | UNKNOWN, always 0 | 0 in all meshes. | low |
+| 0x144  | u32      | Offset of this mesh's vertex records in the MDX file | MDX positions match MDL positions for every vertex. | high |
+| 0x148  | u32      | Offset of the vertex positions in the MDL file. Each position is three f32 values. | MDX positions match MDL positions for every vertex. | high |
+
+The bounding box encloses the vertices and the origin of the node. In 76,662 of the 76,767 meshes with vertices it is exactly the smallest box around both, and in the other 105 it is larger. Because it includes the origin, it is larger than the box around the vertices alone in 39,855 meshes.
+
+The 79 meshes without an index list are the 64 lightsaber meshes and the 15 meshes without vertices. In those 15 meshes the vertex record size and several offsets are 0xFFFFFFFF.
+
+The counter array at 0xC8 holds one u32 counter. Its values are distinct within each model. Taken in node-number order, the counters of the model with the most meshes, `m03mg_01a`, run 98, 97, … 0, then 100, then 199, 198, … 101, then 200, then 399, and so on. Every counter of every model is a value of that sequence. The values are not a function of the mesh's rank alone, and the purpose of the counter is UNKNOWN.
+
+The render flag at 0x139 is 0 or 1 in all 71,568 meshes of `models.bif`. Of the 57,513 meshes with the value 1, 56,359 have a texture. Of the 14,055 meshes with the value 0, 13,381 have no texture. Most meshes with the value 0 are named with the suffix "\_g" or are walkmeshes and boxes. These look like helper geometry for animation and collision. Rendering one head model (p_bastilah) with and without these meshes shows untextured plates over the face when they are included. The flag has not been tested in the game itself.
 
 ## Face
 
-A face is a 32-byte structure that describes one triangle.
+A face is a 32-byte structure that describes one triangle. The table below lists its fields.
 
-| Offset | Type   | Meaning                            | Evidence                                                                | Confidence |
-| ------ | ------ | ---------------------------------- | ----------------------------------------------------------------------- | ---------- |
-| 0x00   | f32[3] | Face normal                        | Agrees with the vertex order for 5,409,908 of 5,412,520 faces (99.95%). | high       |
-| 0x0C   | f32    | UNKNOWN, likely the plane distance | Not tested.                                                             | low        |
-| 0x10   | u32    | UNKNOWN, likely a surface material | Not tested.                                                             | low        |
-| 0x14   | u16[3] | UNKNOWN, likely adjacent faces     | Not tested.                                                             | low        |
-| 0x1A   | u16[3] | Vertex indices                     | Every index is below the vertex count.                                  | high       |
+| Offset | Type   | Meaning | Evidence | Confidence |
+| ------ | ------ | ------- | -------- | ---------- |
+| 0x00   | f32[3] | Face normal | Agrees with the vertex order for 5,708,907 of the 5,712,287 faces that are not degenerate (99.94%). All 768 faces of the 64 lightsaber meshes hold (0, 0, 0). | high |
+| 0x0C   | f32    | Plane distance | See below. | high |
+| 0x10   | u32    | Material. In AABB meshes it is a row of `surfacemat.2da`. In other meshes its meaning is UNKNOWN. | See below. | high for AABB meshes, otherwise low |
+| 0x14   | u16[3] | Adjacent faces, or 0xFFFF for none | See below. | high |
+| 0x1A   | u16[3] | Vertex indices | Every index is below the vertex count. | high |
 
-The cause of the 2,612 faces whose normal disagrees with the vertex order is not known.
+The plane distance d satisfies n · v0 + d = 0 within 0.001, where n is the face normal and v0 the first vertex of the face. This holds for 5,706,624 of 5,719,372 faces (99.78%). The exceptions are 244 faces of the lightsaber meshes, whose normals are 0, and 12,503 faces in 30 models, of which 11,516 lie in `m18ab_04a`.
+
+The material of a face in an AABB mesh is a row of `surfacemat.2da`, as in the walkmesh files. In all 980 room models with an area walkmesh with faces, the AABB mesh has as many faces as the walkmesh, and the two hold the same materials, counted per value. The order of the faces differs in 865 of the 980 rooms, because the walkmesh stores its walkable faces first. In the other meshes the value is 1 in 2,597,150 faces, and the values 2 to 6 are also common. Values such as 251, 501 and 751 also occur, and they are not rows of `surfacemat.2da`, which has rows 0 to 30. Its meaning outside AABB meshes is UNKNOWN.
+
+Adjacent face e shares the edge from vertex e to vertex e + 1 (mod 3) of the face. Edges are compared by vertex position, not by vertex index. Compared by index, far fewer adjacent faces share the edge, probably because meshes repeat a vertex at texture seams. Of the 14,769,224 adjacent faces that lie inside the face array, 14,691,025 (99.47%) share that edge. A further 1,135 adjacent faces lie outside the face array, and all of them are in lightsaber meshes. Of the edges with the value 0xFFFF, 93.7% have no other face at the same position, according to a scratch check in Python. Why the other 6.3% have no adjacent face is UNKNOWN.
 
 ## MDX file
 
-An MDX file has no header. It is an array of vertex records, each built from f32 values. The mesh header in the MDL file gives the record size and the position of each component within a record. The MDX resources of 368 models are empty, for example those of v_polymorf_imp and m12ah_mgt04. These are exactly the 368 models that contain no meshes.
+An MDX file has no header. It is an array of vertex records, each built from f32 values. Each mesh's records start at the offset given at 0x144 of its mesh header and are as long as the size at 0xFC. The vertex component flags at 0x100 name the components of a record. The table below lists the known components, the offset in the mesh header that gives their position within a record, and their sizes.
+
+| Bit  | Component                       | Offset in the mesh header | Size in bytes | Meshes |
+| ---- | ------------------------------- | ------------------------- | ------------- | ------ |
+| 0x01 | Position, f32[3]                | 0x104                     | 12            | 76,703 |
+| 0x20 | Normal, f32[3]                  | 0x108                     | 12            | 76,703 |
+| 0x02 | First texture coordinates, f32[2] | 0x110                   | 8             | 63,199 |
+| 0x04 | Second texture coordinates, f32[2] | 0x114                  | 8             | 41,554 |
+| 0x80 | Tangent space, probably f32[9]  | 0x120                     | 36            | 4,914  |
+
+In all meshes the components lie in the order position, normal, first and second texture coordinates, tangent space. The record size equals the sum of the component sizes, plus 32 bytes in the 968 skinned meshes. The skinned mesh data that follows the mesh header probably describes these 32 bytes, which may hold four bone weights and four bone indices, but this is not verified. The lightsaber meshes and the meshes without vertices have no components.
+
+The MDX resources of 368 models are empty, for example those of v_polymorf_imp and m12ah_mgt04. These are exactly the 368 models that contain no meshes.
 
 ## Walkmeshes in models.bif
 
@@ -1602,7 +1681,7 @@ The table below lists the contents by resource type.
 | GUI layout (2047)      | 7         | 5 have the name of a `gui.bif` layout, and 2 are new.      | `<resref>.json`                             |
 | TPC texture (3007)     | 84        | 75 have the name of a texture pack texture, and 9 are new. | `<resref>.png`, and `<resref>.txi` for 9    |
 | 2DA table (2017)       | 4         | All 4 have the name of a `2da.bif` table.                  | `<resref>.2da.csv`                          |
-| MDL model (2002)       | 1         | Has the name of an `items.bif` model.                      | `w_lghtsbr_008.obj` and `w_lghtsbr_008.mtl` |
+| MDL model (2002)       | 1         | Has the name of an `items.bif` model.                      | `w_lghtsbr_008.obj`, `.mtl`, `.json` and `.faces.csv` |
 | MDX vertex data (3008) | 1         | Byte-for-byte identical to the `items.bif` copy.           | Used for the model, not written on its own  |
 
 The GUI layouts are described in "Resources in patch.erf" in the GUI section. Every resource of the other types has a different content from its namesake, except the MDX resource. The differences are described below.

@@ -99,9 +99,17 @@ func writeModel(out, label, resref string, mdl, mdx []byte, texturePath map[stri
 		}
 	}
 
+	text, err := json.MarshalIndent(map[string][]kotor.MdlMesh{"meshes": model.Meshes}, "", "\t")
+	if err != nil {
+		kotor.Fatal(err.Error())
+	}
+
 	kotor.WriteFile(filepath.Join(out, resref+".obj"), []byte(model.Obj))
 	kotor.WriteFile(filepath.Join(out, resref+".mtl"), []byte(strings.Join(mtl, "\n")+"\n"))
-	return kotor.ReportMdl(label, model), []string{resref + ".obj", resref + ".mtl"}
+	kotor.WriteFile(filepath.Join(out, resref+".json"), append(text, '\n'))
+	kotor.WriteFile(filepath.Join(out, resref+".faces.csv"), []byte(model.FacesCsv))
+	files := []string{resref + ".obj", resref + ".mtl", resref + ".json", resref + ".faces.csv"}
+	return kotor.ReportMdl(label, model), files
 }
 
 func noteModels(summary *kotor.Summary, stage string, counts *modelCounts) {
@@ -116,9 +124,10 @@ func noteModels(summary *kotor.Summary, stage string, counts *modelCounts) {
 		fmt.Sprintf("%s: model textures not found: %d (%s)", stage, len(missingNames), strings.Join(missingNames, " ")))
 }
 
-// Models: data/<archive>.bif -> extracted/data/<archive>/*.obj + *.mtl (passing, with geometry), one folder per
-// archive in kotor.ModelBifs. The walkmeshes of an archive become <resref>.<wok|dwk|pwk>.obj + .json in the
-// same folder, with walkmesh.mtl. Only models.bif holds walkmeshes.
+// Models: data/<archive>.bif -> extracted/data/<archive>/*.obj + *.mtl + *.json + *.faces.csv (passing, with
+// geometry), one folder per archive in kotor.ModelBifs. The JSON file holds the decoded mesh headers and the CSV
+// file the face fields of the meshes in the OBJ file. The walkmeshes of an archive become
+// <resref>.<wok|dwk|pwk>.obj + .json in the same folder, with walkmesh.mtl. Only models.bif holds walkmeshes.
 func convertModels(summary *kotor.Summary) {
 	fmt.Println("models...")
 	texturePath := texturePaths()
@@ -176,7 +185,7 @@ func convertModels(summary *kotor.Summary) {
 			written[walkmeshMtl] = true
 		}
 
-		prune(out, written, []string{".obj", ".mtl", ".json"})
+		prune(out, written, []string{".obj", ".mtl", ".json", ".csv"})
 	}
 
 	summary.Tally("models", report)
