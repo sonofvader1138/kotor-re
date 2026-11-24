@@ -116,57 +116,69 @@ func noteModels(summary *kotor.Summary, stage string, counts *modelCounts) {
 		fmt.Sprintf("%s: model textures not found: %d (%s)", stage, len(missingNames), strings.Join(missingNames, " ")))
 }
 
-// Models: data/models.bif -> extracted/data/models/*.obj + *.mtl (passing, with geometry), and the walkmeshes
-// of the same archive -> extracted/data/models/<resref>.<wok|dwk|pwk>.obj + .json and walkmesh.mtl
+// Models: data/<archive>.bif -> extracted/data/<archive>/*.obj + *.mtl (passing, with geometry), one folder per
+// archive in kotor.ModelBifs. The walkmeshes of an archive become <resref>.<wok|dwk|pwk>.obj + .json in the
+// same folder, with walkmesh.mtl. Only models.bif holds walkmeshes.
 func convertModels(summary *kotor.Summary) {
 	fmt.Println("models...")
-	out := filepath.Join(kotor.Extracted, "data", "models")
-	kotor.MakeDir(out)
-
 	texturePath := texturePaths()
-	resources := kotor.BifResources("data/models.bif", kotor.ReadKey())
-	mdx := map[string][]byte{}
-	for _, resource := range resources {
-		if resource.Ext == "mdx" {
-			mdx[resource.Resref] = resource.Data
-		}
-	}
+	materials := surfaceMaterials()
+	key := kotor.ReadKey()
 
 	var report []string
 	var walkmeshReport []string
-	written := map[string]bool{walkmeshMtl: true}
 	counts := &modelCounts{missing: map[string]bool{}}
-	materials := surfaceMaterials()
 	walkmeshes := map[string]int{}
-	for _, resource := range resources {
-		var line string
-		var files []string
-		switch resource.Ext {
-		case "mdl":
-			line, files = writeModel(out, resource.Resref, resource.Resref, resource.Data, mdx[resource.Resref], texturePath, counts)
-			report = append(report, line)
+	for _, name := range kotor.ModelBifs {
+		out := filepath.Join(kotor.Extracted, "data", name)
+		kotor.MakeDir(out)
 
-		case "wok", "dwk", "pwk":
-			line, files = writeWalkmesh(out, resource, materials)
-			walkmeshReport = append(walkmeshReport, line)
-			if files == nil {
-				walkmeshes["empty "+resource.Ext]++
+		resources := kotor.BifResources("data/"+name+".bif", key)
+		mdx := map[string][]byte{}
+		for _, resource := range resources {
+			if resource.Ext == "mdx" {
+				mdx[resource.Resref] = resource.Data
 			}
 		}
 
-		for _, file := range files {
-			written[file] = true
+		written := map[string]bool{}
+		hasWalkmesh := false
+		for _, resource := range resources {
+			label := name + "/" + resource.Resref + "." + resource.Ext
+			var line string
+			var files []string
+			switch resource.Ext {
+			case "mdl":
+				line, files = writeModel(out, label, resource.Resref, resource.Data, mdx[resource.Resref], texturePath, counts)
+				report = append(report, line)
+
+			case "wok", "dwk", "pwk":
+				hasWalkmesh = true
+				line, files = writeWalkmesh(out, resource, materials)
+				walkmeshReport = append(walkmeshReport, line)
+				if files == nil {
+					walkmeshes["empty "+resource.Ext]++
+				}
+			}
+
+			for _, file := range files {
+				written[file] = true
+			}
 		}
+
+		if hasWalkmesh {
+			mtl := []string{"# surface materials of the walkmeshes, from surfacemat.2da"}
+			for _, material := range materials {
+				red, green, blue := material.color()
+				mtl = append(mtl, "", "newmtl "+material.name, fmt.Sprintf("Kd %.6f %.6f %.6f", red, green, blue))
+			}
+			kotor.WriteFile(filepath.Join(out, walkmeshMtl), []byte(strings.Join(mtl, "\n")+"\n"))
+			written[walkmeshMtl] = true
+		}
+
+		prune(out, written, []string{".obj", ".mtl", ".json"})
 	}
 
-	mtl := []string{"# surface materials of the walkmeshes, from surfacemat.2da"}
-	for _, material := range materials {
-		red, green, blue := material.color()
-		mtl = append(mtl, "", "newmtl "+material.name, fmt.Sprintf("Kd %.6f %.6f %.6f", red, green, blue))
-	}
-	kotor.WriteFile(filepath.Join(out, walkmeshMtl), []byte(strings.Join(mtl, "\n")+"\n"))
-
-	prune(out, written, []string{".obj", ".mtl", ".json"})
 	summary.Tally("models", report)
 	noteModels(summary, "models", counts)
 	summary.Tally("walkmeshes", walkmeshReport)

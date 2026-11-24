@@ -238,7 +238,8 @@ func assimpObj(dir, file string) []string {
 	return line(fmt.Sprintf("%s meshes=%s faces=%s %s", file, meshes[1], loaded[1], kotor.Verdict(errs...)))
 }
 
-// Models: extracted/data/models/*.obj
+// Models: extracted/data/<archive>/*.obj for each archive in kotor.ModelBifs, and the walkmesh JSON files of
+// the same folders.
 func models(summary *kotor.Summary) {
 	if !kotor.Has("assimp") {
 		summary.Note("assimp missing: models UNVERIFIED")
@@ -246,28 +247,32 @@ func models(summary *kotor.Summary) {
 	}
 
 	log("models...")
-	dir := filepath.Join(kotor.Extracted, "data", "models")
+	data := filepath.Join(kotor.Extracted, "data")
+	key := kotor.ReadKey()
 	var jobs []job
-	for _, file := range kotor.ListFiles(dir, ".obj", false) {
-		jobs = append(jobs, func() []string { return assimpObj(dir, file) })
+	var walkmeshJobs []job
+	for _, name := range kotor.ModelBifs {
+		for _, file := range kotor.ListFiles(filepath.Join(data, name), ".obj", false) {
+			jobs = append(jobs, func() []string { return assimpObj(data, filepath.Join(name, file)) })
+		}
+
+		for _, resource := range kotor.BifResources("data/"+name+".bif", key) {
+			if resource.Ext != "wok" && resource.Ext != "dwk" && resource.Ext != "pwk" {
+				continue
+			}
+			file := filepath.Join(name, resource.Resref+"."+resource.Ext+".json")
+			path := filepath.Join(data, file)
+			if !exists(path) {
+				continue
+			}
+			walkmeshJobs = append(walkmeshJobs, func() []string {
+				return line(file + " " + kotor.Verdict(checkWalkmeshJson(path, resource.Data)))
+			})
+		}
 	}
 	summary.Tally("assimp_models", pool(jobs))
 
 	log("walkmeshes...")
-	var walkmeshJobs []job
-	for _, resource := range kotor.BifResources("data/models.bif", kotor.ReadKey()) {
-		if resource.Ext != "wok" && resource.Ext != "dwk" && resource.Ext != "pwk" {
-			continue
-		}
-		name := resource.Resref + "." + resource.Ext + ".json"
-		path := filepath.Join(dir, name)
-		if !exists(path) {
-			continue
-		}
-		walkmeshJobs = append(walkmeshJobs, func() []string {
-			return line(name + " " + kotor.Verdict(checkWalkmeshJson(path, resource.Data)))
-		})
-	}
 	summary.Tally("jq_walkmeshes", pool(walkmeshJobs))
 }
 

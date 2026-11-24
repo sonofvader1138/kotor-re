@@ -108,6 +108,9 @@ type TgaGroup struct {
 	Pattern *regexp.Regexp
 }
 
+// ModelBifs lists the BIF archives that hold models. Each archive becomes the folder extracted/data/<name>.
+var ModelBifs = []string{"models", "items", "party", "player"}
+
 // ResourceBifs lists the BIF archives whose resources are converted one by one, without models: tables,
 // sounds, scripts, templates, the journal and the room layouts. Each archive becomes the folder
 // extracted/data/<name>.
