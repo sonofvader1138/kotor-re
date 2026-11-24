@@ -359,7 +359,8 @@ func convertTga(summary *kotor.Summary) {
 }
 
 // Stream audio: streammusic/*.wav, streamsounds/*.wav and streamwaves/**/*.wav -> assets/<folder>/**/*.mp3 | *.wav (PCM).
-// All three folders use the layouts that kotor.UnwrapAudio detects. kotor.DecodeAdpcm copies PCM unchanged.
+// All three folders use the layouts that kotor.UnwrapAudio detects. kotor.DecodeAdpcm copies 16-bit PCM
+// unchanged.
 // streamwaves has one subfolder per module and dialog, which the output keeps.
 func convertAudio(summary *kotor.Summary, stage, folder string) {
 	fmt.Printf("%s...\n", stage)
@@ -604,7 +605,7 @@ func dialogTlk() *kotor.Tlk {
 // gffFile converts a GFF resource to the JSON form of gffJson and returns the text, notes for the report
 // line and an error text. The file type must match the resource extension, except for the extension "res",
 // which saved games use for GFF files of several file types. The version must be V3.2. Unreferenced bytes
-// are noted, not rejected, because 29 module files have them.
+// are noted, not rejected, because 29 module files and 5 template files have them.
 func gffFile(data []byte, ext string, tlk *kotor.Tlk) ([]byte, string, string) {
 	gff, problem := kotor.ReadGff(data)
 	typeMatches := ext == "res" || gff != nil && gff.FileType == fmt.Sprintf("%-4s", strings.ToUpper(ext))
@@ -965,8 +966,8 @@ func convertRims(summary *kotor.Summary) {
 	summary.Note(fmt.Sprintf("rims: MDX data without a model, not converted: %d (%s)", len(orphans), strings.Join(orphans, " ")))
 }
 
-// Bifs: data/<archive>.bif -> assets/data/<archive>/, one folder per archive in kotor.ResourceBifs. Each resource
-// is converted by writeResource.
+// Bifs: data/<archive>.bif -> assets/data/<archive>/, one folder per archive in kotor.ResourceBifs. Each
+// resource is converted by writeResource.
 func convertBifs(summary *kotor.Summary) {
 	fmt.Println("bifs...")
 	inputs := newResourceInputs()

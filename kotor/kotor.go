@@ -1,5 +1,7 @@
-// Package kotor holds the readers and converters for the game's file formats (KEY, BIF, ERF, RIM, GFF, TPC, TGA, MDL,
-// LIP, LTR, stream audio, IMA ADPCM and Bink), a minimal PNG encoder, the project paths, and helpers that every command uses.
+// Package kotor holds the readers and converters for the game's file formats, a minimal PNG encoder, the project
+// paths, and helpers that every command uses. The formats are the archives (KEY, BIF, ERF and RIM), GFF, TLK, 2DA,
+// SSF, LTR, NCS, TPC, TGA, MDL, BWM, LYT, VIS, LIP, the saved game variables, stream audio, IMA ADPCM and Bink.
+// FILE_FORMATS.md describes each layout.
 package kotor
 
 import (
@@ -256,7 +258,7 @@ func CString(data []byte) string {
 	return Latin1(data)
 }
 
-// Slice returns data[start:end] with both bounds clamped to the data, like Buffer.subarray.
+// Slice returns data[start:end] with both bounds clamped to the data.
 func Slice(data []byte, start, end int) []byte {
 	end = min(max(end, 0), len(data))
 	start = min(max(start, 0), end)
@@ -283,10 +285,11 @@ type Key struct {
 	Keys []KeyEntry
 }
 
-// ReadKey reads chitin.key.
-// KEY: header 8 magic, u32 bifCount, keyCount, bifTableOff, keyTableOff.
-// Bif entry 12 bytes: u32 size, u32 nameOff, u16 nameLen, u16 drives.
-// Key entry 22 bytes: char[16] resref, u16 type, u32 id (bif << 20 | index).
+// ReadKey reads chitin.key. The header holds the 8-byte signature and four u32 values: the number of BIF
+// archives, the number of resources, the offset of the BIF table and the offset of the resource table. A BIF
+// entry is 12 bytes: u32 file size, u32 name offset, u16 name length and a u16 of unknown meaning. A resource
+// entry is 22 bytes: a 16-byte resref, a u16 type and a u32 ID that holds the BIF index in its top 12 bits and
+// the entry index in its low 20 bits.
 func ReadKey() *Key {
 	file := filepath.Join(Game, "chitin.key")
 	data := ReadFile(file)
@@ -329,9 +332,9 @@ type BifEntry struct {
 	Type   uint32
 }
 
-// ReadBif reads a whole BIF archive and its variable resource table.
-// BIF: 8 magic, u32 varCount, u32 fixedCount, u32 tableOff.
-// Var entry 16 bytes: u32 id, u32 offset, u32 size, u32 type.
+// ReadBif reads a whole BIF archive and its variable resource table. The header holds the 8-byte signature,
+// the u32 number of variable resources, the u32 number of fixed resources (0 in every archive) and the u32
+// offset of the entry table. An entry is 16 bytes: u32 ID, u32 offset, u32 size and u32 type.
 func ReadBif(file string) ([]byte, []BifEntry) {
 	data := ReadFile(file)
 	if string(Slice(data, 0, signatureLength)) != bifSignature {
@@ -451,9 +454,11 @@ func ReadErf(path string) []ErfEntry {
 
 // ErfEntries reads the tables of an ERF V1.0 archive of the given size from file. name is used in error
 // messages. Each entry reads its resource on demand, since the texture packs are up to 400 MB. A saved
-// game nests one archive in another, so file can also be a bytes.Reader.
-// ERF V1.0: 160-byte header. 0x10 u32 entryCount, 0x18 u32 keyListOff, 0x1C u32 resListOff.
-// Key entry 24 bytes: char[16] resref, u32 id, u16 type, u16 unused. Resource entry 8 bytes: u32 offset, u32 size.
+// game nests one archive in another, so file can also be a bytes.Reader. The 160-byte header holds the
+// resource count at 0x10, the offset of the key table at 0x18 and the offset of the resource table at 0x1C.
+// A key entry is 24 bytes: a 16-byte resref, a u32 ID, a u16 type and a u16 that is always 0. A resource
+// entry is 8 bytes: u32 offset and u32 size. The signatures "HAK V1.0" and "SAV V1.0" are accepted as well,
+// although no file of the game uses them.
 func ErfEntries(file io.ReaderAt, fileSize int64, name string) []ErfEntry {
 	header := make([]byte, erfHeaderSize)
 	readAt(file, header, 0)
@@ -535,10 +540,11 @@ type Rim struct {
 }
 
 // ReadRim parses a RIM V1.0 archive and returns an error text when the file breaks any of the rules below.
-// RIM V1.0: 120-byte header. 0x08 u32 zero, 0x0C u32 entryCount, 0x10 u32 tableOff (120), 0x14 u32 flag,
-// 0x18 96 zero bytes. Entry 32 bytes: char[16] resref, u32 type, u32 id (= index), u32 offset, u32 size.
-// Strict: resources lie inside the file in table order, start on a multiple of 4, do not overlap, and every
-// byte between them and after the last one is zero.
+// The 120-byte header holds a u32 that is always 0 at 0x08, the resource count at 0x0C, the table offset
+// (always 120) at 0x10, the flag at 0x14, and 96 zero bytes from 0x18. An entry is 32 bytes: a 16-byte
+// resref, u32 type, u32 ID (equal to the entry's index), u32 offset and u32 size. The resources must lie
+// inside the file in table order, start on a multiple of 4 and not overlap, and every byte between them
+// and after the last one must be zero.
 func ReadRim(data []byte) (*Rim, string) {
 	if len(data) < rimHeaderSize || string(data[:signatureLength]) != rimSignature {
 		return nil, "not RIM V1.0"

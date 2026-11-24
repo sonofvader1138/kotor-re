@@ -1,6 +1,6 @@
 // This file converts IMA ADPCM WAV files (format 0x11) and 8-bit PCM WAV files to 16-bit PCM WAV. Other
-// formats are copied unchanged. As a check, it compares each block header's predictor with the last decoded sample of the
-// previous block.
+// formats are copied unchanged. As a check, it compares the predictor in each block header with the last
+// decoded sample of the previous block.
 
 package kotor
 

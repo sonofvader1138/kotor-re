@@ -1,8 +1,9 @@
 // This file reads TPC textures and decodes them to RGBA, 8 bits per channel. Layout: see FILE_FORMATS.md.
-// Header 128 bytes: u32 dataSize (0 = uncompressed), f32 alpha threshold, u16 width, u16 height,
-// u8 encoding, u8 mip count, zero padding. Pixel data for all mip levels follows. An optional
-// ASCII TXI (texture info) trailer fills the rest of the file.
-// Only the top mip level is decoded. Cube faces are stacked vertically; flipbook frames keep their grid.
+// The 128-byte header holds the u32 size of the top mip level (0 when uncompressed), an f32 of unknown
+// meaning between 0 and 1, the u16 width and height, the u8 encoding, the u8 mip count and zero padding.
+// Pixel data for all mip levels follows. An optional ASCII TXI (texture information) trailer fills the
+// rest of the file. Only the top mip level is decoded. Cube faces are stacked vertically, and flipbook
+// frames keep their grid.
 
 package kotor
 

@@ -10,7 +10,7 @@ import (
 	"re/kotor"
 )
 
-// A GFF file (GUI layouts and module resources) becomes JSON indented with tabs. Object keys keep the order of the fields in the file,
+// A GFF file becomes JSON indented with tabs. Object keys keep the order of the fields in the file,
 // and assigning an existing key keeps its position. NaN and infinities have no JSON form and become null.
 
 // orderedObject is a JSON object whose keys keep their insertion order.
@@ -68,10 +68,9 @@ func number(value float64, bitSize int) any {
 // kept as "__struct_type". Lists become arrays of objects, vectors become 3-element arrays and orientations
 // 4-element arrays, f32 values use the shortest decimal that round-trips as an f32, and 64-bit integers
 // are written exactly. Binary data becomes a lowercase hexadecimal string. A localized string becomes an
-// object with "strref", the string number
-// (null for 0xFFFFFFFF); "text", the string's text in dialog.tlk when the number names an entry with text;
-// and "substrings", when there are any, as objects with "id" and "text". unresolved counts the string
-// numbers that name no entry of dialog.tlk.
+// object with "strref", the string number (null for 0xFFFFFFFF); "text", the string's text in dialog.tlk
+// when the number names an entry with text; and "substrings", when there are any, as objects with "id" and
+// "text". unresolved counts the string numbers that name no entry of dialog.tlk.
 func gffJson(structValue *kotor.GffStructValue, tlk *kotor.Tlk, unresolved *int) *orderedObject {
 	object := &orderedObject{}
 	if structValue.StructType != 0 {
@@ -347,12 +346,12 @@ func globalsJson(globals *kotor.Globals) *orderedObject {
 }
 
 // walkmeshJson turns the parts of a walkmesh that an OBJ file cannot hold into an object with "type" (0 for
-// a door or placeable, 1 for an area room); "position", the walkmesh node's position in its model;
-// "relative_use" and "absolute_use", two points each; and "perimeters", one array per closed boundary loop of
-// the walkable faces. Each perimeter edge has "face", the face index in the OBJ file counted from 0; "edge",
-// 0 to 2, the edge from that face's vertex k to vertex (k + 1) mod 3; and "transition", the index of the
-// room in the area's layout that the edge leads to, or null. The AABB tree and the adjacency table can be
-// rebuilt from the faces and are left out.
+// a door or placeable, 1 for an area room); "position", which in an area walkmesh is the walkmesh node's
+// position in its model; "relative_use" and "absolute_use", two points each; and "perimeters", one array
+// per closed boundary loop of the walkable faces. Each perimeter edge has "face", the face index in the OBJ
+// file counted from 0; "edge", 0 to 2, the edge from that face's vertex k to vertex (k + 1) mod 3; and
+// "transition", the index of the room in the area's layout that the edge leads to, or null. The AABB tree
+// and the adjacency table can be rebuilt from the faces and are left out.
 func walkmeshJson(bwm *kotor.Bwm) *orderedObject {
 	vector := func(values [3]float64) []any {
 		return []any{number(values[0], 32), number(values[1], 32), number(values[2], 32)}

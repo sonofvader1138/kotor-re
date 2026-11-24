@@ -14,7 +14,7 @@
 // tga: ImageMagick's decoding of each PNG must equal its decoding of the source TGA, and pngcheck must
 // accept the PNG. Each TXI must equal the source bytes. Each room visibility list, read with jq, must build
 // again into its source text in canonical form (see checkVisJson).
-// music, sounds, waves: ffprobe must read each file without error.
+// music, sounds, waves: ffprobe must read each file without error. The samples are not compared.
 // movies: ffprobe must report the Bink file's size, frame count, sample rate, channel count and audio
 // duration (within 0.1 s; ffmpeg's Bink audio decoder emits about 0.03 s more than the packets declare),
 // and every output frame must have a PSNR of at least 40 dB against the decoded Bink frame.
@@ -772,7 +772,8 @@ var checkTools = []struct{ kind, program string }{
 // the converted file without the extensions that writeResource adds, and label is the same path relative
 // to the folder of the report. Models are not added here, because their OBJ files are checked by listing.
 //
-//   - A WAV file must be read by ffprobe as 16-bit PCM.
+//   - A WAV file must be read by ffprobe as 16-bit PCM, and its samples must match the source (see
+//     compareSamples).
 //   - A 2DA CSV file, read with Go's encoding/csv reader, must build again into the source table.
 //   - A script listing must assemble to the source script.
 //   - The string numbers of an SSF JSON file, read with jq, must build again into the source sound set.
@@ -1044,8 +1045,8 @@ func patch(summary *kotor.Summary) {
 	runResourceChecks(summary, "patch", jobs)
 }
 
-// Bifs: assets/data/<archive>/ against data/<archive>.bif for each archive in kotor.ResourceBifs. Each resource is
-// checked as addResourceChecks describes.
+// Bifs: assets/data/<archive>/ against data/<archive>.bif for each archive in kotor.ResourceBifs. Each
+// resource is checked as addResourceChecks describes.
 func bifs(summary *kotor.Summary) {
 	log("bifs...")
 	key := kotor.ReadKey()

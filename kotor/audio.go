@@ -1,7 +1,8 @@
 // This file unwraps KotOR stream audio. Two layouts exist:
 //
-//	A: 58-byte fake WAV header (data size 0) + MP3   -> <name>.mp3
-//	B: MP3 stub frames + real RIFF WAV               -> <name>.wav (as stored; may be ADPCM)
+//	A: a 58-byte fake WAV header with data size 0, then an MP3 stream, which becomes <name>.mp3.
+//	B: three MP3 frames of silence, then a complete RIFF WAV file, which becomes <name>.wav. The WAV file is
+//	   returned as stored and may hold IMA ADPCM.
 //
 // The MP3 frame walk or RIFF chunk walk must consume the payload exactly.
 

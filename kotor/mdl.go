@@ -1,5 +1,5 @@
-// This file converts MDL + MDX models to Wavefront OBJ. Layout: see FILE_FORMATS.md. MDL offsets are
-// relative to file offset 12.
+// This file converts MDL models with their MDX vertex data to Wavefront OBJ. Layout: see FILE_FORMATS.md.
+// MDL offsets are relative to file offset 12.
 
 package kotor
 
@@ -96,8 +96,9 @@ type MdlResult struct {
 	Errors   []string
 }
 
-// ConvertMdl writes mtllib, when not empty, as the material library at the top of the OBJ.
-// Meshes whose render byte is 0 are skipped; the game does not appear to draw them.
+// ConvertMdl converts a model and returns the OBJ text, its statistics, its texture names and its errors.
+// When mtllib is not empty, the OBJ names it as its material library. Meshes whose render byte is 0 are
+// skipped, because the game does not appear to draw them.
 func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 	data := mdl[min(fileHeaderSize, len(mdl)):]
 	length := len(data)
@@ -232,7 +233,7 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 			world := qrot(rotation, vertex)
 			fmt.Fprintf(&out, "v %.6f %.6f %.6f\n", world[0]+position[0], world[1]+position[1], world[2]+position[2])
 
-			// vt for every vertex keeps v/vt indices aligned
+			// Every vertex gets a texture coordinate, so that vertex and texture coordinate indices agree.
 			u, v := 0.0, 0.0
 			if hasUv {
 				u = mdxFloat(mdxOffset + stride*i + uvOffset)
@@ -256,7 +257,7 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 				continue
 			}
 
-			// stored normal must match winding
+			// The stored face normal is checked against the winding order of the vertices.
 			normal, _ := f32(faceEntry, 3)
 			corner0, corner1, corner2 := verts[ix[0]], verts[ix[1]], verts[ix[2]]
 			var edge1, edge2 vec3

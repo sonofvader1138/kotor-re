@@ -7,13 +7,13 @@ import (
 	"math"
 )
 
-// Generic tree file (GFF), used by GUI layouts, by most module resources such as "ARE V3.2" and "UTC V3.2",
-// and by saved games. 56-byte header: char[4] fileType, char[4] version,
-// then six u32 pairs: structs (off, count), fields (off, count), labels (off, count),
-// fieldData (off, bytes), fieldIndices (off, bytes), listIndices (off, bytes).
-// Struct 12 bytes: u32 type, u32 data, u32 fieldCount. Field 12 bytes: u32 type, u32 labelIndex, u32 value.
-// Every field and every non-root struct must be used exactly once, and no byte of the three data regions may
-// be used twice. Unused bytes are counted, because some module files contain them.
+// GFF (generic file format) is the tree container of GUI layouts, module resources such as "ARE V3.2" and
+// "UTC V3.2", templates and saved games. The 56-byte header holds a 4-byte file type, a 4-byte version and six
+// pairs of u32 values: the offset and count of the struct, field and label tables, then the offset and byte
+// size of the field data, field index and list index regions. A struct is 12 bytes: u32 type, u32 field
+// index or field index offset, and u32 field count. A field is 12 bytes: u32 type, u32 label index and u32
+// value. Every field and every non-root struct must be used exactly once, and no byte of the three data
+// regions may be used twice. Unused bytes are counted, because 34 files of the game contain them.
 const (
 	gffHeaderSize = 56
 	gffStructSize = 12

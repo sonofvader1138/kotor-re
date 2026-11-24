@@ -1,6 +1,7 @@
 // BWM V1.0: a binary walkmesh, the triangle mesh that defines where characters can walk. Resource types
 // 2016 (area room, wok), 2052 (door, dwk) and 2053 (placeable, pwk), all in data/models.bif. A 136-byte
-// header holds the walkmesh type, four use positions, a position and nine table descriptors. The tables
+// header holds the walkmesh type, two use points in relative and absolute form, a position and nine table
+// descriptors. The tables
 // follow in a fixed order and end exactly at the end of the file. Layout: see FILE_FORMATS.md.
 package kotor
 
@@ -61,8 +62,8 @@ type BwmEdge struct {
 type Bwm struct {
 	Type uint32
 
-	// RelativeUse and AbsoluteUse hold two points each. Position is the walkmesh node's position in its
-	// model. In a placeable walkmesh the absolute points and the position are 0.
+	// RelativeUse and AbsoluteUse hold two points each. In an area walkmesh, Position is the position of the
+	// walkmesh node in the room model. In a placeable walkmesh the absolute points are 0.
 	RelativeUse [2][3]float64
 	AbsoluteUse [2][3]float64
 	Position    [3]float64

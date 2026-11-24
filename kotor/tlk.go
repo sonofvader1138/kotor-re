@@ -1,5 +1,6 @@
 // TLK V3.0: the string table dialog.tlk, which localized strings in GFF files refer to by string number.
-// 20-byte header: char[8] signature, u32 language, u32 entry count, u32 offset of the string data.
+// 20-byte header: char[8] signature, a u32 that is 0 and may be a language number, u32 entry count and u32
+// offset of the string data.
 // Then one 40-byte entry per string: u32 flags, char[16] sound resref, u32 unknown, u32 unknown, u32 offset
 // into the string data, u32 length, f32 unknown. The three unknown fields are 0 in dialog.tlk.
 package kotor
