@@ -221,3 +221,32 @@ func ltrJson(ltr *kotor.Ltr) *orderedObject {
 	object.set("triple", triple)
 	return object
 }
+
+// visJson turns a room visibility list into an object with "rooms", an array with one object per room line
+// in file order. Each room has "room", its name; "count", the count as written (null when the line has
+// none); and "visible", the names of the indented lines that follow it. Names keep their case. Spaces
+// beyond the canonical form and a missing final line break are not kept.
+func visJson(vis *kotor.Vis) *orderedObject {
+	rooms := make([]any, len(vis.Rooms))
+	for i, room := range vis.Rooms {
+		object := &orderedObject{}
+		object.set("room", room.Name)
+
+		var count any
+		if room.Count != kotor.VisNoCount {
+			count = room.Count
+		}
+		object.set("count", count)
+
+		visible := make([]any, len(room.Visible))
+		for j, name := range room.Visible {
+			visible[j] = name
+		}
+		object.set("visible", visible)
+		rooms[i] = object
+	}
+
+	object := &orderedObject{}
+	object.set("rooms", rooms)
+	return object
+}

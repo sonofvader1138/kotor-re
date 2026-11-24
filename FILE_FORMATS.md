@@ -70,7 +70,7 @@ The entry table has one 16-byte entry per resource.
 
 Resource data follows the entry table directly. The resources are stored in order, without gaps or overlaps, and the last one ends exactly at the end of the file. This holds for all 26 archives. The data is not compressed.
 
-The archives contain 29 resource types. Six are described in this document: 2002 is an MDL model, 3008 is its MDX vertex data, 2047 is a GUI layout, 3 is a TGA image, 2022 is a TXI text file of texture options, and 3001 is a text file that probably lists visible rooms. Type 3007 (TPC texture) does not occur in the BIF archives; it occurs in the ERF texture packs. The tables, sounds, scripts and templates of five archives are described in the section "Tables, sounds, scripts and templates in the BIF archives". The number of resources of each type is listed below.
+The archives contain 29 resource types. Six are described in this document: 2002 is an MDL model, 3008 is its MDX vertex data, 2047 is a GUI layout, 3 is a TGA image, 2022 is a TXI text file of texture options, and 3001 is a VIS room visibility list. Type 3007 (TPC texture) does not occur in the BIF archives; it occurs in the ERF texture packs. The tables, sounds, scripts and templates of five archives are described in the section "Tables, sounds, scripts and templates in the BIF archives". The number of resources of each type is listed below.
 
 | Type | Count | Type | Count | Type | Count | Type | Count |
 | ---- | ----- | ---- | ----- | ---- | ----- | ---- | ----- |
@@ -309,7 +309,7 @@ The area's geometry and layout are in BIF archives under the area name. The reso
 | Type | Archive               | Content                                                                                                                         |
 | ---- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | 3000 | `data/layouts.bif`    | Text beginning with "#MAXLAYOUT ASCII". It lists the rooms with three coordinates each, for example `M02aa_03a 75.0 150.0 0.0`. |
-| 3001 | `data/lightmaps*.bif` | Text that lists, for each room, a count and the names of other rooms. This is probably the set of rooms visible from that room. |
+| 3001 | `data/lightmaps*.bif` | Room visibility list (VIS), described in the section "Room visibility lists: VIS".                                             |
 | 2016 | `data/models.bif`     | Binary data beginning with "BWM V1.0", one per room model. This is probably the walkable surface.                               |
 
 ## Compiled scripts: NCS
@@ -1057,7 +1057,53 @@ How a mesh selects its lightmap and which texture coordinates it uses are not do
 
 `textures.bif` also holds 28 TXI files. Fourteen belong to its grayscale images and contain "isbumpmap 1", which suggests the images are bump maps. The other 14, such as `distortiontex` and `grassinfo`, have no image in that archive. The converter writes all 28.
 
-The lightmap archives also hold 112 resources of type 3001, one per area, named after the area, such as `m01aa`. They are ASCII text with CRLF line breaks. An unindented line holds a room name and a count, and indented lines naming other rooms follow it. In 107 of the 112 files, the number of indented lines always equals the count. The other 5, such as `m38ab`, contain a count that does not match or a doubled space. The text may be a room visibility list, but this has not been verified. The converter skips them.
+The lightmap archives also hold 112 room visibility lists of type 3001. They are described in the next section.
+
+# Room visibility lists: VIS
+
+A VIS file lists, for each room of an area, the other rooms that can be seen from it. The game probably uses it to decide which room models to draw. Each of the 112 files is one resource of type 3001 in `data/lightmaps*.bif`, named after its area, such as `m01aa`. The archives hold between 3 (`lightmaps12.bif`) and 31 (`lightmaps13.bif`) of them. The parser is `ParseVis` in `kotor/vis.go`.
+
+The resource type is named VIS after two strings in `swkotor.exe`: the extension ".vis" and the path pattern "%s/%s.VIS". The strings "  %s" and "%s %d" stand next to them. These match the two line forms below, so the code that reads or writes the file is probably nearby.
+
+## Text layout
+
+A VIS file is ASCII text with CRLF line breaks. The files are between 11 and 9,853 bytes long. There are two kinds of lines, described in the table below.
+
+| Line                | Form                                                | Meaning                                                  | Evidence                                                                                                       | Confidence |
+| ------------------- | --------------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------- |
+| Room line           | Name, a space and a decimal count, at column 0       | Starts the entry of one room of the area                 | Every one of the 1,250 unindented lines has this form, except one without a count.                              | high       |
+| Visible-room line   | Two spaces and a name                               | A room visible from the room of the preceding room line  | All 8,905 indented lines have this form. None comes before the first room line.                                | high       |
+
+The count is meant to give the number of visible-room lines that follow. It does so for 1,246 of the 1,250 rooms. The parser takes the list of visible rooms from the indentation, not from the count, because the count is wrong in four rooms. Three of them list one room fewer than the count (`m38ab_08`, `m38ab_06`) or one more (`m39aa_15`). The fourth, `m17aa_09w` in `m17aa`, has no count and no visible rooms. If the game read a fixed number of lines from the count, the next room line would be taken as a visible room. Whether the game reads by count or by indentation is UNKNOWN.
+
+The files contain a few irregularities in spacing and line breaks. The parser accepts all of them:
+
+- 13 files, such as `m01aa`, lack a line break after the last line.
+- In `m36aa`, the first room line has two spaces before its count.
+- In `m17aa` and `m22aa`, one visible-room line each has a space after the name.
+
+Each file holds between 1 and 54 rooms, and each room lists between 0 and 44 visible rooms. Of the 1,250 rooms, 65 list no visible room. Room names are at most 16 characters long and are written in mixed case, such as `M01aa_10` beside `m01aa_09`. Case is probably not significant, because resource references are not case-sensitive.
+
+## Relation to room layouts
+
+The room names agree with the room layouts (LYT, type 3000) of `data/layouts.bif`, which list each area's rooms with their positions. This is the main evidence that the file is about rooms. The comparison below ignores case.
+
+- 111 of the 112 areas have a layout of the same name. Only `m47ac` has none. Thirteen layouts, such as `m09zz` and `m12ac`, have no VIS file.
+- In these 111 areas, 1,190 of the 1,248 room lines name a room of the layout. The other 58 are in 14 areas, such as `m02ae`, `m25aa` and `m40ab`, and are probably rooms that were renamed or removed after the file was made. In `m41az`, six room lines name rooms of `m41ad` instead.
+- Of the 8,905 visible-room lines, 371 name no room of the layout. Most belong to the same 14 areas. Two are typing errors: `m17aa11b` for `m17aa_11b` in `m17aa`, and `m38aa_07` in `m39aa`.
+- Of the 1,221 layout rooms, 31 have no room line. Fifteen of them are the placeholder `****` of the `stunt_` areas.
+- Visibility is mostly symmetric. Where both rooms of a listed pair have room lines, the reverse pair is also listed in 8,211 of 8,877 cases.
+- Ten rooms list themselves, and six lists name a room twice.
+
+The visible rooms are not simply the rooms nearby. Using the layout positions, the nearest other room is listed in 950 of 1,161 cases, and the mean distance to a listed room (89.3 units) is only slightly shorter than to an unlisted one (95.3 units). This agrees with a visibility list computed from lines of sight, but the method that produced it is UNKNOWN.
+
+## Conversion and verification
+
+The converter writes each file to `assets/data/lightmaps/<area>.vis.json`, beside the lightmaps. The JSON object has "rooms", an array with one object per room line in file order. Each room has "room", the name as written; "count", the count as written, or null when the line has none; and "visible", the names of the visible-room lines in file order. Extra spaces and a missing final line break are not kept.
+
+The parser passes for all 112 files: it consumes every byte, finds only printable ASCII and CRLF line breaks, and finds no line of another form. Its report lists the irregularities of each file.
+
+The verifier reads each JSON file with jq, builds the text again, and compares it with the source in canonical form. The canonical form has a CRLF after every line, a single space before each count and no space after a name. All 112 files match. A test with one count changed in `m01aa.vis.json` was reported as a failure.
 
 # User interface layouts: GUI
 

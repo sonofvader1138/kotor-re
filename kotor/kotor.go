@@ -64,6 +64,9 @@ var extensions = map[uint32]string{
 	// These types are named after their content: a RIFF WAVE file, the signatures "2DA V2.b" and
 	// "SSF V1.1", and NWScript source text, whose routine declarations nwscript.nss holds.
 	4: "wav", 2017: "2da", 2060: "ssf", TypeNss: "nss",
+
+	// The room visibility lists are named after the extension that swkotor.exe appends to an area name.
+	3001: "vis",
 }
 
 // Ext returns the file extension of a resource type, or the type code in decimal when the type is unknown.

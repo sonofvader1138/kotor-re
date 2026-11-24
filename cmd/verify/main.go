@@ -10,7 +10,8 @@
 // still rejects faces whose vertex index is out of range.
 // textures: ImageMagick's decoding of each PNG must equal the decoded TPC texture, and pngcheck must accept it.
 // tga: ImageMagick's decoding of each PNG must equal its decoding of the source TGA, and pngcheck must
-// accept the PNG. Each TXI must equal the source bytes.
+// accept the PNG. Each TXI must equal the source bytes. Each room visibility list, read with jq, must build
+// again into its source text in canonical form (see checkVisJson).
 // music, sounds, waves: ffprobe must read each file without error.
 // movies: ffprobe must report the Bink file's size, frame count, sample rate, channel count and audio
 // duration (within 0.1 s; ffmpeg's Bink audio decoder emits about 0.03 s more than the packets declare),
@@ -283,7 +284,7 @@ func tgaImages(summary *kotor.Summary) {
 		log("tga " + group.Name + "...")
 		dir := filepath.Join(kotor.Assets, "data", group.Name)
 
-		var txiJobs, jobs []job
+		var txiJobs, visJobs, jobs []job
 		seen := map[string]bool{}
 		for _, bif := range key.Bifs {
 			if !group.Pattern.MatchString(bif) {
@@ -291,6 +292,13 @@ func tgaImages(summary *kotor.Summary) {
 			}
 
 			for _, resource := range kotor.BifResources(bif, key) {
+				if resource.Ext == "vis" {
+					name := resource.Resref + ".vis.json"
+					visJobs = append(visJobs, func() []string {
+						return line(name + " " + kotor.Verdict(checkVisJson(filepath.Join(dir, name), resource.Data)))
+					})
+					continue
+				}
 				if resource.Ext != "tga" && resource.Ext != "txi" {
 					continue
 				}
@@ -333,6 +341,13 @@ func tgaImages(summary *kotor.Summary) {
 		}
 
 		summary.Tally("txi_"+group.Name, pool(txiJobs))
+		if len(visJobs) > 0 {
+			if kotor.Has("jq") {
+				summary.Tally("jq_vis_"+group.Name, pool(visJobs))
+			} else {
+				summary.Note("jq missing: vis_" + group.Name + " UNVERIFIED")
+			}
+		}
 		imageChecks(summary, group.Name, dir, jobs)
 	}
 }
@@ -955,6 +970,32 @@ func checkLtrJson(path string, source []byte) string {
 
 	if !bytes.Equal(built, source) {
 		return fmt.Sprintf("built %d bytes differ from the %d source bytes", len(built), len(source))
+	}
+	return ""
+}
+
+// checkVisJson builds the text of a room visibility list from the JSON that jq reads and compares it with
+// the source in canonical form. The canonical form has CRLF after every line, one space between a room name
+// and its count, and no spaces after a name; the converted JSON keeps nothing else.
+func checkVisJson(path string, source []byte) string {
+	program := `.rooms[] | (.room + if .count == null then "" else " " + (.count | tostring) end), "  " + .visible[]`
+	result := kotor.Exec("jq", []string{"-r", program, path}, nil)
+	if result.Status != 0 {
+		return "jq: " + kotor.FirstLine(result.Stderr)
+	}
+	built := strings.ReplaceAll(string(result.Stdout), "\n", "\r\n")
+
+	var canonical strings.Builder
+	for _, text := range strings.Split(strings.TrimSuffix(string(source), "\r\n"), "\r\n") {
+		text = strings.TrimRight(text, " ")
+		if !strings.HasPrefix(text, " ") {
+			text = strings.Join(strings.Fields(text), " ")
+		}
+		canonical.WriteString(text + "\r\n")
+	}
+
+	if built != canonical.String() {
+		return fmt.Sprintf("built %d bytes differ from the %d canonical source bytes", len(built), canonical.Len())
 	}
 	return ""
 }

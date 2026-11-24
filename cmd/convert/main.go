@@ -179,7 +179,8 @@ func convertTextures(summary *kotor.Summary) {
 // TGA images and their TXI texture options from three groups of BIF archives:
 // data/lightmaps*.bif -> assets/data/lightmaps, data/textures.bif -> assets/data/textures,
 // data/legacy.bif -> assets/data/legacy. Images become 8-bit PNG with the TGA's channels (gray, RGB or
-// RGBA), top row first. The TGA parser must consume each file exactly.
+// RGBA), top row first. The TGA parser must consume each file exactly. The room visibility lists of the
+// lightmap archives are converted by writeResource into the same folder.
 func convertTga(summary *kotor.Summary) {
 	key := kotor.ReadKey()
 	for _, group := range kotor.TgaGroups {
@@ -196,6 +197,14 @@ func convertTga(summary *kotor.Summary) {
 
 			for _, resource := range kotor.BifResources(bif, key) {
 				label := filepath.Base(bif) + ":" + resource.Resref + "." + resource.Ext
+				if resource.Ext == "vis" {
+					line, files := writeResource(out, label, resource, nil, nil)
+					report = append(report, line)
+					for _, file := range files {
+						written[file] = true
+					}
+					continue
+				}
 				if resource.Ext != "tga" && resource.Ext != "txi" {
 					report = append(report, label+" not an image, skipped PASS")
 					continue
@@ -229,7 +238,7 @@ func convertTga(summary *kotor.Summary) {
 			}
 		}
 
-		prune(out, written, []string{".png", ".txi"})
+		prune(out, written, []string{".png", ".txi", ".json"})
 		summary.Tally("tga_"+group.Name, report)
 	}
 }
@@ -596,6 +605,7 @@ func newResourceInputs() *resourceInputs {
 //     trailer without trailing NUL bytes, when the trailer holds text.
 //   - A GUI layout becomes <resref>.json in the form of gffJson. It must use every byte of its regions.
 //   - A letter table becomes <resref>.ltr.json (see ltrJson).
+//   - A room visibility list becomes <resref>.vis.json (see visJson). It needs no inputs.
 //   - Every other type is a GFF file and becomes <resref>.<ext>.json (see gffFile).
 func writeResource(dir, label string, resource kotor.Resource, mdx []byte, inputs *resourceInputs) (string, []string) {
 	var line string
@@ -704,6 +714,19 @@ func writeResource(dir, label string, resource kotor.Resource, mdx []byte, input
 		line = label + " " + kotor.Verdict(problem)
 		if problem == "" {
 			output = append(text, '\n')
+		}
+
+	case "vis":
+		vis := kotor.ParseVis(resource.Data)
+		line = kotor.ReportVis(label, vis)
+		file += ".json"
+		if len(vis.Errors) == 0 {
+			text, err := json.MarshalIndent(visJson(vis), "", "\t")
+			if err != nil {
+				line = label + " FAIL: " + err.Error()
+			} else {
+				output = append(text, '\n')
+			}
 		}
 
 	case "ltr":
