@@ -7,7 +7,9 @@
 // is raw (-r): assimp's default post-processing merges meshes with identical geometry into one, and some
 // models repeat a mesh at the same place, so the default import reports fewer faces than the file has.
 // The raw import also skips assimp's validation of its own data structures. The OBJ parser still runs and
-// still rejects faces whose vertex index is out of range.
+// still rejects faces whose vertex index is out of range. This includes the walkmesh OBJ files. Each
+// walkmesh JSON file, read with jq, must build again into the source's header values, edge table and
+// perimeter table (see checkWalkmeshJson).
 // textures: ImageMagick's decoding of each PNG must equal the decoded TPC texture, and pngcheck must accept it.
 // tga: ImageMagick's decoding of each PNG must equal its decoding of the source TGA, and pngcheck must
 // accept the PNG. Each TXI must equal the source bytes. Each room visibility list, read with jq, must build
@@ -250,6 +252,107 @@ func models(summary *kotor.Summary) {
 		jobs = append(jobs, func() []string { return assimpObj(dir, file) })
 	}
 	summary.Tally("assimp_models", pool(jobs))
+
+	log("walkmeshes...")
+	var walkmeshJobs []job
+	for _, resource := range kotor.BifResources("data/models.bif", kotor.ReadKey()) {
+		if resource.Ext != "wok" && resource.Ext != "dwk" && resource.Ext != "pwk" {
+			continue
+		}
+		name := resource.Resref + "." + resource.Ext + ".json"
+		path := filepath.Join(dir, name)
+		if !exists(path) {
+			continue
+		}
+		walkmeshJobs = append(walkmeshJobs, func() []string {
+			return line(name + " " + kotor.Verdict(checkWalkmeshJson(path, resource.Data)))
+		})
+	}
+	summary.Tally("jq_walkmeshes", pool(walkmeshJobs))
+}
+
+// walkmeshProgram prints the numbers of a walkmesh JSON file, one per line, in source order: the type, the
+// two relative and the two absolute use points, the position, then for each perimeter its edges as
+// 3 * face + edge and transition (-1 for null), followed by the perimeter's end in the edge list.
+const walkmeshProgram = `.type, (.relative_use + .absolute_use | .[][]), .position[],
+	(foreach .perimeters[] as $perimeter (0; . + ($perimeter | length);
+		($perimeter[] | (3 * .face + .edge), (.transition // -1)), "end \(.)"))`
+
+// checkWalkmeshJson builds the header bytes 0x08 to 0x47, the edge table and the perimeter table of a
+// walkmesh from the JSON that jq reads, and compares them with the source. The header offsets of the two
+// tables are read from the source.
+func checkWalkmeshJson(path string, source []byte) string {
+	result := kotor.Exec("jq", []string{"-r", walkmeshProgram, path}, nil)
+	if result.Status != 0 {
+		return "jq: " + kotor.FirstLine(result.Stderr)
+	}
+	fields := strings.Split(strings.TrimSuffix(string(result.Stdout), "\n"), "\n")
+
+	const headerFloats = 15
+	if len(fields) < 1+headerFloats {
+		return fmt.Sprintf("jq printed %d values", len(fields))
+	}
+	var header, edges, perimeters []byte
+	typeValue, err := strconv.ParseUint(fields[0], 10, 32)
+	if err != nil {
+		return "bad type " + fields[0]
+	}
+	header = binary.LittleEndian.AppendUint32(header, uint32(typeValue))
+	for _, field := range fields[1 : 1+headerFloats] {
+		value, err := strconv.ParseFloat(field, 32)
+		if err != nil {
+			return "bad number " + field
+		}
+		header = binary.LittleEndian.AppendUint32(header, math.Float32bits(float32(value)))
+	}
+
+	rest := fields[1+headerFloats:]
+	for i := 0; i < len(rest); i++ {
+		if end, ok := strings.CutPrefix(rest[i], "end "); ok {
+			value, _ := strconv.ParseUint(end, 10, 32)
+			perimeters = binary.LittleEndian.AppendUint32(perimeters, uint32(value))
+			continue
+		}
+		if i+1 >= len(rest) {
+			return "edge without transition"
+		}
+		edge, edgeErr := strconv.ParseInt(rest[i], 10, 32)
+		transition, transitionErr := strconv.ParseInt(rest[i+1], 10, 32)
+		if edgeErr != nil || transitionErr != nil {
+			return "bad edge " + rest[i] + " " + rest[i+1]
+		}
+		edges = binary.LittleEndian.AppendUint32(edges, uint32(int32(edge)))
+		edges = binary.LittleEndian.AppendUint32(edges, uint32(int32(transition)))
+		i++
+	}
+
+	const (
+		headerStart     = 0x08
+		edgeCount       = 0x78
+		edgeOffset      = 0x7C
+		perimeterCount  = 0x80
+		perimeterOffset = 0x84
+		edgeSize        = 8
+		perimeterSize   = 4
+	)
+	table := func(countOffset, dataOffset, size int) []byte {
+		count := int(binary.LittleEndian.Uint32(source[countOffset:]))
+		start := int(binary.LittleEndian.Uint32(source[dataOffset:]))
+		if count == 0 {
+			return nil
+		}
+		return kotor.Slice(source, start, start+count*size)
+	}
+
+	switch {
+	case !bytes.Equal(header, source[headerStart:headerStart+len(header)]):
+		return "header differs from the source"
+	case !bytes.Equal(edges, table(edgeCount, edgeOffset, edgeSize)):
+		return fmt.Sprintf("built %d edge bytes differ from the source", len(edges))
+	case !bytes.Equal(perimeters, table(perimeterCount, perimeterOffset, perimeterSize)):
+		return fmt.Sprintf("built %d perimeter bytes differ from the source", len(perimeters))
+	}
+	return ""
 }
 
 // Textures: assets/TexturePacks/<pack>/*.png against the TPC textures in TexturePacks/<pack>.erf.

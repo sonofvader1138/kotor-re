@@ -70,7 +70,7 @@ The entry table has one 16-byte entry per resource.
 
 Resource data follows the entry table directly. The resources are stored in order, without gaps or overlaps, and the last one ends exactly at the end of the file. This holds for all 26 archives. The data is not compressed.
 
-The archives contain 29 resource types. Six are described in this document: 2002 is an MDL model, 3008 is its MDX vertex data, 2047 is a GUI layout, 3 is a TGA image, 2022 is a TXI text file of texture options, and 3001 is a VIS room visibility list. Type 3007 (TPC texture) does not occur in the BIF archives; it occurs in the ERF texture packs. The tables, sounds, scripts and templates of five archives are described in the section "Tables, sounds, scripts and templates in the BIF archives". The number of resources of each type is listed below.
+The archives contain 29 resource types. Nine are described in this document: 2002 is an MDL model, 3008 is its MDX vertex data, 2047 is a GUI layout, 3 is a TGA image, 2022 is a TXI text file of texture options, 3001 is a VIS room visibility list, and 2016, 2052 and 2053 are walkmeshes. Type 3007 (TPC texture) does not occur in the BIF archives; it occurs in the ERF texture packs. The tables, sounds, scripts and templates of five archives are described in the section "Tables, sounds, scripts and templates in the BIF archives". The number of resources of each type is listed below.
 
 | Type | Count | Type | Count | Type | Count | Type | Count |
 | ---- | ----- | ---- | ----- | ---- | ----- | ---- | ----- |
@@ -83,7 +83,7 @@ The archives contain 29 resource types. Six are described in this document: 2002
 |      |       | 2027 | 205   | 2044 | 317   | 3001 | 112   |
 |      |       |      |       | 2047 | 84    | 3008 | 2,832 |
 
-Many of the other types begin with a signature of four characters followed by a version. The table below lists the signatures found at the start of the resources of each type. The formats behind these signatures have not been examined, except the "V3.2" container, which is described in the GUI section.
+Many of the other types begin with a signature of four characters followed by a version. The table below lists the signatures found at the start of the resources of each type. The formats behind these signatures have not been examined here. The "V3.2" container is described in the GUI section, and "BWM V1.0" in the section "Walkmeshes: BWM".
 
 | Signature | Types and counts                                                                                                                                                                                               |
 | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -310,7 +310,7 @@ The area's geometry and layout are in BIF archives under the area name. The reso
 | ---- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | 3000 | `data/layouts.bif`    | Room layout (LYT), described in the section "Room layouts: LYT".                                                               |
 | 3001 | `data/lightmaps*.bif` | Room visibility list (VIS), described in the section "Room visibility lists: VIS".                                             |
-| 2016 | `data/models.bif`     | Binary data beginning with "BWM V1.0", one per room model. This is probably the walkable surface.                               |
+| 2016 | `data/models.bif`     | Area room walkmesh (BWM), named after its room model, described in the section "Walkmeshes: BWM".                               |
 
 ## Compiled scripts: NCS
 
@@ -858,7 +858,7 @@ The flags take eight combinations in models.bif. The table below counts the node
 | 0x005 | 8,848  | 0x121 | 2,586  |
 | 0x011 | 1,954  | 0x221 | 1,102  |
 
-Bits 0x02, 0x04 and 0x10 never occur together with 0x20, so these nodes carry no mesh. Bits 0x100 and 0x200 occur only together with 0x20. The meanings of bits 0x02, 0x04, 0x10, 0x100 and 0x200 are UNKNOWN. The converter treats all nodes with 0x20 alike, and it does not read any additional data that the other bits may announce.
+Bits 0x02, 0x04 and 0x10 never occur together with 0x20, so these nodes carry no mesh. Bits 0x100 and 0x200 occur only together with 0x20. Bit 0x200 probably marks the walkmesh node of a room model: each of the 980 room models whose area walkmesh has faces has exactly one node with this bit, named like `01awalkmesh`, and that node's position is stored in the walkmesh header (see "Walkmeshes: BWM"). The other 122 nodes with bit 0x200 have not been examined. The meanings of bits 0x02, 0x04, 0x10 and 0x100 are UNKNOWN. The converter treats all nodes with 0x20 alike, and it does not read any additional data that the other bits may announce.
 
 ## Mesh header
 
@@ -903,7 +903,144 @@ An MDX file has no header. It is an array of vertex records, each built from f32
 
 ## Walkmeshes in models.bif
 
-The archive also contains resources of types 2016 (1,202), 2052 (156) and 2053 (196). All 1,554 begin with the signature "BWM V1.0". They are probably walkmeshes, the surfaces that define where characters can walk, but their format has not been examined. An empty MDX resource has the offset of the resource that follows it. For 32 of the 368 empty MDX resources, such as that of `m03mg_01b`, the next resource is a walkmesh, so a reader that looks at the bytes at that offset finds "BWM V1.0".
+The archive also contains 1,554 walkmeshes, which are described in the section "Walkmeshes: BWM". An empty MDX resource has the offset of the resource that follows it. For 32 of the 368 empty MDX resources, such as that of `m03mg_01b`, the next resource is a walkmesh, so a reader that looks at the bytes at that offset finds "BWM V1.0".
+
+# Walkmeshes: BWM
+
+A walkmesh is a triangle mesh that defines where characters can walk and where they collide. Each face carries a surface material, such as dirt or a non-walkable wall. The format, binary walkmesh (BWM), has three resource types, all in `data/models.bif`. No other archive holds walkmeshes. The converter is part of the models stage of `cmd/convert`. The parser is `kotor/bwm.go`.
+
+The three types and their counts are listed below. The extensions are taken from the extension pool of `swkotor.exe`. There the strings "utw sav jrl utg btg pwk dwk utm" run in descending type order from 2058 to 2051, so "pwk" is 2053 and "dwk" is 2052. The string "wok" stands between "2da" (2017) and "bic" (2015).
+
+| Type | Extension | Count | Content                                                                |
+| ---- | --------- | ----- | ---------------------------------------------------------------------- |
+| 2016 | wok       | 1,202 | Area room walkmesh. Each has the resref of a room model in models.bif. |
+| 2052 | dwk       | 156   | Door walkmesh. The resrefs form 52 sets ending in 0, 1 and 2.          |
+| 2053 | pwk       | 196   | Placeable walkmesh. Every resref begins with "plc_".                   |
+
+The executable contains the strings "closed", "open1" and "open2". The three door walkmeshes of a set probably describe these three states of a door. This has not been verified.
+
+All 1,554 walkmeshes pass the parser's checks: every table lies inside the file, the tables follow each other without gaps and end exactly at the end of the file, and every index refers to an existing entry. Together they hold 116,787 vertices and 191,329 faces. Of the walkmeshes, 222 area walkmeshes and 74 placeable walkmeshes have no faces and are not converted.
+
+## Header
+
+The header is 136 bytes (0x88). It holds the walkmesh type, five points and nine table descriptors.
+
+| Offset | Type    | Meaning                                                      | Evidence                                                                         | Confidence |
+| ------ | ------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------- | ---------- |
+| 0x00   | char[8] | Signature "BWM V1.0"                                         | Present in all 1,554 files.                                                      | high       |
+| 0x08   | u32     | Walkmesh type: 1 for an area room, 0 for a door or placeable | 1 in all 1,202 area walkmeshes, 0 in all 352 door and placeable walkmeshes.      | high       |
+| 0x0C   | f32[3]  | First use point, relative                                    | See below.                                                                       | low        |
+| 0x18   | f32[3]  | Second use point, relative                                   | See below.                                                                       | low        |
+| 0x24   | f32[3]  | First use point, absolute                                    | Equals the relative point plus the position in all 156 door walkmeshes.          | medium     |
+| 0x30   | f32[3]  | Second use point, absolute                                   | Equals the relative point plus the position in all 156 door walkmeshes.          | medium     |
+| 0x3C   | f32[3]  | Position                                                     | In area walkmeshes, equals the position of the model's walkmesh node. See below. | high       |
+| 0x48   | u32     | Number of vertices                                           | Tables end exactly at the end of the file in all 1,554 files.                    | high       |
+| 0x4C   | u32     | Offset of the vertex table                                   | As above.                                                                        | high       |
+| 0x50   | u32     | Number of faces                                              | As above.                                                                        | high       |
+| 0x54   | u32     | Offset of the face table                                     | As above.                                                                        | high       |
+| 0x58   | u32     | Offset of the material table                                 | As above.                                                                        | high       |
+| 0x5C   | u32     | Offset of the normal table                                   | As above.                                                                        | high       |
+| 0x60   | u32     | Offset of the plane distance table                           | As above.                                                                        | high       |
+| 0x64   | u32     | Number of AABB nodes                                         | As above.                                                                        | high       |
+| 0x68   | u32     | Offset of the AABB table                                     | As above.                                                                        | high       |
+| 0x6C   | u32     | Probably the index of the root AABB node                     | See below.                                                                       | low        |
+| 0x70   | u32     | Number of adjacency rows                                     | As above.                                                                        | high       |
+| 0x74   | u32     | Offset of the adjacency table                                | As above.                                                                        | high       |
+| 0x78   | u32     | Number of perimeter edges                                    | As above.                                                                        | high       |
+| 0x7C   | u32     | Offset of the edge table                                     | As above.                                                                        | high       |
+| 0x80   | u32     | Number of perimeters                                         | As above.                                                                        | high       |
+| 0x84   | u32     | Offset of the perimeter table                                | As above.                                                                        | high       |
+
+All offsets count from the start of the file. The tables are stored in the order of the header, directly after it. An empty table may have the offset 0, or the offset where it would start. The material, normal and plane distance tables have one entry per face. Door and placeable walkmeshes hold only vertices, faces, materials, normals and plane distances: their AABB, adjacency, edge and perimeter tables are empty in all 352 files.
+
+The fields from 0x0C to 0x3B are 0 in all 1,202 area walkmeshes. The executable contains the strings "pwk_use" and "pwk_dp_use_", so the two points are probably the places where a character stands to use a door or placeable. In placeable walkmeshes the absolute points are 0 in all 196 files, and the relative points are set in 188. In door walkmeshes the position is set in 146 of 156 files. The meaning of the position in door and placeable walkmeshes is not known.
+
+In area walkmeshes the position equals the position of one node in the room's MDL model. In all 980 area walkmeshes with faces, the model has exactly one node with flag bit 0x200, its name ends in "walkmesh", such as `01awalkmesh`, and its position equals the value at 0x3C. The 222 area walkmeshes without faces belong to models with no such node.
+
+The value at 0x6C is 0 in all 980 area walkmeshes with faces and in all door and placeable walkmeshes. In those 980 files, node 0 is the only AABB node that is no node's child. In 29 area walkmeshes without faces the value is nonzero, for example 0x3F800000 or 0xFFFFFFFF. These values look like uninitialized memory.
+
+## Vertices
+
+A vertex is three f32 values: x, y and z. Area walkmeshes use world coordinates. Each vertex equals a vertex of the model's walkmesh node, plus that node's position, plus the room's position in the area's room layout (LYT). This holds within 1 mm for 845 of the 980 area walkmeshes with faces, within 1 cm for 954 and within 10 cm for 971. The cause of the larger differences in the other 9 is not known. The walkmesh has fewer vertices than the MDL node in 960 of the 980 files; the MDL node probably stores each vertex once per face corner.
+
+## Faces, materials, normals and plane distances
+
+A face is three u32 vertex indices. Every index is below the vertex count in all 1,554 files.
+
+A material is a u32 row number of `surfacemat.2da`. That table gives each material a label and a "walk" column, which is 1 for walkable surfaces. The materials found are listed below with their face counts.
+
+| Row | Label        | Walk | Area   | Door | Placeable |
+| --- | ------------ | ---- | ------ | ---- | --------- |
+| 1   | Dirt         | 1    | 57,142 | 56   | 3         |
+| 2   | Obscuring    | 0    | 15,869 | 8    | 0         |
+| 3   | Grass        | 1    | 12,143 | 0    | 0         |
+| 4   | Stone        | 1    | 6,501  | 0    | 0         |
+| 5   | Wood         | 1    | 882    | 0    | 0         |
+| 6   | Water        | 1    | 47     | 0    | 0         |
+| 7   | Nonwalk      | 0    | 74,009 | 912  | 762       |
+| 8   | Transparent  | 0    | 103    | 0    | 0         |
+| 9   | Carpet       | 1    | 20     | 0    | 0         |
+| 10  | Metal        | 1    | 18,534 | 0    | 0         |
+| 11  | Puddles      | 1    | 16     | 0    | 0         |
+| 13  | Mud          | 1    | 327    | 0    | 0         |
+| 17  | DeepWater    | 0    | 29     | 0    | 0         |
+| 19  | NonWalkGrass | 0    | 3,966  | 0    | 0         |
+
+In area walkmeshes the walkable faces come first, before all other faces. This holds in all 980 files with faces. Of the 14 door walkmeshes with walkable faces, 4 do not follow this order. In the 2 placeable walkmeshes with walkable faces, those faces come first.
+
+A normal is three f32 values. In area and door walkmeshes it is the unit normal of the face, and it agrees with the vertex order: the cosine between the normal and the cross product (v1 − v0) × (v2 − v0) exceeds 0.99 for all 190,452 faces that are not degenerate. The 112 degenerate faces, whose vertices lie on one line, all occur in area walkmeshes. In placeable walkmeshes all 765 normals are (0, 0, 0).
+
+A plane distance is an f32 value d. In area and door walkmeshes, n · v0 + d = 0 within 0.001 for every face, where n is its normal and v0 its first vertex. Only the first vertex was tested. In placeable walkmeshes the values are arbitrary numbers such as 1.7e−33 and 2.1e17, which look like uninitialized memory.
+
+## AABB tree
+
+An AABB (axis-aligned bounding box) tree is a binary tree of boxes that lets the game find the face under a point quickly. Only area walkmeshes have one. Each node is 44 bytes.
+
+| Offset | Type   | Meaning                                       | Evidence                                                        | Confidence |
+| ------ | ------ | --------------------------------------------- | --------------------------------------------------------------- | ---------- |
+| 0x00   | f32[6] | Box: minimum x, y, z, then maximum x, y, z    | Inner boxes contain their children's boxes in 979 of 980 trees. | high       |
+| 0x18   | i32    | Face index in a leaf, −1 in an inner node     | Each face has one leaf (with one exception, see below).         | high       |
+| 0x1C   | u32    | UNKNOWN; 4 in every node                      | True for all 378,136 nodes.                                     | low        |
+| 0x20   | u32    | Split direction in an inner node, 0 in a leaf | See below.                                                      | medium     |
+| 0x24   | i32    | Index of the left child, −1 in a leaf         | Every node is reached exactly once from node 0.                 | high       |
+| 0x28   | i32    | Index of the right child, −1 in a leaf        | As above.                                                       | high       |
+
+A tree over n faces has 2n − 1 nodes in 979 of the 980 area walkmeshes with faces. The exception, `m02af_01a`, has 219 nodes for 140 faces. Its 30 faces from 110 to 139, all of material 7 (Nonwalk), have no leaf.
+
+A leaf box contains its face with a margin, usually 0.005 to 0.015. The largest difference between a leaf box and its face's box is at most 2 cm in 951 files and at most 10 cm in 977. The three exceptions are `m02af_01a`, `m17mg_01a` and `m26mg_01a`, with differences of 0.75, 1,111 and 1,151. The cause is not known.
+
+The split value is one of 1, 2, 4, 8, 16 and 32. These name the axes +x, +y, +z, −x, −y and −z. Along the named axis, the center of the right child's box lies in the named direction from the center of the left child's box in 183,627 of 188,578 inner nodes. In 4,950 other nodes the two centers are equal along that axis, and one node contradicts the rule. How the game uses the value is not known.
+
+## Adjacency table
+
+The adjacency table connects each walkable face to its walkable neighbours. Only area walkmeshes have one. It has one row of three i32 values for each walkable face. Row i belongs to face i, which is possible because the walkable faces come first. Entry k describes the edge from vertex k to vertex (k + 1) mod 3 of that face. Edges are numbered 3 × face + k. An entry holds the number of the edge of the neighbouring face that shares this edge, or −1 if no walkable face shares it.
+
+The number of rows equals the number of walkable faces, as given by the "walk" column of `surfacemat.2da`, in all 980 area walkmeshes with faces.
+
+The table is symmetric: if edge a names edge b, then edge b names edge a. The only exception is `m38aa_03`, where three faces share the edge between vertices 6 and 7, so two entries cannot point back.
+
+## Edge table
+
+The edge table lists every edge whose adjacency entry is −1, that is, the boundary of the walkable surface. Each entry is 8 bytes.
+
+| Offset | Type | Meaning                                                 | Evidence                                                                      | Confidence |
+| ------ | ---- | ------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- |
+| 0x00   | u32  | Edge number, 3 × face + k                               | Each boundary edge occurs exactly once in all 980 area walkmeshes with faces. | high       |
+| 0x04   | i32  | Transition: index of a room in the area's layout, or −1 | See below.                                                                    | high       |
+
+Transitions occur on 3,926 of the 39,366 edges. A transition marks an edge that leads into another room. The value is an index into the room list of the area's LYT file, counted from 0. For all 3,926 transitions, the midpoint of the edge lies inside the horizontal extent of the target room's walkmesh, within 5 cm.
+
+## Perimeter table
+
+The perimeter table is a list of u32 values. Each value is the end of one perimeter in the edge table, exclusive; the next perimeter starts there. The last value equals the number of edges in all 969 files that have edges. The other 11 area walkmeshes with faces, such as `m17aa_18`, have no walkable faces, and therefore no adjacency rows, edges or perimeters. Each perimeter is a closed loop: each edge ends at the vertex where the next edge starts, and the last edge ends where the first starts. This holds for all 1,789 perimeters.
+
+## Conversion and verification
+
+The models stage of `cmd/convert` writes each walkmesh that has faces to `assets/data/models/<resref>.<ext>.obj`, for example `m01aa_01a.wok.obj`. Faces keep their order. A "usemtl" line names the face material, such as `07_Nonwalk`, whenever it changes. All walkmesh OBJ files share the material library `walkmesh.mtl`, which gives each row of `surfacemat.2da` its own color: bright for walkable materials and dark for the others. The 1,258 files are 980 area, 156 door and 122 placeable walkmeshes.
+
+An OBJ file cannot hold the other data, so each walkmesh also gets `<resref>.<ext>.json`. It holds the type, the position, the use points, and the perimeters, with each edge's face, edge number within the face and transition. The AABB tree and the adjacency table can be rebuilt from the faces and are not written.
+
+The verify command checks both files of each walkmesh. assimp must load each OBJ file with the face count of the file; all 1,258 pass. jq must read each JSON file, and its values, packed again as binary, must equal the source's header values from 0x08 to 0x47, its edge table and its perimeter table byte for byte; all 1,258 pass.
 
 # Textures: TPC
 

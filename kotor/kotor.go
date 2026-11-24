@@ -73,6 +73,11 @@ var extensions = map[uint32]string{
 	// "roomcount" and "trackcount".
 	3000: "lyt",
 
+	// The walkmeshes are named after the extension pool of swkotor.exe, which lists the extensions in
+	// descending type order in places: "utw sav jrl utg btg pwk dwk utm" runs from 2058 down to 2051, so
+	// "pwk" is 2053 and "dwk" is 2052. "wok" stands between "2da" (2017) and "bic" (2015).
+	TypeWok: "wok", TypeDwk: "dwk", TypePwk: "pwk",
+
 	// These types occur only in saved games. They are named after the extension pool of swkotor.exe, where
 	// "sav" stands between "utw" (2058) and "jrl" (2056), and "res" stands beside "bmp", "mve" and "tga"
 	// (1 to 3). A saved module is an ERF archive, and a type 0 resource is a GFF file of any file type.

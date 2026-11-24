@@ -345,3 +345,43 @@ func globalsJson(globals *kotor.Globals) *orderedObject {
 	object.set("location_data", hex.EncodeToString(globals.LocationData))
 	return object
 }
+
+// walkmeshJson turns the parts of a walkmesh that an OBJ file cannot hold into an object with "type" (0 for
+// a door or placeable, 1 for an area room); "position", the walkmesh node's position in its model;
+// "relative_use" and "absolute_use", two points each; and "perimeters", one array per closed boundary loop of
+// the walkable faces. Each perimeter edge has "face", the face index in the OBJ file counted from 0; "edge",
+// 0 to 2, the edge from that face's vertex k to vertex (k + 1) mod 3; and "transition", the index of the
+// room in the area's layout that the edge leads to, or null. The AABB tree and the adjacency table can be
+// rebuilt from the faces and are left out.
+func walkmeshJson(bwm *kotor.Bwm) *orderedObject {
+	vector := func(values [3]float64) []any {
+		return []any{number(values[0], 32), number(values[1], 32), number(values[2], 32)}
+	}
+
+	perimeters := []any{}
+	start := 0
+	for _, end := range bwm.Perimeters {
+		edges := []any{}
+		for _, edge := range bwm.Edges[start:end] {
+			object := &orderedObject{}
+			object.set("face", edge.Edge/3)
+			object.set("edge", edge.Edge%3)
+			var transition any
+			if edge.Transition >= 0 {
+				transition = edge.Transition
+			}
+			object.set("transition", transition)
+			edges = append(edges, object)
+		}
+		perimeters = append(perimeters, edges)
+		start = end
+	}
+
+	object := &orderedObject{}
+	object.set("type", bwm.Type)
+	object.set("position", vector(bwm.Position))
+	object.set("relative_use", []any{vector(bwm.RelativeUse[0]), vector(bwm.RelativeUse[1])})
+	object.set("absolute_use", []any{vector(bwm.AbsoluteUse[0]), vector(bwm.AbsoluteUse[1])})
+	object.set("perimeters", perimeters)
+	return object
+}

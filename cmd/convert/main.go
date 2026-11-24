@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -115,7 +116,8 @@ func noteModels(summary *kotor.Summary, stage string, counts *modelCounts) {
 		fmt.Sprintf("%s: model textures not found: %d (%s)", stage, len(missingNames), strings.Join(missingNames, " ")))
 }
 
-// Models: data/models.bif -> assets/data/models/*.obj + *.mtl (passing, with geometry)
+// Models: data/models.bif -> assets/data/models/*.obj + *.mtl (passing, with geometry), and the walkmeshes
+// of the same archive -> assets/data/models/<resref>.<wok|dwk|pwk>.obj + .json and walkmesh.mtl
 func convertModels(summary *kotor.Summary) {
 	fmt.Println("models...")
 	out := filepath.Join(kotor.Assets, "data", "models")
@@ -131,21 +133,134 @@ func convertModels(summary *kotor.Summary) {
 	}
 
 	var report []string
-	written := map[string]bool{}
+	var walkmeshReport []string
+	written := map[string]bool{walkmeshMtl: true}
 	counts := &modelCounts{missing: map[string]bool{}}
+	materials := surfaceMaterials()
+	walkmeshes := map[string]int{}
 	for _, resource := range resources {
-		if resource.Ext == "mdl" {
-			line, files := writeModel(out, resource.Resref, resource.Resref, resource.Data, mdx[resource.Resref], texturePath, counts)
+		var line string
+		var files []string
+		switch resource.Ext {
+		case "mdl":
+			line, files = writeModel(out, resource.Resref, resource.Resref, resource.Data, mdx[resource.Resref], texturePath, counts)
 			report = append(report, line)
-			for _, file := range files {
-				written[file] = true
+
+		case "wok", "dwk", "pwk":
+			line, files = writeWalkmesh(out, resource, materials)
+			walkmeshReport = append(walkmeshReport, line)
+			if files == nil {
+				walkmeshes["empty "+resource.Ext]++
 			}
+		}
+
+		for _, file := range files {
+			written[file] = true
 		}
 	}
 
-	prune(out, written, []string{".obj", ".mtl"})
+	mtl := []string{"# surface materials of the walkmeshes, from surfacemat.2da"}
+	for _, material := range materials {
+		red, green, blue := material.color()
+		mtl = append(mtl, "", "newmtl "+material.name, fmt.Sprintf("Kd %.6f %.6f %.6f", red, green, blue))
+	}
+	kotor.WriteFile(filepath.Join(out, walkmeshMtl), []byte(strings.Join(mtl, "\n")+"\n"))
+
+	prune(out, written, []string{".obj", ".mtl", ".json"})
 	summary.Tally("models", report)
 	noteModels(summary, "models", counts)
+	summary.Tally("walkmeshes", walkmeshReport)
+	summary.Note(fmt.Sprintf("walkmeshes: without faces, not written: %d wok, %d dwk, %d pwk",
+		walkmeshes["empty wok"], walkmeshes["empty dwk"], walkmeshes["empty pwk"]))
+}
+
+// walkmeshMtl is the material library that all walkmesh OBJ files share.
+const walkmeshMtl = "walkmesh.mtl"
+
+// surfaceMaterial is one row of surfacemat.2da. The name is the row number and the label, such as
+// "07_Nonwalk", because several rows share the label "CRAP".
+type surfaceMaterial struct {
+	row      int
+	name     string
+	walkable bool
+}
+
+// goldenAngle spreads the hues of consecutive materials apart.
+const goldenAngle = 137.507764
+
+// color gives each material its own hue. Walkable materials are bright and the others dark.
+func (material surfaceMaterial) color() (float64, float64, float64) {
+	hue := math.Mod(float64(material.row)*goldenAngle, 360) / 60
+	value := 0.35
+	if material.walkable {
+		value = 0.9
+	}
+
+	const saturation = 0.6
+	chroma := value * saturation
+	x := chroma * (1 - math.Abs(math.Mod(hue, 2)-1))
+	rgb := [6][3]float64{{chroma, x, 0}, {x, chroma, 0}, {0, chroma, x}, {0, x, chroma}, {x, 0, chroma}, {chroma, 0, x}}[int(hue)%6]
+	low := value - chroma
+	return rgb[0] + low, rgb[1] + low, rgb[2] + low
+}
+
+// surfaceMaterials reads the rows of surfacemat.2da in data/2da.bif.
+func surfaceMaterials() []surfaceMaterial {
+	for _, resource := range kotor.BifResources("data/2da.bif", kotor.ReadKey()) {
+		if resource.Resref != "surfacemat" || resource.Ext != "2da" {
+			continue
+		}
+
+		table := kotor.ParseTwoDa(resource.Data)
+		if len(table.Errors) > 0 {
+			kotor.Fatal("surfacemat.2da: " + table.Errors[0])
+		}
+		label := slices.Index(table.Columns, "label")
+		walk := slices.Index(table.Columns, "walk")
+		if label < 0 || walk < 0 {
+			kotor.Fatal("surfacemat.2da: no label or walk column")
+		}
+
+		materials := make([]surfaceMaterial, len(table.Rows))
+		for r, row := range table.Rows {
+			name := fmt.Sprintf("%02d_%s", r, table.Cells[r][label])
+			if row != fmt.Sprint(r) {
+				kotor.Fatal("surfacemat.2da: row " + row + " out of order")
+			}
+			materials[r] = surfaceMaterial{row: r, name: name, walkable: table.Cells[r][walk] == "1"}
+		}
+		return materials
+	}
+	kotor.Fatal("surfacemat.2da not in data/2da.bif")
+	return nil
+}
+
+// writeWalkmesh converts one walkmesh to <resref>.<ext>.obj, which uses walkmeshMtl, and <resref>.<ext>.json
+// (see walkmeshJson). It returns its report line and the names of the files it wrote. A walkmesh without
+// faces is not written.
+func writeWalkmesh(out string, resource kotor.Resource, materials []surfaceMaterial) (string, []string) {
+	label := resource.Resref + "." + resource.Ext
+	bwm := kotor.ParseBwm(resource.Data)
+	line := kotor.ReportBwm(label, bwm)
+	if len(bwm.Errors) > 0 || len(bwm.Faces) == 0 {
+		return line, nil
+	}
+
+	for _, material := range bwm.Materials {
+		if int(material) >= len(materials) {
+			return line + " (material " + fmt.Sprint(material) + " not in surfacemat.2da)", nil
+		}
+	}
+
+	obj := kotor.BwmObj(bwm, label, walkmeshMtl, func(material uint32) string { return materials[material].name })
+	text, err := json.MarshalIndent(walkmeshJson(bwm), "", "\t")
+	if err != nil {
+		kotor.Fatal(err.Error())
+	}
+
+	kotor.WriteFile(filepath.Join(out, label+".obj"), []byte(obj))
+	kotor.WriteFile(filepath.Join(out, label+".json"), append(text, '\n'))
+	return line, []string{label + ".obj", label + ".json"}
 }
 
 // Textures: TexturePacks/<pack>.erf -> assets/TexturePacks/<pack>/*.png (+ *.txi when present)
