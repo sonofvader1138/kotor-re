@@ -1,9 +1,9 @@
-// Command convert converts all supported game assets into ~/re/extracted and writes each parser's report
+// Command extract converts all supported game assets into ~/re/extracted and writes each parser's report
 // to ~/re/temp/reports. It does not check the outputs with independent tools; the verify command does that.
 // Movies require ffmpeg. All stages run at the same time. Each stage writes its own outputs and reports
 // and keeps its own summary lines, which are printed in stage order at the end.
 //
-// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [patch] [lips] [modules] [rims] [bifs] [tlk] [saves]   (default: all)
+// usage: go run ./cmd/extract [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [patch] [lips] [modules] [rims] [bifs] [tlk] [saves]   (default: all)
 package main
 
 import (

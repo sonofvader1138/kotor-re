@@ -630,7 +630,7 @@ func Has(program string) bool {
 	return err == nil
 }
 
-// Summary holds the summary lines of one stage of the convert or verify command.
+// Summary holds the summary lines of one stage of the extract or verify command.
 type Summary []string
 
 // Note adds a line to the summary.
@@ -651,7 +651,7 @@ func (summary *Summary) Tally(name string, report []string) {
 	summary.Note(fmt.Sprintf("%s: %d pass, %d fail", name, pass, len(report)-pass))
 }
 
-// Stage is one named step of the convert or verify command.
+// Stage is one named step of the extract or verify command.
 type Stage struct {
 	Name string
 	Run  func(*Summary)

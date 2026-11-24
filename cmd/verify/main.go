@@ -1,5 +1,5 @@
 // Command verify checks the converted assets in ~/re/extracted with independent tools and writes one report
-// per check to ~/re/temp/reports. Run the convert command first. A stage whose tool is missing is reported
+// per check to ~/re/temp/reports. Run the extract command first. A stage whose tool is missing is reported
 // as UNVERIFIED. All stages run at the same time, and their checks share jobSlots job slots, so that at
 // most that many external programs run at once. Each report lists its lines in job order.
 //
@@ -416,7 +416,7 @@ func tgaImages(summary *kotor.Summary) {
 				}
 				file := filepath.Join(dir, name)
 
-				// convert keeps the first archive's copy of a name and reports the others.
+				// extract keeps the first archive's copy of a name and reports the others.
 				if seen[name] {
 					continue
 				}

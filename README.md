@@ -7,118 +7,118 @@ All integers and floats are little-endian. Offsets are in hexadecimal and count 
 ## Contents
 
 - [Archives: KEY, BIF, ERF and RIM](#archives-key-bif-erf-and-rim)
-	- [KEY file](#key-file)
-	- [BIF archive](#bif-archive)
-	- [ERF archive](#erf-archive)
-	- [RIM archive](#rim-archive)
+  - [KEY file](#key-file)
+  - [BIF archive](#bif-archive)
+  - [ERF archive](#erf-archive)
+  - [RIM archive](#rim-archive)
 - [Generic file format: GFF](#generic-file-format-gff)
-	- [Header](#header)
-	- [Struct, field and label tables](#struct-field-and-label-tables)
-	- [Field types](#field-types)
-	- [Conversion to JSON](#conversion-to-json)
+  - [Header](#header)
+  - [Struct, field and label tables](#struct-field-and-label-tables)
+  - [Field types](#field-types)
+  - [Conversion to JSON](#conversion-to-json)
 - [Modules: modules/\*.rim](#modules-modulesrim)
-	- [Archive pairs](#archive-pairs)
-	- [Module and area names](#module-and-area-names)
-	- [Contents of the module files](#contents-of-the-module-files)
-	- [Links to other files](#links-to-other-files)
-	- [Compiled scripts: NCS](#compiled-scripts-ncs)
-	- [Conversion and verification](#conversion-and-verification)
+  - [Archive pairs](#archive-pairs)
+  - [Module and area names](#module-and-area-names)
+  - [Contents of the module files](#contents-of-the-module-files)
+  - [Links to other files](#links-to-other-files)
+  - [Compiled scripts: NCS](#compiled-scripts-ncs)
+  - [Conversion and verification](#conversion-and-verification)
 - [Global resources: rims/\*.rim](#global-resources-rimsrim)
-	- [Archives](#archives)
-	- [2DA table](#2da-table)
-	- [SSF sound set](#ssf-sound-set)
-	- [WAV sounds](#wav-sounds)
-	- [Conversion and verification](#conversion-and-verification-1)
+  - [Archives](#archives)
+  - [2DA table](#2da-table)
+  - [SSF sound set](#ssf-sound-set)
+  - [WAV sounds](#wav-sounds)
+  - [Conversion and verification](#conversion-and-verification-1)
 - [Tables, sounds, scripts and templates in the BIF archives](#tables-sounds-scripts-and-templates-in-the-bif-archives)
-	- [2DA tables](#2da-tables)
-	- [WAV sounds](#wav-sounds-1)
-	- [NWScript sources: NSS](#nwscript-sources-nss)
-	- [Templates](#templates)
-	- [LTR letter tables](#ltr-letter-tables)
-	- [Conversion and verification](#conversion-and-verification-2)
+  - [2DA tables](#2da-tables)
+  - [WAV sounds](#wav-sounds-1)
+  - [NWScript sources: NSS](#nwscript-sources-nss)
+  - [Templates](#templates)
+  - [LTR letter tables](#ltr-letter-tables)
+  - [Conversion and verification](#conversion-and-verification-2)
 - [String table: dialog.tlk](#string-table-dialogtlk)
-	- [Flags](#flags)
-	- [Sound names](#sound-names)
-	- [Conversion and verification](#conversion-and-verification-3)
+  - [Flags](#flags)
+  - [Sound names](#sound-names)
+  - [Conversion and verification](#conversion-and-verification-3)
 - [3D models: MDL and MDX](#3d-models-mdl-and-mdx)
-	- [MDL file header](#mdl-file-header)
-	- [Model header](#model-header)
-	- [Node](#node)
-	- [Mesh header](#mesh-header)
-	- [Face](#face)
-	- [MDX file](#mdx-file)
-	- [Walkmeshes in models.bif](#walkmeshes-in-modelsbif)
+  - [MDL file header](#mdl-file-header)
+  - [Model header](#model-header)
+  - [Node](#node)
+  - [Mesh header](#mesh-header)
+  - [Face](#face)
+  - [MDX file](#mdx-file)
+  - [Walkmeshes in models.bif](#walkmeshes-in-modelsbif)
 - [Walkmeshes: BWM](#walkmeshes-bwm)
-	- [Header](#header-1)
-	- [Vertices](#vertices)
-	- [Faces, materials, normals and plane distances](#faces-materials-normals-and-plane-distances)
-	- [AABB tree](#aabb-tree)
-	- [Adjacency table](#adjacency-table)
-	- [Edge table](#edge-table)
-	- [Perimeter table](#perimeter-table)
-	- [Conversion and verification](#conversion-and-verification-4)
+  - [Header](#header-1)
+  - [Vertices](#vertices)
+  - [Faces, materials, normals and plane distances](#faces-materials-normals-and-plane-distances)
+  - [AABB tree](#aabb-tree)
+  - [Adjacency table](#adjacency-table)
+  - [Edge table](#edge-table)
+  - [Perimeter table](#perimeter-table)
+  - [Conversion and verification](#conversion-and-verification-4)
 - [Textures: TPC](#textures-tpc)
-	- [TPC header](#tpc-header)
-	- [Pixel data layout](#pixel-data-layout)
-	- [TXI trailer](#txi-trailer)
-	- [Reduced texture packs: tpb and tpc](#reduced-texture-packs-tpb-and-tpc)
-	- [Conversion to model materials](#conversion-to-model-materials)
+  - [TPC header](#tpc-header)
+  - [Pixel data layout](#pixel-data-layout)
+  - [TXI trailer](#txi-trailer)
+  - [Reduced texture packs: tpb and tpc](#reduced-texture-packs-tpb-and-tpc)
+  - [Conversion to model materials](#conversion-to-model-materials)
 - [Images: TGA in the BIF archives](#images-tga-in-the-bif-archives)
-	- [TGA header](#tga-header)
-	- [Trailer](#trailer)
-	- [Lightmaps](#lightmaps)
-	- [Other resources in the same archives](#other-resources-in-the-same-archives)
+  - [TGA header](#tga-header)
+  - [Trailer](#trailer)
+  - [Lightmaps](#lightmaps)
+  - [Other resources in the same archives](#other-resources-in-the-same-archives)
 - [Room layouts: LYT](#room-layouts-lyt)
-	- [Text layout](#text-layout)
-	- [Comparison with the module door instances](#comparison-with-the-module-door-instances)
-	- [Model names](#model-names)
-	- [Irregularities](#irregularities)
-	- [Conversion and verification](#conversion-and-verification-5)
+  - [Text layout](#text-layout)
+  - [Comparison with the module door instances](#comparison-with-the-module-door-instances)
+  - [Model names](#model-names)
+  - [Irregularities](#irregularities)
+  - [Conversion and verification](#conversion-and-verification-5)
 - [Room visibility lists: VIS](#room-visibility-lists-vis)
-	- [Text layout](#text-layout-1)
-	- [Relation to room layouts](#relation-to-room-layouts)
-	- [Conversion and verification](#conversion-and-verification-6)
+  - [Text layout](#text-layout-1)
+  - [Relation to room layouts](#relation-to-room-layouts)
+  - [Conversion and verification](#conversion-and-verification-6)
 - [User interface layouts: GUI](#user-interface-layouts-gui)
-	- [Resources in patch.erf](#resources-in-patcherf)
-	- [GUI layout content](#gui-layout-content)
+  - [Resources in patch.erf](#resources-in-patcherf)
+  - [GUI layout content](#gui-layout-content)
 - [Patch archive: patch.erf](#patch-archive-patcherf)
-	- [Textures](#textures)
-	- [Tables](#tables)
-	- [Model](#model)
-	- [Conversion and verification](#conversion-and-verification-7)
+  - [Textures](#textures)
+  - [Tables](#tables)
+  - [Model](#model)
+  - [Conversion and verification](#conversion-and-verification-7)
 - [Music: streammusic/\*.wav](#music-streammusicwav)
-	- [Layout A: MP3 behind a fake WAV header](#layout-a-mp3-behind-a-fake-wav-header)
-	- [Layout B: WAV behind an MP3 stub](#layout-b-wav-behind-an-mp3-stub)
-	- [IMA ADPCM encoding](#ima-adpcm-encoding)
-	- [Conversion and verification](#conversion-and-verification-8)
+  - [Layout A: MP3 behind a fake WAV header](#layout-a-mp3-behind-a-fake-wav-header)
+  - [Layout B: WAV behind an MP3 stub](#layout-b-wav-behind-an-mp3-stub)
+  - [IMA ADPCM encoding](#ima-adpcm-encoding)
+  - [Conversion and verification](#conversion-and-verification-8)
 - [Sound effects and voices: streamsounds/\*.wav](#sound-effects-and-voices-streamsoundswav)
-	- [Embedded WAV](#embedded-wav)
-	- [File names](#file-names)
-	- [Verification](#verification)
+  - [Embedded WAV](#embedded-wav)
+  - [File names](#file-names)
+  - [Verification](#verification)
 - [Voice-over: streamwaves/\*\*/\*.wav](#voice-over-streamwaveswav)
-	- [Fake header](#fake-header)
-	- [MP3 stream](#mp3-stream)
-	- [Folder structure and file names](#folder-structure-and-file-names)
-	- [Verification](#verification-1)
+  - [Fake header](#fake-header)
+  - [MP3 stream](#mp3-stream)
+  - [Folder structure and file names](#folder-structure-and-file-names)
+  - [Verification](#verification-1)
 - [Lip sync: lips/\*.mod](#lip-sync-lipsmod)
-	- [Archives](#archives-1)
-	- [LIP resource](#lip-resource)
-	- [Link to the voice files](#link-to-the-voice-files)
-	- [Conversion and verification](#conversion-and-verification-9)
+  - [Archives](#archives-1)
+  - [LIP resource](#lip-resource)
+  - [Link to the voice files](#link-to-the-voice-files)
+  - [Conversion and verification](#conversion-and-verification-9)
 - [Movies: movies/\*.bik](#movies-moviesbik)
-	- [Header](#header-2)
-	- [Frame index](#frame-index)
-	- [Frame](#frame)
-	- [Conversion and verification](#conversion-and-verification-10)
+  - [Header](#header-2)
+  - [Frame index](#frame-index)
+  - [Frame](#frame)
+  - [Conversion and verification](#conversion-and-verification-10)
 - [Saved games: saves/\*/](#saved-games-saves)
-	- [Files of a saved game](#files-of-a-saved-game)
-	- [Saved game archive: SAVEGAME.sav](#saved-game-archive-savegamesav)
-	- [GFF field types in saved games](#gff-field-types-in-saved-games)
-	- [Global variables: GLOBALVARS.res](#global-variables-globalvarsres)
-	- [Party table: PARTYTABLE.res](#party-table-partytableres)
-	- [Save summary: savenfo.res](#save-summary-savenfores)
-	- [Screenshot: Screen.tga](#screenshot-screentga)
-	- [Conversion and verification](#conversion-and-verification-11)
+  - [Files of a saved game](#files-of-a-saved-game)
+  - [Saved game archive: SAVEGAME.sav](#saved-game-archive-savegamesav)
+  - [GFF field types in saved games](#gff-field-types-in-saved-games)
+  - [Global variables: GLOBALVARS.res](#global-variables-globalvarsres)
+  - [Party table: PARTYTABLE.res](#party-table-partytableres)
+  - [Save summary: savenfo.res](#save-summary-savenfores)
+  - [Screenshot: Screen.tga](#screenshot-screentga)
+  - [Conversion and verification](#conversion-and-verification-11)
 
 # Archives: KEY, BIF, ERF and RIM
 
@@ -213,15 +213,15 @@ In the "V3.2" row, the four characters before the version differ by type and are
 
 The table below lists what each archive holds and where its conversion is described. Every archive is converted except `items.bif`, `party.bif` and `player.bif`. Their 387 models pass the checks of the model converter (see "3D models: MDL and MDX"), but they are not written.
 
-| Archives                                      | Contents                                    | Section                                                      |
-| --------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------ |
-| `models.bif`                                  | 2,445 models and 1,554 walkmeshes           | "3D models: MDL and MDX", "Walkmeshes: BWM"                  |
-| `items.bif`, `party.bif`, `player.bif`        | 305, 19 and 63 models                       | Not converted                                                |
-| `lightmaps.bif`, `lightmaps2.bif` to `13.bif` | 5,586 TGA lightmaps, their TXI files, 112 VIS | "Images: TGA in the BIF archives", "Room visibility lists: VIS" |
-| `textures.bif`, `legacy.bif`                  | 15 TGA images and 28 TXI files              | "Images: TGA in the BIF archives"                            |
-| `gui.bif`                                     | 84 GUI layouts                              | "User interface layouts: GUI"                                |
-| `layouts.bif`                                 | 124 room layouts                            | "Room layouts: LYT"                                          |
-| `2da.bif`, `sounds.bif`, `scripts.bif`, `templates.bif`, `_newbif.bif` | Tables, sounds, scripts, templates and the journal | "Tables, sounds, scripts and templates in the BIF archives" |
+| Archives                                                               | Contents                                           | Section                                                         |
+| ---------------------------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------- |
+| `models.bif`                                                           | 2,445 models and 1,554 walkmeshes                  | "3D models: MDL and MDX", "Walkmeshes: BWM"                     |
+| `items.bif`, `party.bif`, `player.bif`                                 | 305, 19 and 63 models                              | Not converted                                                   |
+| `lightmaps.bif`, `lightmaps2.bif` to `13.bif`                          | 5,586 TGA lightmaps, their TXI files, 112 VIS      | "Images: TGA in the BIF archives", "Room visibility lists: VIS" |
+| `textures.bif`, `legacy.bif`                                           | 15 TGA images and 28 TXI files                     | "Images: TGA in the BIF archives"                               |
+| `gui.bif`                                                              | 84 GUI layouts                                     | "User interface layouts: GUI"                                   |
+| `layouts.bif`                                                          | 124 room layouts                                   | "Room layouts: LYT"                                             |
+| `2da.bif`, `sounds.bif`, `scripts.bif`, `templates.bif`, `_newbif.bif` | Tables, sounds, scripts, templates and the journal | "Tables, sounds, scripts and templates in the BIF archives"     |
 
 ## ERF archive
 
@@ -327,15 +327,15 @@ GFF (generic file format) is the tree container of most structured resources: us
 
 The game holds 11,152 GFF files, listed in the table below. No other archive holds one.
 
-| Source               | Files | File types                                                                   |
-| -------------------- | ----- | ---------------------------------------------------------------------------- |
-| `data/gui.bif`       | 84    | GUI                                                                          |
-| `patch.erf`          | 7     | GUI                                                                          |
+| Source               | Files | File types                                                                     |
+| -------------------- | ----- | ------------------------------------------------------------------------------ |
+| `data/gui.bif`       | 84    | GUI                                                                            |
+| `patch.erf`          | 7     | GUI                                                                            |
 | `modules/`           | 9,712 | ARE, DLG, FAC, GIT, IFO, JRL, PTH, UTC, UTD, UTE, UTI, UTM, UTP, UTS, UTT, UTW |
-| `rims/`              | 62    | UTI                                                                          |
-| `data/templates.bif` | 1,277 | BIC, BTC, BTI, DLG, ITP, UTC, UTD, UTE, UTI, UTP, UTT, UTW                   |
-| `data/_newbif.bif`   | 1     | JRL                                                                          |
-| The saved game       | 9     | ARE, FAC, GIT, GVT, IFO, INV, NFO, PT, UTC                                   |
+| `rims/`              | 62    | UTI                                                                            |
+| `data/templates.bif` | 1,277 | BIC, BTC, BTI, DLG, ITP, UTC, UTD, UTE, UTI, UTP, UTT, UTW                     |
+| `data/_newbif.bif`   | 1     | JRL                                                                            |
+| The saved game       | 9     | ARE, FAC, GIT, GVT, IFO, INV, NFO, PT, UTC                                     |
 
 These are 25 file types in all. Each resource type always carries the same file type, and the lowercase file type is the extension that this document uses for the resource type, such as "utc" for type 2027.
 
@@ -345,42 +345,42 @@ All 11,152 files parse under the strict rules of the reader. The six regions cha
 
 A GFF file begins with a 56-byte header. After the signature, it consists of six pairs of u32 values, and each pair locates one region of the file. The evidence below holds for all 11,152 files.
 
-| Offset | Type    | Meaning                                 | Evidence                                                                             | Confidence |
-| ------ | ------- | --------------------------------------- | ------------------------------------------------------------------------------------ | ---------- |
-| 0x00   | char[4] | File type, such as "GUI "               | Matches the resource type in every archive.                                          | high       |
-| 0x04   | char[4] | Version, "V3.2"                         | Present in all files.                                                                | high       |
-| 0x08   | u32     | Offset of the struct table (always 56)  | The value is 56 in all files.                                                        | high       |
-| 0x0C   | u32     | Number of structs                       | The next region starts at the struct table offset plus 12 bytes per struct.          | high       |
-| 0x10   | u32     | Offset of the field table               | Equals the struct table offset plus 12 times the struct count.                       | high       |
-| 0x14   | u32     | Number of fields                        | The next region starts at the field table offset plus 12 bytes per field.            | high       |
-| 0x18   | u32     | Offset of the label table               | Equals the field table offset plus 12 times the field count.                         | high       |
-| 0x1C   | u32     | Number of labels                        | The next region starts at the label table offset plus 16 bytes per label.            | high       |
-| 0x20   | u32     | Offset of the field data region         | Equals the label table offset plus 16 times the label count.                         | high       |
-| 0x24   | u32     | Size of the field data region in bytes  | The next region starts at its end.                                                   | high       |
-| 0x28   | u32     | Offset of the field index region        | Directly follows the field data region.                                              | high       |
-| 0x2C   | u32     | Size of the field index region in bytes | The next region starts at its end.                                                   | high       |
-| 0x30   | u32     | Offset of the list index region         | Directly follows the field index region.                                             | high       |
-| 0x34   | u32     | Size of the list index region in bytes  | The region ends exactly at the end of the file.                                      | high       |
+| Offset | Type    | Meaning                                 | Evidence                                                                    | Confidence |
+| ------ | ------- | --------------------------------------- | --------------------------------------------------------------------------- | ---------- |
+| 0x00   | char[4] | File type, such as "GUI "               | Matches the resource type in every archive.                                 | high       |
+| 0x04   | char[4] | Version, "V3.2"                         | Present in all files.                                                       | high       |
+| 0x08   | u32     | Offset of the struct table (always 56)  | The value is 56 in all files.                                               | high       |
+| 0x0C   | u32     | Number of structs                       | The next region starts at the struct table offset plus 12 bytes per struct. | high       |
+| 0x10   | u32     | Offset of the field table               | Equals the struct table offset plus 12 times the struct count.              | high       |
+| 0x14   | u32     | Number of fields                        | The next region starts at the field table offset plus 12 bytes per field.   | high       |
+| 0x18   | u32     | Offset of the label table               | Equals the field table offset plus 12 times the field count.                | high       |
+| 0x1C   | u32     | Number of labels                        | The next region starts at the label table offset plus 16 bytes per label.   | high       |
+| 0x20   | u32     | Offset of the field data region         | Equals the label table offset plus 16 times the label count.                | high       |
+| 0x24   | u32     | Size of the field data region in bytes  | The next region starts at its end.                                          | high       |
+| 0x28   | u32     | Offset of the field index region        | Directly follows the field data region.                                     | high       |
+| 0x2C   | u32     | Size of the field index region in bytes | The next region starts at its end.                                          | high       |
+| 0x30   | u32     | Offset of the list index region         | Directly follows the field index region.                                    | high       |
+| 0x34   | u32     | Size of the list index region in bytes  | The region ends exactly at the end of the file.                             | high       |
 
 ## Struct, field and label tables
 
 A struct is a group of fields. Struct 0 is the root of the tree. Each entry of the struct table is 12 bytes.
 
-| Offset | Type | Meaning                                                                                                                  | Evidence                                                                                                       | Confidence |
-| ------ | ---- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | u32  | Struct type                                                                                                              | 0xFFFFFFFF on the root of all 11,152 files. See below.                                                         | low        |
+| Offset | Type | Meaning                                                                                                                                                               | Evidence                                                                                                                | Confidence |
+| ------ | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | u32  | Struct type                                                                                                                                                           | 0xFFFFFFFF on the root of all 11,152 files. See below.                                                                  | low        |
 | 0x04   | u32  | For a struct with one field, the index of that field. Otherwise a byte offset into the field index region, where the struct's field indices are stored as u32 values. | Under this reading, every field is used exactly once in all files. The module files hold 40,631 structs with one field. | high       |
-| 0x08   | u32  | Number of fields                                                                                                         | Every field index that a struct reads is valid.                                                                | high       |
+| 0x08   | u32  | Number of fields                                                                                                                                                      | Every field index that a struct reads is valid.                                                                         | high       |
 
 No struct in any file has zero fields, so the encoding of an empty struct is UNKNOWN.
 
 Each entry of the field table is 12 bytes.
 
-| Offset | Type | Meaning                                                    | Evidence                                                         | Confidence |
-| ------ | ---- | ---------------------------------------------------------- | ---------------------------------------------------------------- | ---------- |
+| Offset | Type | Meaning                                                    | Evidence                                                          | Confidence |
+| ------ | ---- | ---------------------------------------------------------- | ----------------------------------------------------------------- | ---------- |
 | 0x00   | u32  | Field type (see below)                                     | Sixteen values occur. Each decodes consistently across all files. | high       |
-| 0x04   | u32  | Index into the label table                                 | Every index is valid.                                            | high       |
-| 0x08   | u32  | The value itself, or an offset or index, depending on type | See the field type table.                                        | high       |
+| 0x04   | u32  | Index into the label table                                 | Every index is valid.                                             | high       |
+| 0x08   | u32  | The value itself, or an offset or index, depending on type | See the field type table.                                         | high       |
 
 Each entry of the label table is a 16-byte name, padded with NUL bytes, for example "EXTENT". A label does not determine the field type: in the GUI files, "TEXT" is a string in 1,631 fields and a struct in 2,016 fields.
 
@@ -390,35 +390,35 @@ The meaning of the struct type is UNKNOWN, but its values follow patterns. The r
 
 The table below lists the 18 field types. The count is the number of fields of the type in all 11,152 files. Types 0 to 5 and 8 store their value in the field entry itself, with signed types sign-extended to 32 bits. The other types store an offset into the field data or the list index region, or an index into the struct table.
 
-| Type | Count   | Value                                                                                               | Evidence                                                                                                                                                                                                                                           | Confidence |
-| ---- | ------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 0    | 403,541 | u8 stored in the field entry                                                                        | All values are at most 0xFF. In the GUI files the values are only 0, 1 and 2, with labels for flags such as PULSING and Obj_Locked.                                                                                                                | medium     |
-| 1    | 407     | i8 stored in the field entry                                                                        | Occurs only in the saved game. Values such as 0xFFFFFFFB (-5) occur in labels such as `Modifier` and `RefSaveThrow`. All values lie between -5 and 16.                                                                                             | high       |
-| 2    | 45,192  | u16 stored in the field entry                                                                       | All values are at most 0xFFFF. Labels include Feat, Spell and PortraitId.                                                                                                                                                                          | medium     |
-| 3    | 22,964  | i16 stored in the field entry                                                                       | In the module files all values lie between 0 and 1,000, with labels such as HitPoints and ClassLevel. In the saved game, 150 DamageValue fields hold 0xFFFFFFFF, which is -1 sign-extended.                                                        | high       |
-| 4    | 282,652 | u32 stored in the field entry                                                                       | In the GUI files it is used only by STRREF, where 0xFFFFFFFF marks no string.                                                                                                                                                                      | medium     |
-| 5    | 110,836 | i32 stored in the field entry                                                                       | GUI coordinates such as LEFT and WIDTH are plausible, and Obj_ParentID uses -1.                                                                                                                                                                    | high       |
-| 6    | 128     | u64: offset into field data, where 8 bytes are stored                                               | Occurs only in the saved game: in `Id` of effect lists (127 fields) and in `Mod_Effect_NxtId`. The 127 `Id` values are distinct and at most 504, the value of `Mod_Effect_NxtId`. Whether the type is signed is UNKNOWN, because no value is large enough to tell. | medium     |
-| 7    | 0       | UNKNOWN, probably i64 in 8 bytes of field data                                                      | Occurs in no file. `ReadGff` reads it by analogy with types 0 to 6.                                                                                                                                                                               | low        |
-| 8    | 161,273 | f32 stored in the field entry                                                                       | In the GUI files ALPHA is always 1.0 and ROTATE is always 0.0.                                                                                                                                                                                     | medium     |
-| 9    | 0       | UNKNOWN, probably f64 in 8 bytes of field data                                                      | Occurs in no file. `ReadGff` reads it by analogy with type 8.                                                                                                                                                                                      | low        |
-| 10   | 256,816 | String: offset into field data, where a u32 length is followed by that many characters              | Decodes to tags and text such as "LBL_BARKTEXT".                                                                                                                                                                                                   | high       |
-| 11   | 360,371 | Resref: offset into field data, where a u8 length (at most 16) is followed by that many characters  | Decodes to names of resources that exist in the game files (see "Links to other files" and "GUI layout content").                                                                                                                                  | high       |
-| 12   | 88,225  | Localized string: offset into field data (layout below)                                             | The size field matches the content in all fields. Labels include Text, Description and LocalizedName.                                                                                                                                              | high       |
-| 13   | 128     | Binary data: offset into field data, where a u32 length is followed by that many bytes              | In the module files it is used only by Mod_ID, where the length is always 16. The saved game also uses it for packed variables (see "Global variables: GLOBALVARS.res").                                                                          | medium     |
-| 14   | 10,770  | Struct: index into the struct table                                                                 | Every non-root struct is referenced exactly once by a type 14 or type 15 field.                                                                                                                                                                    | high       |
-| 15   | 130,468 | List: offset into the list index region, where a u32 count is followed by that many struct indices  | The list index region is covered exactly, except in the files described below.                                                                                                                                                                    | high       |
-| 16   | 1,177   | Orientation: offset into field data, where four f32 values are stored                               | Used only by Orientation in the GIT camera lists. The squared length of all 1,137 module values lies between 0.99999 and 1.00001, so the four values are probably a unit quaternion. Their order is UNKNOWN.                                       | medium     |
-| 17   | 7,869   | Vector: offset into field data, where three f32 values are stored                                   | In the GUI files it is used only by COLOR, whose components lie between 0 and 1, except the value (-1, -1, -1).                                                                                                                                    | high       |
+| Type | Count   | Value                                                                                              | Evidence                                                                                                                                                                                                                                                           | Confidence |
+| ---- | ------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| 0    | 403,541 | u8 stored in the field entry                                                                       | All values are at most 0xFF. In the GUI files the values are only 0, 1 and 2, with labels for flags such as PULSING and Obj_Locked.                                                                                                                                | medium     |
+| 1    | 407     | i8 stored in the field entry                                                                       | Occurs only in the saved game. Values such as 0xFFFFFFFB (-5) occur in labels such as `Modifier` and `RefSaveThrow`. All values lie between -5 and 16.                                                                                                             | high       |
+| 2    | 45,192  | u16 stored in the field entry                                                                      | All values are at most 0xFFFF. Labels include Feat, Spell and PortraitId.                                                                                                                                                                                          | medium     |
+| 3    | 22,964  | i16 stored in the field entry                                                                      | In the module files all values lie between 0 and 1,000, with labels such as HitPoints and ClassLevel. In the saved game, 150 DamageValue fields hold 0xFFFFFFFF, which is -1 sign-extended.                                                                        | high       |
+| 4    | 282,652 | u32 stored in the field entry                                                                      | In the GUI files it is used only by STRREF, where 0xFFFFFFFF marks no string.                                                                                                                                                                                      | medium     |
+| 5    | 110,836 | i32 stored in the field entry                                                                      | GUI coordinates such as LEFT and WIDTH are plausible, and Obj_ParentID uses -1.                                                                                                                                                                                    | high       |
+| 6    | 128     | u64: offset into field data, where 8 bytes are stored                                              | Occurs only in the saved game: in `Id` of effect lists (127 fields) and in `Mod_Effect_NxtId`. The 127 `Id` values are distinct and at most 504, the value of `Mod_Effect_NxtId`. Whether the type is signed is UNKNOWN, because no value is large enough to tell. | medium     |
+| 7    | 0       | UNKNOWN, probably i64 in 8 bytes of field data                                                     | Occurs in no file. `ReadGff` reads it by analogy with types 0 to 6.                                                                                                                                                                                                | low        |
+| 8    | 161,273 | f32 stored in the field entry                                                                      | In the GUI files ALPHA is always 1.0 and ROTATE is always 0.0.                                                                                                                                                                                                     | medium     |
+| 9    | 0       | UNKNOWN, probably f64 in 8 bytes of field data                                                     | Occurs in no file. `ReadGff` reads it by analogy with type 8.                                                                                                                                                                                                      | low        |
+| 10   | 256,816 | String: offset into field data, where a u32 length is followed by that many characters             | Decodes to tags and text such as "LBL_BARKTEXT".                                                                                                                                                                                                                   | high       |
+| 11   | 360,371 | Resref: offset into field data, where a u8 length (at most 16) is followed by that many characters | Decodes to names of resources that exist in the game files (see "Links to other files" and "GUI layout content").                                                                                                                                                  | high       |
+| 12   | 88,225  | Localized string: offset into field data (layout below)                                            | The size field matches the content in all fields. Labels include Text, Description and LocalizedName.                                                                                                                                                              | high       |
+| 13   | 128     | Binary data: offset into field data, where a u32 length is followed by that many bytes             | In the module files it is used only by Mod_ID, where the length is always 16. The saved game also uses it for packed variables (see "Global variables: GLOBALVARS.res").                                                                                           | medium     |
+| 14   | 10,770  | Struct: index into the struct table                                                                | Every non-root struct is referenced exactly once by a type 14 or type 15 field.                                                                                                                                                                                    | high       |
+| 15   | 130,468 | List: offset into the list index region, where a u32 count is followed by that many struct indices | The list index region is covered exactly, except in the files described below.                                                                                                                                                                                     | high       |
+| 16   | 1,177   | Orientation: offset into field data, where four f32 values are stored                              | Used only by Orientation in the GIT camera lists. The squared length of all 1,137 module values lies between 0.99999 and 1.00001, so the four values are probably a unit quaternion. Their order is UNKNOWN.                                                       | medium     |
+| 17   | 7,869   | Vector: offset into field data, where three f32 values are stored                                  | In the GUI files it is used only by COLOR, whose components lie between 0 and 1, except the value (-1, -1, -1).                                                                                                                                                    | high       |
 
 A localized string stores a string number and any number of literal substrings. Its layout in the field data is described below.
 
-| Offset | Type   | Meaning                                         | Evidence                                                                                                                                                                                                                | Confidence |
-| ------ | ------ | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | u32    | Number of bytes that follow this field          | Equals the length of the rest of the value in all 88,225 fields.                                                                                                                                                        | high       |
-| 0x04   | u32    | String number in `dialog.tlk`, or 0xFFFFFFFF    | Every number other than 0xFFFFFFFF names an entry with text, such as 35,782, "Taris - South Apartments", for the area name of `tar_m02aa`. 0xFFFFFFFF occurs where a literal substring is given instead.                | high       |
-| 0x08   | u32    | Number of substrings                            | The value is 0 in 77,091 and 1 in 170 of the 77,261 module fields.                                                                                                                                                      | high       |
-| 0x0C   | varies | Substrings: u32 ID, u32 length, then characters | All 170 substrings of the module files have ID 0. Their text is plausible, for example the IFO Mod_Name "tar_m02aa".                                                                                                    | medium     |
+| Offset | Type   | Meaning                                         | Evidence                                                                                                                                                                                                 | Confidence |
+| ------ | ------ | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | u32    | Number of bytes that follow this field          | Equals the length of the rest of the value in all 88,225 fields.                                                                                                                                         | high       |
+| 0x04   | u32    | String number in `dialog.tlk`, or 0xFFFFFFFF    | Every number other than 0xFFFFFFFF names an entry with text, such as 35,782, "Taris - South Apartments", for the area name of `tar_m02aa`. 0xFFFFFFFF occurs where a literal substring is given instead. | high       |
+| 0x08   | u32    | Number of substrings                            | The value is 0 in 77,091 and 1 in 170 of the 77,261 module fields.                                                                                                                                       | high       |
+| 0x0C   | varies | Substrings: u32 ID, u32 length, then characters | All 170 substrings of the module files have ID 0. Their text is plausible, for example the IFO Mod_Name "tar_m02aa".                                                                                     | medium     |
 
 The meaning of the substring ID is UNKNOWN, because only the value 0 occurs in the module files. It may encode a language.
 
@@ -426,16 +426,16 @@ In 34 files, some bytes of the field index or list index region are not referenc
 
 ## Conversion to JSON
 
-Every GFF file is converted to JSON by `gffJson` in `cmd/convert/json.go`. Each struct becomes an object keyed by field label in file order, a struct type other than 0 is kept as `__struct_type`, and lists become arrays. The values are written as described in the table below.
+Every GFF file is converted to JSON by `gffJson` in `cmd/extract/json.go`. Each struct becomes an object keyed by field label in file order, a struct type other than 0 is kept as `__struct_type`, and lists become arrays. The values are written as described in the table below.
 
-| Type          | JSON value                                                                                                                                                                                             |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 0 to 6, 8     | A number. An f32 uses the shortest decimal that reads back as the same f32, and a 64-bit integer is written exactly.                                                                                   |
-| 10, 11        | A string, decoded as Latin-1.                                                                                                                                                                          |
-| 12            | An object with `strref`, the string number, or null for 0xFFFFFFFF; `text`, the text of that entry in `dialog.tlk`; and `substrings`, when there are any, as an array of objects with `id` and `text`. |
-| 13            | A string of lowercase hexadecimal digits.                                                                                                                                                              |
-| 14, 15        | An object, or an array of objects.                                                                                                                                                                     |
-| 16, 17        | An array of four or three numbers in file order.                                                                                                                                                       |
+| Type      | JSON value                                                                                                                                                                                             |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0 to 6, 8 | A number. An f32 uses the shortest decimal that reads back as the same f32, and a 64-bit integer is written exactly.                                                                                   |
+| 10, 11    | A string, decoded as Latin-1.                                                                                                                                                                          |
+| 12        | An object with `strref`, the string number, or null for 0xFFFFFFFF; `text`, the text of that entry in `dialog.tlk`; and `substrings`, when there are any, as an array of objects with `id` and `text`. |
+| 13        | A string of lowercase hexadecimal digits.                                                                                                                                                              |
+| 14, 15    | An object, or an array of objects.                                                                                                                                                                     |
+| 16, 17    | An array of four or three numbers in file order.                                                                                                                                                       |
 
 The following example shows the area name in `extracted/modules/tar_m02aa/m02aa.are.json`.
 
@@ -454,7 +454,7 @@ The only string byte above 0x7F in the GUI files is 0xB1 in six strings, which i
 
 A module is one playable location of the game, such as one district of a planet. The folder `modules/` holds 117 modules in 234 RIM archives, 70 MB in total. Each module consists of two archives: `<module>.rim`, called the main archive here, and `<module>_s.rim`, called the support archive here. The main archive describes the area and the objects placed in it. The support archive holds the templates, dialogs and scripts that those objects use. The area's 3D geometry is not in the module; it is in the BIF archives (see "Links to other files" below).
 
-The reader is `ReadRim` in `kotor/kotor.go`. Every resource except the scripts is read with `ReadGff` in `kotor/gff.go`, and the scripts are read with `ParseNcs` in `kotor/ncs.go`. The `modules` stage of `cmd/convert` converts every resource to `extracted/modules/` and writes one report line per resource to `temp/reports/modules.txt` (see "Conversion and verification" below). All 234 archives pass: each RIM table parses, all 9,712 GFF resources parse with the signature that matches their resource type and version "V3.2", and all 10,863 scripts decode completely.
+The reader is `ReadRim` in `kotor/kotor.go`. Every resource except the scripts is read with `ReadGff` in `kotor/gff.go`, and the scripts are read with `ParseNcs` in `kotor/ncs.go`. The `modules` stage of `cmd/extract` converts every resource to `extracted/modules/` and writes one report line per resource to `temp/reports/modules.txt` (see "Conversion and verification" below). All 234 archives pass: each RIM table parses, all 9,712 GFF resources parse with the signature that matches their resource type and version "V3.2", and all 10,863 scripts decode completely.
 
 ## Archive pairs
 
@@ -494,7 +494,7 @@ The IFO file names the module's area in three places: the single entry of `Mod_A
 
 In 86 modules, the area name is the module name without its prefix, for example area `m02aa` in module `tar_m02aa`. The other 31 are the 20 `STUNT` modules, whose areas have names such as `stunt_ebocom` or reuse another area's name such as `m40ad`, and 11 others: `danm13`, `danm15` and `danm16` (areas `m13aa`, `m15aa`, `m16aa`), `ebo_m40aa`, `ebo_m40ad` and `ebo_m41aa` (all area `m12aa`), `ebo_m46ab` (`m46aa`), `korr_m38aa` (`m38ab`), `korr_m38ab` (`m38aa`), `liv_m99aa` (`m50aa`) and `tat_m17ag` (`m17ae`). Several modules thus share an area name and its geometry.
 
-Each of the 117 modules has a matching lip sync archive `lips/<module>_loc.mod`. The IFO field `Mod_VO_ID` is empty in 19 modules and equals the area name in 76. It is the module part of the names of the module's voice files: 30,923 of the 34,673 voice references in the module dialogs begin with "n" or "_" followed by the `Mod_VO_ID` of their module (see "Voice-over: streamwaves/\*\*/\*.wav"). The others include references to shared conversations under `globe`, references to conversations of other modules, and the references of modules without a `Mod_VO_ID`. In 90 modules, `Mod_VO_ID` is also the name of a folder in `streamwaves/`.
+Each of the 117 modules has a matching lip sync archive `lips/<module>_loc.mod`. The IFO field `Mod_VO_ID` is empty in 19 modules and equals the area name in 76. It is the module part of the names of the module's voice files: 30,923 of the 34,673 voice references in the module dialogs begin with "n" or "\_" followed by the `Mod_VO_ID` of their module (see "Voice-over: streamwaves/\*\*/\*.wav"). The others include references to shared conversations under `globe`, references to conversations of other modules, and the references of modules without a `Mod_VO_ID`. In 90 modules, `Mod_VO_ID` is also the name of a folder in `streamwaves/`.
 
 ## Contents of the module files
 
@@ -538,11 +538,11 @@ The 15 rooms without a model all have the placeholder name `****`, and all are i
 
 The area's geometry and layout are in BIF archives under the area name. The table below lists the resource types that hold them.
 
-| Type | Archive               | Content                                                                                                                         |
-| ---- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| 3000 | `data/layouts.bif`    | Room layout (LYT), described in the section "Room layouts: LYT".                                                               |
-| 3001 | `data/lightmaps*.bif` | Room visibility list (VIS), described in the section "Room visibility lists: VIS".                                             |
-| 2016 | `data/models.bif`     | Area room walkmesh (BWM), named after its room model, described in the section "Walkmeshes: BWM".                               |
+| Type | Archive               | Content                                                                                           |
+| ---- | --------------------- | ------------------------------------------------------------------------------------------------- |
+| 3000 | `data/layouts.bif`    | Room layout (LYT), described in the section "Room layouts: LYT".                                  |
+| 3001 | `data/lightmaps*.bif` | Room visibility list (VIS), described in the section "Room visibility lists: VIS".                |
+| 2016 | `data/models.bif`     | Area room walkmesh (BWM), named after its room model, described in the section "Walkmeshes: BWM". |
 
 ## Compiled scripts: NCS
 
@@ -642,7 +642,7 @@ The module scripts call 401 of the 772 routines. The most frequent calls are Get
 
 ## Conversion and verification
 
-The `modules` stage of `cmd/convert` converts every resource of the 234 archives. Its output keeps the layout of the game files: one folder `extracted/modules/<archive>/` per archive, named after the archive without `.rim`, so a module has a main folder such as `tar_m02aa` and a support folder such as `tar_m02aa_s`. The report is `temp/reports/modules.txt`, with one line per resource. All 20,575 resources pass.
+The `modules` stage of `cmd/extract` converts every resource of the 234 archives. Its output keeps the layout of the game files: one folder `extracted/modules/<archive>/` per archive, named after the archive without `.rim`, so a module has a main folder such as `tar_m02aa` and a support folder such as `tar_m02aa_s`. The report is `temp/reports/modules.txt`, with one line per resource. All 20,575 resources pass.
 
 A GFF resource becomes `<resref>.<ext>.json` in the JSON form described under "Generic file format: GFF", for example `m02aa.are.json`. The extension stays in the name because the ARE and GIT files of an area share a resref. The report lines of the 29 module files with unreferenced bytes give the number of those bytes.
 
@@ -669,7 +669,7 @@ The `modules` stage of `cmd/verify` writes two reports. In `temp/reports/jq_modu
 
 # Global resources: rims/\*.rim
 
-The folder `rims/` holds 12 RIM archives with resources that do not belong to one module: models, sounds, tables, sound sets, item templates and scripts. Every one of these resources is a copy of a resource in the BIF archives, so the archives probably let the game load a fixed set of resources at once. The archives are read with `ReadRim` in `kotor/kotor.go`. Three formats occur here that the module archives do not hold: the 2DA table, the SSF sound set and the WAV sound. The `rims` stage of `cmd/convert` converts every resource (see "Conversion and verification" below).
+The folder `rims/` holds 12 RIM archives with resources that do not belong to one module: models, sounds, tables, sound sets, item templates and scripts. Every one of these resources is a copy of a resource in the BIF archives, so the archives probably let the game load a fixed set of resources at once. The archives are read with `ReadRim` in `kotor/kotor.go`. Three formats occur here that the module archives do not hold: the 2DA table, the SSF sound set and the WAV sound. The `rims` stage of `cmd/extract` converts every resource (see "Conversion and verification" below).
 
 ## Archives
 
@@ -772,7 +772,7 @@ The four IMA ADPCM files are `cb_sh_blast1`, `cb_sh_hvybl1`, `cb_sh_medbl1` and 
 
 ## Conversion and verification
 
-The `rims` stage of `cmd/convert` writes one folder `extracted/rims/<archive>/` per archive without "dx" and writes the report `temp/reports/rims.txt`. The report has one line per archive and one line per resource, except the MDX resources, which are read together with their models. All 1,696 lines pass: the 12 archive tables, 239 models, 375 sounds, 306 tables, 210 sound sets, 62 item templates and 492 scripts. The resources become the files below.
+The `rims` stage of `cmd/extract` writes one folder `extracted/rims/<archive>/` per archive without "dx" and writes the report `temp/reports/rims.txt`. The report has one line per archive and one line per resource, except the MDX resources, which are read together with their models. All 1,696 lines pass: the 12 archive tables, 239 models, 375 sounds, 306 tables, 210 sound sets, 62 item templates and 492 scripts. The resources become the files below.
 
 | Resource     | Output                         | Form                                                                                                                           |
 | ------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
@@ -796,15 +796,15 @@ The `rims` stage of `cmd/verify` writes five reports, and every line passes. In 
 
 # Tables, sounds, scripts and templates in the BIF archives
 
-Five BIF archives hold rule tables, sound effects, scripts, object templates and the quest journal. Most of their formats are already described under modules and global resources; this section gives what is specific to these archives and describes two formats that occur only here, the NWScript source and the LTR letter table. The `bifs` stage of `cmd/convert` converts every resource of these five archives, and also the room layouts of `layouts.bif`, which are described in the section "Room layouts: LYT". The table below lists the five archives and their contents.
+Five BIF archives hold rule tables, sound effects, scripts, object templates and the quest journal. Most of their formats are already described under modules and global resources; this section gives what is specific to these archives and describes two formats that occur only here, the NWScript source and the LTR letter table. The `bifs` stage of `cmd/extract` converts every resource of these five archives, and also the room layouts of `layouts.bif`, which are described in the section "Room layouts: LYT". The table below lists the five archives and their contents.
 
-| Archive         | Resources | Contents                                                     | Output                    |
-| --------------- | --------- | ------------------------------------------------------------ | ------------------------- |
-| `2da.bif`       | 209       | 209 2DA tables                                               | `extracted/data/2da/`        |
-| `sounds.bif`    | 1,928     | 1,928 WAV sounds                                             | `extracted/data/sounds/`     |
-| `scripts.bif`   | 3,558     | 1,784 compiled scripts (NCS) and 1,774 script sources (NSS)  | `extracted/data/scripts/`    |
+| Archive         | Resources | Contents                                                      | Output                      |
+| --------------- | --------- | ------------------------------------------------------------- | --------------------------- |
+| `2da.bif`       | 209       | 209 2DA tables                                                | `extracted/data/2da/`       |
+| `sounds.bif`    | 1,928     | 1,928 WAV sounds                                              | `extracted/data/sounds/`    |
+| `scripts.bif`   | 3,558     | 1,784 compiled scripts (NCS) and 1,774 script sources (NSS)   | `extracted/data/scripts/`   |
 | `templates.bif` | 1,387     | 1,277 GFF files of 12 types, 106 SSF sound sets, 3 LTR, 1 TXI | `extracted/data/templates/` |
-| `_newbif.bif`   | 1         | 1 journal (JRL), `global`                                    | `extracted/data/_newbif/`    |
+| `_newbif.bif`   | 1         | 1 journal (JRL), `global`                                     | `extracted/data/_newbif/`   |
 
 ## 2DA tables
 
@@ -842,20 +842,20 @@ All 1,774 sources are text with CRLF line breaks, and none contains a NUL byte. 
 
 `templates.bif` holds the templates that the game creates objects from, together with the palettes and the name tables that support them. All 1,277 GFF files carry the signature of their type with version "V3.2" and parse with `ReadGff`. Five of them have unreferenced bytes in the field index or list index region, as described under "Generic file format: GFF": the BIC file (44 bytes) and four ITP files (8 to 252 bytes). The table below lists the types. The types that do not occur in the modules are named after their signatures; their meanings come from their field labels and are not confirmed.
 
-| Type | Ext | Files | Probable content                                                                                                     | Confidence |
-| ---- | --- | ----- | -------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 2015 | bic | 1     | A character, `temp_char`. It has the creature fields of a UTC file, such as Race, ClassList and Equip_ItemList.     | low        |
-| 2024 | bti | 1     | An item, `nw_wblhvy001`. It has the item fields of a UTI file, such as BaseItem, PropertiesList and Cost.            | low        |
-| 2026 | btc | 3     | Creatures, such as `sw_krayt`. They have creature fields, such as FactionID, ScriptSpawn and SaveFortitude.           | low        |
-| 2030 | itp | 16    | Palettes, described below.                                                                                           | medium     |
-| 2029 | dlg | 32    | Dialogs, as in the modules.                                                                                          | high       |
-| 2027 | utc | 205   | Creature templates, as in the modules.                                                                               | high       |
-| 2042 | utd | 50    | Door templates, as in the modules.                                                                                   | high       |
-| 2040 | ute | 65    | Encounter templates, as in the modules.                                                                              | high       |
-| 2025 | uti | 557   | Item templates, as in the modules.                                                                                   | high       |
-| 2044 | utp | 317   | Placeable templates, as in the modules.                                                                              | high       |
-| 2032 | utt | 21    | Trigger templates, as in the modules.                                                                                | high       |
-| 2058 | utw | 9     | Waypoint templates, as in the modules.                                                                               | high       |
+| Type | Ext | Files | Probable content                                                                                                | Confidence |
+| ---- | --- | ----- | --------------------------------------------------------------------------------------------------------------- | ---------- |
+| 2015 | bic | 1     | A character, `temp_char`. It has the creature fields of a UTC file, such as Race, ClassList and Equip_ItemList. | low        |
+| 2024 | bti | 1     | An item, `nw_wblhvy001`. It has the item fields of a UTI file, such as BaseItem, PropertiesList and Cost.       | low        |
+| 2026 | btc | 3     | Creatures, such as `sw_krayt`. They have creature fields, such as FactionID, ScriptSpawn and SaveFortitude.     | low        |
+| 2030 | itp | 16    | Palettes, described below.                                                                                      | medium     |
+| 2029 | dlg | 32    | Dialogs, as in the modules.                                                                                     | high       |
+| 2027 | utc | 205   | Creature templates, as in the modules.                                                                          | high       |
+| 2042 | utd | 50    | Door templates, as in the modules.                                                                              | high       |
+| 2040 | ute | 65    | Encounter templates, as in the modules.                                                                         | high       |
+| 2025 | uti | 557   | Item templates, as in the modules.                                                                              | high       |
+| 2044 | utp | 317   | Placeable templates, as in the modules.                                                                         | high       |
+| 2032 | utt | 21    | Trigger templates, as in the modules.                                                                           | high       |
+| 2058 | utw | 9     | Waypoint templates, as in the modules.                                                                          | high       |
 
 The 16 ITP files form two groups. Nine are named `<kind>pal`, such as `creaturepal`, and hold a field RESTYPE with a resource type number, such as 2027 (UTC) in `creaturepal`, and a list MAIN of categories. Each category has the field DELETE_ME and some of the fields ID, TYPE and LIST; a LIST holds nested categories. The other seven are named `<kind>palstd`, such as `creaturepalstd`. Their categories hold lists of entries with the fields NAME, RESREF and, for creatures, CR. The seven files name 1,093 distinct resrefs, and all but one name a template in `templates.bif`. For example, `creaturepalstd` lists "Bantha" with the resref `c_bantha`. The palettes are probably the template lists of BioWare's level editor, because the game itself does not need them to create objects. This has not been confirmed.
 
@@ -867,13 +867,13 @@ An LTR file (type 2036) holds the letter probabilities for a random name generat
 
 The file has a 9-byte header followed by tables of 28 f32 values, one value per letter. The letters are "a" to "z", the apostrophe and the hyphen, in this order. The tables come in sets of three: one for the start of a name, one for the middle and one for the end. The table below describes the layout.
 
-| Offset | Type                  | Meaning                                                                                           | Evidence                                                                                                       | Confidence |
-| ------ | --------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | char[8]               | Signature "LTR V1.0"                                                                              | Present in all three files.                                                                                    | high       |
-| 0x08   | u8                    | Number of letters n                                                                               | The value is 28 in all three files, and the size of each file is 9 + 4 × 3n × (1 + n + n²) = 273,177 bytes.    | high       |
-| 0x09   | f32[3][n]             | The set for single letters: start, middle and end                                                 | See the evidence below.                                                                                        | high       |
-| 0x159  | f32[n][3][n]          | One set per preceding letter, in letter order, giving the next letter                             | See the evidence below.                                                                                        | high       |
-| 0x2619 | f32[n][n][3][n]       | One set per preceding pair of letters, the first letter varying slowest, giving the next letter    | The tables end exactly at the end of all three files.                                                          | high       |
+| Offset | Type            | Meaning                                                                                         | Evidence                                                                                                    | Confidence |
+| ------ | --------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | char[8]         | Signature "LTR V1.0"                                                                            | Present in all three files.                                                                                 | high       |
+| 0x08   | u8              | Number of letters n                                                                             | The value is 28 in all three files, and the size of each file is 9 + 4 × 3n × (1 + n + n²) = 273,177 bytes. | high       |
+| 0x09   | f32[3][n]       | The set for single letters: start, middle and end                                               | See the evidence below.                                                                                     | high       |
+| 0x159  | f32[n][3][n]    | One set per preceding letter, in letter order, giving the next letter                           | See the evidence below.                                                                                     | high       |
+| 0x2619 | f32[n][n][3][n] | One set per preceding pair of letters, the first letter varying slowest, giving the next letter | The tables end exactly at the end of all three files.                                                       | high       |
 
 Each nonzero value is the cumulative probability of the letters up to and including that letter, and 0 means that the letter cannot occur there. Of the 2,439 tables per file, 217 (`humanf`), 225 (`humanm`) and 192 (`humanl`) contain a nonzero value. In each of these tables except two per file, the nonzero values never decrease, and the last one is 1 within 0.0001. The largest value is 1.0000001, which is the rounding of a sum. The two exceptions in each file are the middle and the end tables of the single-letter set. In them, the values restart at a small value several times; for example, the middle table of `humanf` reaches 0.472 at "i" and continues with 0.009 at "k". The meaning of these two tables is UNKNOWN.
 
@@ -881,18 +881,18 @@ The order of the sets and of the letters follows from three checks, which hold i
 
 ## Conversion and verification
 
-The `bifs` stage of `cmd/convert` writes one folder `extracted/data/<archive>/` per archive and the report `temp/reports/bifs.txt`. All 7,207 lines pass: 7,083 for the five archives and 124 for `layouts.bif`. The resources become the files below. The 2DA, SSF, NCS and GFF resources use the same forms as in `rims/` and the modules.
+The `bifs` stage of `cmd/extract` writes one folder `extracted/data/<archive>/` per archive and the report `temp/reports/bifs.txt`. All 7,207 lines pass: 7,083 for the five archives and 124 for `layouts.bif`. The resources become the files below. The 2DA, SSF, NCS and GFF resources use the same forms as in `rims/` and the modules.
 
-| Resource | Output                    | Form                                                                                                                                       |
-| -------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| WAV      | `<resref>.wav`            | 16-bit PCM. 16-bit PCM files are copied unchanged. The IMA ADPCM files are decoded, and the 8-bit file is widened: each sample becomes (s − 128) × 256. |
-| 2DA      | `<resref>.2da.csv`        | CSV, as for `rims/`.                                                                                                                      |
-| NCS      | `<resref>.ncs.txt`        | The disassembly listing of the module files.                                                                                              |
-| NSS      | `<resref>.nss`            | The source text, decoded as Windows-1252 and written as UTF-8. The line breaks are kept.                                                  |
-| SSF      | `<resref>.ssf.json`       | JSON, as for `rims/`.                                                                                                                     |
-| LTR      | `<resref>.ltr.json`       | JSON, described below.                                                                                                                    |
-| TXI      | `<resref>.txi`            | Copied unchanged.                                                                                                                         |
-| GFF      | `<resref>.<ext>.json`     | The JSON form described under "Generic file format: GFF", for all 13 GFF file types including the journal.                               |
+| Resource | Output                | Form                                                                                                                                                    |
+| -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| WAV      | `<resref>.wav`        | 16-bit PCM. 16-bit PCM files are copied unchanged. The IMA ADPCM files are decoded, and the 8-bit file is widened: each sample becomes (s − 128) × 256. |
+| 2DA      | `<resref>.2da.csv`    | CSV, as for `rims/`.                                                                                                                                    |
+| NCS      | `<resref>.ncs.txt`    | The disassembly listing of the module files.                                                                                                            |
+| NSS      | `<resref>.nss`        | The source text, decoded as Windows-1252 and written as UTF-8. The line breaks are kept.                                                                |
+| SSF      | `<resref>.ssf.json`   | JSON, as for `rims/`.                                                                                                                                   |
+| LTR      | `<resref>.ltr.json`   | JSON, described below.                                                                                                                                  |
+| TXI      | `<resref>.txi`        | Copied unchanged.                                                                                                                                       |
+| GFF      | `<resref>.<ext>.json` | The JSON form described under "Generic file format: GFF", for all 13 GFF file types including the journal.                                              |
 
 The JSON form of an LTR file is an object with "letters", the 28 letters in table order; "single", the single-letter set; "double", an object keyed by the preceding letter; and "triple", an object keyed by the preceding pair. Each set is an object with "start", "middle" and "end", each an array of the 28 stored values in file order. The values are the stored cumulative probabilities, written with the shortest decimal that reads back as the same f32. The example below shows the start of `extracted/data/templates/humanf.ltr.json`.
 
@@ -907,14 +907,14 @@ The JSON form of an LTR file is an object with "letters", the 28 letters in tabl
 
 The `bifs` stage of `cmd/verify` writes six reports, and every line passes. The table below lists them.
 
-| Report             | Files | Check                                                                                                                                             |
-| ------------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ffprobe_bifs.txt` | 1,928 | ffprobe reads the WAV file as 16-bit PCM, and ffmpeg decodes the output and the source to the same 16-bit samples (see the note on ADPCM below).  |
-| `csv_bifs.txt`     | 209   | Go's `encoding/csv` reader reads the CSV file, and the table built again from it equals the source table byte for byte.                          |
-| `ncs_bifs.txt`     | 1,784 | The listing assembles to the source script.                                                                                                       |
+| Report             | Files | Check                                                                                                                                                                                            |
+| ------------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ffprobe_bifs.txt` | 1,928 | ffprobe reads the WAV file as 16-bit PCM, and ffmpeg decodes the output and the source to the same 16-bit samples (see the note on ADPCM below).                                                 |
+| `csv_bifs.txt`     | 209   | Go's `encoding/csv` reader reads the CSV file, and the table built again from it equals the source table byte for byte.                                                                          |
+| `ncs_bifs.txt`     | 1,784 | The listing assembles to the source script.                                                                                                                                                      |
 | `jq_bifs.txt`      | 1,511 | jq parses the 1,278 GFF JSON files. For the 106 SSF, 3 LTR and 124 LYT files, the values that jq reads build again into the source file (see "Room layouts: LYT" for the comparison of layouts). |
-| `iconv_bifs.txt`   | 1,774 | iconv converts the NSS file from UTF-8 back to Windows-1252, and the result equals the source bytes.                                             |
-| `copy_bifs.txt`    | 1     | The TXI file equals the source bytes.                                                                                                             |
+| `iconv_bifs.txt`   | 1,774 | iconv converts the NSS file from UTF-8 back to Windows-1252, and the result equals the source bytes.                                                                                             |
+| `copy_bifs.txt`    | 1     | The TXI file equals the source bytes.                                                                                                                                                            |
 
 A test altered one value in `humanf.ltr.json`, one character in `k_pman_casamad_s.nss` and one sample byte in `mgs_sith_hit.wav`. Each of the three files then failed its check, and no other file did.
 
@@ -935,15 +935,15 @@ The file begins with a 20-byte header, described in the table below.
 
 Each entry is 40 bytes long and is laid out as described in the table below.
 
-| Offset | Type     | Meaning                                  | Evidence                                                                                                                                      | Confidence |
-| ------ | -------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | u32      | Flags                                    | The values are 7 (48,560 entries), 6 (398) and 0x8000 (307). Bit 0 is set exactly in the 48,560 entries that have text.                       | medium     |
-| 0x04   | char[16] | Sound resref, padded with NUL bytes      | 32,853 entries name a sound. Every byte after the name is NUL. The names use only digits, letters and the underscore.                         | high       |
-| 0x14   | u32      | UNKNOWN, always 0                        | The value is 0 in all entries. It may be a volume variance.                                                                                   | low        |
-| 0x18   | u32      | UNKNOWN, always 0                        | The value is 0 in all entries. It may be a pitch variance.                                                                                    | low        |
-| 0x1C   | u32      | Offset of the text, from the string data | The texts lie in entry order with no gap or overlap, and the last ends exactly at the end of the file. All 705 entries without text hold 0.   | high       |
-| 0x20   | u32      | Length of the text in bytes              | See above. The length is 0 exactly when bit 0 of the flags is clear.                                                                          | high       |
-| 0x24   | f32      | UNKNOWN, always 0.0                      | The bits are 0 in all entries. It may be the length of the sound.                                                                             | low        |
+| Offset | Type     | Meaning                                  | Evidence                                                                                                                                    | Confidence |
+| ------ | -------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | u32      | Flags                                    | The values are 7 (48,560 entries), 6 (398) and 0x8000 (307). Bit 0 is set exactly in the 48,560 entries that have text.                     | medium     |
+| 0x04   | char[16] | Sound resref, padded with NUL bytes      | 32,853 entries name a sound. Every byte after the name is NUL. The names use only digits, letters and the underscore.                       | high       |
+| 0x14   | u32      | UNKNOWN, always 0                        | The value is 0 in all entries. It may be a volume variance.                                                                                 | low        |
+| 0x18   | u32      | UNKNOWN, always 0                        | The value is 0 in all entries. It may be a pitch variance.                                                                                  | low        |
+| 0x1C   | u32      | Offset of the text, from the string data | The texts lie in entry order with no gap or overlap, and the last ends exactly at the end of the file. All 705 entries without text hold 0. | high       |
+| 0x20   | u32      | Length of the text in bytes              | See above. The length is 0 exactly when bit 0 of the flags is clear.                                                                        | high       |
+| 0x24   | f32      | UNKNOWN, always 0.0                      | The bits are 0 in all entries. It may be the length of the sound.                                                                           | low        |
 
 The text is not terminated by a NUL byte. All bytes of the texts are below 0x80, and the only control character is the line feed (5,191 times), so the code page does not matter. Entry 0 is "Bad StrRef", and entry 35,782 is "Taris - South Apartments", the area name of `tar_m02aa`.
 
@@ -977,7 +977,7 @@ Most names without a file are player replies. Voiced lines start with `n`, for e
 
 ## Conversion and verification
 
-The `tlk` stage of `cmd/convert` writes `extracted/dialog.tlk.json`. It is an object with "language", the u32 at header offset 0x08, and "entries", one object per entry in file order. Each entry has "strref", its number; "flags"; "sound"; and "text". The sound and the text are empty strings when the entry has none. The form leaves out the three unknown fields and the text offsets, so `ReadTlk` rejects a file in which an unknown field is not 0 or an entry without text has an offset other than 0. The example below shows the start of the file.
+The `tlk` stage of `cmd/extract` writes `extracted/dialog.tlk.json`. It is an object with "language", the u32 at header offset 0x08, and "entries", one object per entry in file order. Each entry has "strref", its number; "flags"; "sound"; and "text". The sound and the text are empty strings when the entry has none. The form leaves out the three unknown fields and the text offsets, so `ReadTlk` rejects a file in which an unknown field is not 0 or an entry without text has an offset other than 0. The example below shows the start of the file.
 
 ```json
 {
@@ -995,7 +995,7 @@ The parser passes on the only sample: `temp/reports/tlk.txt` reports 49,265 entr
 
 # 3D models: MDL and MDX
 
-Each 3D model is stored as two resources with the same resref. The MDL resource (type 2002) holds the model's structure: a tree of nodes, some of which carry meshes. The MDX resource (type 3008) holds the vertex data for those meshes. The converter is `ConvertMdl` in `kotor/mdl.go`, which writes Wavefront OBJ files. The `models` stage of `cmd/convert` runs it on every model of `data/models.bif`, and `cmd/mdl2obj` runs it on one model.
+Each 3D model is stored as two resources with the same resref. The MDL resource (type 2002) holds the model's structure: a tree of nodes, some of which carry meshes. The MDX resource (type 3008) holds the vertex data for those meshes. The converter is `ConvertMdl` in `kotor/mdl.go`, which writes Wavefront OBJ files. The `models` stage of `cmd/extract` runs it on every model of `data/models.bif`, and `cmd/mdl2obj` runs it on one model.
 
 The models examined here are in `data/models.bif`, which contains 2,445 MDL resources and 2,445 MDX resources, including area room models such as `m01aa_01a`. Of the converted models, 1,329 have names of that form. The BIF archives hold 387 more models: 305 in `items.bif`, 63 in `player.bif` and 19 in `party.bif`. All 387 pass the same checks of the converter, with no MDL and MDX position mismatch, but they are not converted. The archives in `rims/` hold another 239 MDL and 252 MDX resources. All of them are copies of models in the BIF archives, and their conversion is described in the section "Global resources: rims/\*.rim". `patch.erf` holds one model, `w_lghtsbr_008`, a changed copy of a model in `items.bif` (see "Patch archive: patch.erf"). The MOD archives in `lips/` hold only LIP resources, and the texture packs hold no models.
 
@@ -1021,19 +1021,19 @@ The rest of the file is the model data. All offsets stored inside the model data
 
 The model header is at the start of the model data.
 
-| Offset | Type     | Meaning                                             | Evidence                                                                                                 | Confidence |
-| ------ | -------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | u32      | Constant 0x00413670                                 | Identical in all 2,445 models. It is likely an address in the game executable. Its purpose is not known. | medium     |
-| 0x04   | u32      | Constant 0x00405520                                 | Identical in all 2,445 models. It is likely an address in the game executable. Its purpose is not known. | medium     |
-| 0x08   | char[32] | Model name                                          | Equals the resref in 2,444 of 2,445 models.                                                              | high       |
-| 0x28   | u32      | Offset of the root node                             | The node tree parses from this offset in all 2,445 models.                                               | high       |
-| 0x2C   | u32      | Number of nodes                                     | Equals the number of nodes in the tree in 2,187 of 2,445 models. See below.                              | medium     |
+| Offset | Type     | Meaning                                                        | Evidence                                                                                                                                                                                         | Confidence |
+| ------ | -------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| 0x00   | u32      | Constant 0x00413670                                            | Identical in all 2,445 models. It is likely an address in the game executable. Its purpose is not known.                                                                                         | medium     |
+| 0x04   | u32      | Constant 0x00405520                                            | Identical in all 2,445 models. It is likely an address in the game executable. Its purpose is not known.                                                                                         | medium     |
+| 0x08   | char[32] | Model name                                                     | Equals the resref in 2,444 of 2,445 models.                                                                                                                                                      | high       |
+| 0x28   | u32      | Offset of the root node                                        | The node tree parses from this offset in all 2,445 models.                                                                                                                                       | high       |
+| 0x2C   | u32      | Number of nodes                                                | Equals the number of nodes in the tree in 2,187 of 2,445 models. See below.                                                                                                                      | medium     |
 | 0x68   | f32[6]   | Probably a bounding box: minimum x, y, z, then maximum x, y, z | The minimum is at most the maximum on every axis in all 2,445 models. The converted geometry lies inside the box in only 709 of the 1,972 converted models, so what the box encloses is UNKNOWN. | low        |
-| 0x88   | char[32] | Name of the supermodel, or "NULL"                   | Contains model names such as S_Female02.                                                                 | high       |
-| 0xA8   | u32      | Probably the offset of the root node (repeated)     | Equals the value at 0x28 in 2,374 of 2,445 models. The other 71 hold other values between 2,138 and 45,068. | low        |
-| 0xB0   | u32      | Size of the MDX file (repeated)                     | Equals the size of the MDX resource in all 2,445 models.                                                 | high       |
-| 0xB8   | u32      | Offset of the name table                            | All node names resolve in all 2,445 models.                                                              | high       |
-| 0xC0   | u32      | Number of entries in the name table                 | All node names resolve in all 2,445 models.                                                              | high       |
+| 0x88   | char[32] | Name of the supermodel, or "NULL"                              | Contains model names such as S_Female02.                                                                                                                                                         | high       |
+| 0xA8   | u32      | Probably the offset of the root node (repeated)                | Equals the value at 0x28 in 2,374 of 2,445 models. The other 71 hold other values between 2,138 and 45,068.                                                                                      | low        |
+| 0xB0   | u32      | Size of the MDX file (repeated)                                | Equals the size of the MDX resource in all 2,445 models.                                                                                                                                         | high       |
+| 0xB8   | u32      | Offset of the name table                                       | All node names resolve in all 2,445 models.                                                                                                                                                      | high       |
+| 0xC0   | u32      | Number of entries in the name table                            | All node names resolve in all 2,445 models.                                                                                                                                                      | high       |
 
 A supermodel is another model whose nodes this model appears to inherit. In 258 models the node count does not match the number of nodes in the tree. All 258 have a supermodel, and in all of them the count exceeds the number of nodes in the tree, so the count probably includes nodes of the supermodel. It is not the sum of the model's nodes and the supermodel's count in any of the 258 models, so how the count is formed is UNKNOWN.
 
@@ -1121,7 +1121,7 @@ The archive also contains 1,554 walkmeshes, which are described in the section "
 
 # Walkmeshes: BWM
 
-A walkmesh is a triangle mesh that defines where characters can walk and where they collide. Each face carries a surface material, such as dirt or a non-walkable wall. The format, binary walkmesh (BWM), has three resource types, all in `data/models.bif`. No other archive holds walkmeshes. The converter is part of the models stage of `cmd/convert`. The parser is `kotor/bwm.go`.
+A walkmesh is a triangle mesh that defines where characters can walk and where they collide. Each face carries a surface material, such as dirt or a non-walkable wall. The format, binary walkmesh (BWM), has three resource types, all in `data/models.bif`. No other archive holds walkmeshes. The converter is part of the models stage of `cmd/extract`. The parser is `kotor/bwm.go`.
 
 The three types and their counts are listed below. The extensions are taken from the extension pool of `swkotor.exe`. There the strings "utw sav jrl utg btg pwk dwk utm" run in descending type order from 2058 to 2051, so "pwk" is 2053 and "dwk" is 2052. The string "wok" stands between "2da" (2017) and "bic" (2015).
 
@@ -1129,7 +1129,7 @@ The three types and their counts are listed below. The extensions are taken from
 | ---- | --------- | ----- | ---------------------------------------------------------------------- |
 | 2016 | wok       | 1,202 | Area room walkmesh. Each has the resref of a room model in models.bif. |
 | 2052 | dwk       | 156   | Door walkmesh. The resrefs form 52 sets ending in 0, 1 and 2.          |
-| 2053 | pwk       | 196   | Placeable walkmesh. Every resref begins with "plc_".                   |
+| 2053 | pwk       | 196   | Placeable walkmesh. Every resref begins with "plc\_".                  |
 
 The executable contains the strings "closed", "open1" and "open2". The three door walkmeshes of a set probably describe these three states of a door. This has not been verified.
 
@@ -1167,7 +1167,7 @@ The header is 136 bytes (0x88). It holds the walkmesh type, five points and nine
 
 All offsets count from the start of the file. The tables are stored in the order of the header, directly after it. An empty table may have the offset 0, or the offset where it would start. The material, normal and plane distance tables have one entry per face. Door and placeable walkmeshes hold only vertices, faces, materials, normals and plane distances: their AABB, adjacency, edge and perimeter tables are empty in all 352 files.
 
-The fields from 0x0C to 0x3B are 0 in all 1,202 area walkmeshes. The executable contains the strings "pwk_use" and "pwk_dp_use_", so the two points are probably the places where a character stands to use a door or placeable. In placeable walkmeshes the absolute points are 0 in all 196 files, and the relative points are set in 188. The position is set in 146 of the 156 door walkmeshes and in 100 of the 122 placeable walkmeshes with faces. The meaning of the position in door and placeable walkmeshes is not known.
+The fields from 0x0C to 0x3B are 0 in all 1,202 area walkmeshes. The executable contains the strings "pwk*use" and "pwk_dp_use*", so the two points are probably the places where a character stands to use a door or placeable. In placeable walkmeshes the absolute points are 0 in all 196 files, and the relative points are set in 188. The position is set in 146 of the 156 door walkmeshes and in 100 of the 122 placeable walkmeshes with faces. The meaning of the position in door and placeable walkmeshes is not known.
 
 In area walkmeshes the position equals the position of one node in the room's MDL model. In all 980 area walkmeshes with faces, the model has exactly one node with flag bit 0x200, and its position equals the value at 0x3C. The node names vary, such as `01awalkmesh`, `walkmesh_12` and `Object125` (see "Node"). The 222 area walkmeshes without faces belong to models with no such node.
 
@@ -1250,7 +1250,7 @@ The perimeter table is a list of u32 values. Each value is the end of one perime
 
 ## Conversion and verification
 
-The models stage of `cmd/convert` writes each walkmesh that has faces to `extracted/data/models/<resref>.<ext>.obj`, for example `m01aa_01a.wok.obj`. Faces keep their order. A "usemtl" line names the face material, such as `07_Nonwalk`, whenever it changes. All walkmesh OBJ files share the material library `walkmesh.mtl`, which gives each row of `surfacemat.2da` its own color: bright for walkable materials and dark for the others. The 1,258 files are 980 area, 156 door and 122 placeable walkmeshes.
+The models stage of `cmd/extract` writes each walkmesh that has faces to `extracted/data/models/<resref>.<ext>.obj`, for example `m01aa_01a.wok.obj`. Faces keep their order. A "usemtl" line names the face material, such as `07_Nonwalk`, whenever it changes. All walkmesh OBJ files share the material library `walkmesh.mtl`, which gives each row of `surfacemat.2da` its own color: bright for walkable materials and dark for the others. The 1,258 files are 980 area, 156 door and 122 placeable walkmeshes.
 
 An OBJ file cannot hold the other data, so each walkmesh also gets `<resref>.<ext>.json`. It holds the type, the position, the use points, and the perimeters, with each edge's face, edge number within the face and transition. The AABB tree and the adjacency table can be rebuilt from the faces and are not written.
 
@@ -1258,7 +1258,7 @@ The verify command checks both files of each walkmesh. assimp must load each OBJ
 
 # Textures: TPC
 
-A TPC file (resource type 3007) is a texture. It holds pixel data for one image, or for several sub-images, each with its own mipmap chain. A mipmap chain is a series of copies of an image, each half the width and height of the previous one. The file ends with an optional TXI trailer. TXI (texture information) is plain ASCII text that sets rendering options. The parser is `ParseTpc` in `kotor/tpc.go`, and `DecodeTpc` decodes the top mipmap level to 8-bit RGBA. The `textures` stage of `cmd/convert` writes it as a PNG file, and `cmd/tpc2png` converts one texture.
+A TPC file (resource type 3007) is a texture. It holds pixel data for one image, or for several sub-images, each with its own mipmap chain. A mipmap chain is a series of copies of an image, each half the width and height of the previous one. The file ends with an optional TXI trailer. TXI (texture information) is plain ASCII text that sets rendering options. The parser is `ParseTpc` in `kotor/tpc.go`, and `DecodeTpc` decodes the top mipmap level to 8-bit RGBA. The `textures` stage of `cmd/extract` writes it as a PNG file, and `cmd/tpc2png` converts one texture.
 
 All 11,452 TPC files in the four texture packs parse completely. In each file, the header, the pixel data and an ASCII trailer together account for every byte. The converted PNG files are verified with two independent tools. ImageMagick decodes each PNG to exactly the pixels of the decoded TPC texture, and pngcheck accepts each file. This holds for all 3,294 textures of each of tpa, tpb and tpc and for all 1,570 textures of gui. The 84 textures in `patch.erf` also parse completely and pass the same checks (see "Patch archive: patch.erf").
 
@@ -1316,13 +1316,13 @@ The packs `swpc_tex_tpb.erf` and `swpc_tex_tpc.erf` hold reduced copies of the t
 
 The following properties hold for both reduced packs.
 
-| Property                               | Evidence                                                                                                                                   | Confidence |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
-| Same names in the same order           | Each pack has the same 3,294 resrefs as tpa, and each resref has the same index in the key table.                                          | high       |
-| Same encoding and layout               | Every texture keeps the pixel format (gray, RGB, RGBA, DXT1 or DXT5) and the layout (plain, cube or flipbook) of its tpa version.         | high       |
-| Same header float at 0x04              | The value at offset 0x04 equals the tpa value in all 3,294 textures of each pack.                                                          | high       |
-| Same TXI trailer                       | The trailer, with trailing NUL bytes removed, equals the tpa trailer in all 3,294 textures of each pack.                                   | high       |
-| Width and height scale by one factor   | The width and the height of each texture shrink by the same factor of 1, 2 or 4. No reduced side is smaller than 2 pixels.                 | high       |
+| Property                             | Evidence                                                                                                                          | Confidence |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| Same names in the same order         | Each pack has the same 3,294 resrefs as tpa, and each resref has the same index in the key table.                                 | high       |
+| Same encoding and layout             | Every texture keeps the pixel format (gray, RGB, RGBA, DXT1 or DXT5) and the layout (plain, cube or flipbook) of its tpa version. | high       |
+| Same header float at 0x04            | The value at offset 0x04 equals the tpa value in all 3,294 textures of each pack.                                                 | high       |
+| Same TXI trailer                     | The trailer, with trailing NUL bytes removed, equals the tpa trailer in all 3,294 textures of each pack.                          | high       |
+| Width and height scale by one factor | The width and the height of each texture shrink by the same factor of 1, 2 or 4. No reduced side is smaller than 2 pixels.        | high       |
 
 The scale factors are listed below. "Unchanged" means that the file is byte-for-byte identical to the tpa file.
 
@@ -1349,12 +1349,12 @@ The PNG files keep their alpha channel, but the MTL files do not declare it as t
 
 # Images: TGA in the BIF archives
 
-Resource type 3 is a TGA image, the uncompressed image format defined by Truevision. The BIF archives hold 5,601 of them. They matter because 5,586 of them are lightmaps, the precomputed lighting that the game blends over area textures. The converter is `kotor/tga.go`, called by the `tga` stage of `cmd/convert`. It writes 8-bit PNG files with the same channels as the TGA.
+Resource type 3 is a TGA image, the uncompressed image format defined by Truevision. The BIF archives hold 5,601 of them. They matter because 5,586 of them are lightmaps, the precomputed lighting that the game blends over area textures. The converter is `kotor/tga.go`, called by the `tga` stage of `cmd/extract`. It writes 8-bit PNG files with the same channels as the TGA.
 
 The images are in three groups. The table below lists each group, its archives and its output directory.
 
-| Archives                                               | Images | Layout                            | Output                   |
-| ------------------------------------------------------ | ------ | --------------------------------- | ------------------------ |
+| Archives                                               | Images | Layout                            | Output                      |
+| ------------------------------------------------------ | ------ | --------------------------------- | --------------------------- |
 | `lightmaps.bif`, `lightmaps2.bif` to `lightmaps13.bif` | 5,586  | 32-bit BGRA, sizes 2x2 to 512x512 | `extracted/data/lightmaps/` |
 | `textures.bif`                                         | 14     | 8-bit grayscale, 256x256          | `extracted/data/textures/`  |
 | `legacy.bif`                                           | 1      | 24-bit BGR, 256x256 (`chrome1`)   | `extracted/data/legacy/`    |
@@ -1420,32 +1420,32 @@ The resource type is named LYT after the string ".lyt" in `swkotor.exe`. It stan
 
 A LYT file is ASCII text with CRLF line breaks, between 171 and 5,129 bytes long. The first line, "#MAXLAYOUT ASCII", and the misspelled keyword "filedependancy" suggest that the files were exported from 3ds Max. All 124 files have the lines below in the same order. The table gives each line form, its canonical indentation and its fields.
 
-| Line                | Indent   | Form                                                        | Evidence                                                                                 | Confidence |
-| ------------------- | -------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------- |
-| Signature           | none     | `#MAXLAYOUT ASCII`                                          | First line of all 124 files.                                                             | high       |
-| File dependency     | none     | `filedependancy` and the name of a 3ds Max scene            | Second line of all files. The name ends in ".max" in all files.                          | high       |
-| Begin               | none     | `beginlayout`                                               | Third line of all files. The string is in `swkotor.exe`.                                 | high       |
-| Room count          | 3 spaces | `roomcount` and a decimal count                             | All files. Followed by exactly that many room lines.                                     | high       |
-| Room                | 6 spaces | Model name and the position x, y and z as floats            | 1,401 lines. Matches the scan format "%s %f%f%f".                                        | high       |
-| Track count         | 3 spaces | `trackcount` and a decimal count                            | All files. Followed by exactly that many track lines.                                    | high       |
-| Track               | 6 spaces | Model name and position, as in a room line                  | 173 lines in 12 files.                                                                   | high       |
-| Obstacle count      | 3 spaces | `obstaclecount` and a decimal count                         | All files. Followed by exactly that many obstacle lines.                                 | high       |
-| Obstacle            | 6 spaces | Model name and position, as in a room line                  | 95 lines in 11 files.                                                                    | high       |
-| Door hook count     | 3 spaces | `doorhookcount` and a decimal count                         | All files. Followed by exactly that many door hook lines.                                | high       |
-| Door hook           | 6 spaces | Room name, door name, an integer, position and orientation  | 897 lines in 103 files. Matches the scan format "%s%s%d%f%f%f%f%f%f%f".                  | high       |
-| Done                | none     | `donelayout`                                                | Last line of all files. The string is in `swkotor.exe`.                                  | high       |
+| Line            | Indent   | Form                                                       | Evidence                                                                | Confidence |
+| --------------- | -------- | ---------------------------------------------------------- | ----------------------------------------------------------------------- | ---------- |
+| Signature       | none     | `#MAXLAYOUT ASCII`                                         | First line of all 124 files.                                            | high       |
+| File dependency | none     | `filedependancy` and the name of a 3ds Max scene           | Second line of all files. The name ends in ".max" in all files.         | high       |
+| Begin           | none     | `beginlayout`                                              | Third line of all files. The string is in `swkotor.exe`.                | high       |
+| Room count      | 3 spaces | `roomcount` and a decimal count                            | All files. Followed by exactly that many room lines.                    | high       |
+| Room            | 6 spaces | Model name and the position x, y and z as floats           | 1,401 lines. Matches the scan format "%s %f%f%f".                       | high       |
+| Track count     | 3 spaces | `trackcount` and a decimal count                           | All files. Followed by exactly that many track lines.                   | high       |
+| Track           | 6 spaces | Model name and position, as in a room line                 | 173 lines in 12 files.                                                  | high       |
+| Obstacle count  | 3 spaces | `obstaclecount` and a decimal count                        | All files. Followed by exactly that many obstacle lines.                | high       |
+| Obstacle        | 6 spaces | Model name and position, as in a room line                 | 95 lines in 11 files.                                                   | high       |
+| Door hook count | 3 spaces | `doorhookcount` and a decimal count                        | All files. Followed by exactly that many door hook lines.               | high       |
+| Door hook       | 6 spaces | Room name, door name, an integer, position and orientation | 897 lines in 103 files. Matches the scan format "%s%s%d%f%f%f%f%f%f%f". | high       |
+| Done            | none     | `donelayout`                                               | Last line of all files. The string is in `swkotor.exe`.                 | high       |
 
 Fields are separated by single spaces. Every count equals the number of entry lines that follow it, in all 496 sections of the 124 files. Numbers are written with at most six significant digits and always with a decimal point, such as "0.0" and "-1.31576", or in exponent form with three exponent digits, such as "1.26441e-007". This is the form of the C format "%g" in Microsoft's runtime library, with ".0" added to whole numbers. The game reads them as 32-bit floats.
 
 The fields of a door hook line are given in the table below, in line order.
 
-| Field       | Type     | Meaning                                                   | Evidence                                                                                                                       | Confidence |
-| ----------- | -------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------- |
-| Room        | name     | Room model that holds the door                            | Outside the `stunt_` areas, all 838 hooks name a room of the same layout.                                                       | high       |
-| Door        | name     | Name of a node in the room model, such as `Door_02`       | Of the 893 hooks whose room has a model, 889 name a node of that model. All names are "Door_" or "door_" and a number.          | high       |
-| Unknown     | integer  | UNKNOWN                                                   | The value is 0 in all 897 lines.                                                                                                | low        |
-| x, y, z     | 3 floats | Position of the door in area coordinates                  | Module door instances stand at these positions (see below).                                                                    | high       |
-| w, x, y, z  | 4 floats | Orientation of the door as a unit quaternion, w first     | All 897 quaternions have length 1. In 885 the second and third value are 0, which leaves a rotation about the vertical axis.    | high       |
+| Field      | Type     | Meaning                                               | Evidence                                                                                                                     | Confidence |
+| ---------- | -------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| Room       | name     | Room model that holds the door                        | Outside the `stunt_` areas, all 838 hooks name a room of the same layout.                                                    | high       |
+| Door       | name     | Name of a node in the room model, such as `Door_02`   | Of the 893 hooks whose room has a model, 889 name a node of that model. All names are "Door*" or "door*" and a number.       | high       |
+| Unknown    | integer  | UNKNOWN                                               | The value is 0 in all 897 lines.                                                                                             | low        |
+| x, y, z    | 3 floats | Position of the door in area coordinates              | Module door instances stand at these positions (see below).                                                                  | high       |
+| w, x, y, z | 4 floats | Orientation of the door as a unit quaternion, w first | All 897 quaternions have length 1. In 885 the second and third value are 0, which leaves a rotation about the vertical axis. | high       |
 
 The positions are in the coordinates of the area, with z pointing up. Room models are built around their own origin, while the rooms stand far from the origin of the area. In half of the 1,162 room models with geometry, no vertex lies farther than 24.7 units from the model origin along x or y. The median room line places its room 155.6 units from the area origin horizontally. The room line therefore gives the translation that moves the room into the area. No line holds a rotation of a room, a track or an obstacle. Of the 1,401 room lines, 505 have a z other than 0.
 
@@ -1473,7 +1473,7 @@ The parser accepts the following irregularities. It reports them, and it fails o
 
 ## Conversion and verification
 
-The `bifs` stage of `cmd/convert` writes each file to `extracted/data/layouts/<area>.lyt.json`. The JSON object has these members:
+The `bifs` stage of `cmd/extract` writes each file to `extracted/data/layouts/<area>.lyt.json`. The JSON object has these members:
 
 - "filedependancy", the scene name as written;
 - "rooms", "tracks" and "obstacles", with one object per line in file order, each with "model" and "position", an array of x, y and z;
@@ -1490,16 +1490,16 @@ The `bifs` stage of `cmd/verify` reads each JSON file with jq, reports in `temp/
 
 A VIS file lists, for each room of an area, the other rooms that can be seen from it. The game probably uses it to decide which room models to draw. Each of the 112 files is one resource of type 3001 in `data/lightmaps*.bif`, named after its area, such as `m01aa`. The archives hold between 3 (`lightmaps12.bif`) and 31 (`lightmaps13.bif`) of them. The parser is `ParseVis` in `kotor/vis.go`.
 
-The resource type is named VIS after two strings in `swkotor.exe`: the extension ".vis" and the path pattern "%s/%s.VIS". The strings "  %s" and "%s %d" stand next to them. These match the two line forms below, so the code that reads or writes the file is probably nearby.
+The resource type is named VIS after two strings in `swkotor.exe`: the extension ".vis" and the path pattern "%s/%s.VIS". The strings " %s" and "%s %d" stand next to them. These match the two line forms below, so the code that reads or writes the file is probably nearby.
 
 ## Text layout
 
 A VIS file is ASCII text with CRLF line breaks. The files are between 11 and 9,853 bytes long. There are two kinds of lines, described in the table below.
 
-| Line                | Form                                                | Meaning                                                  | Evidence                                                                                                       | Confidence |
-| ------------------- | --------------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------- |
-| Room line           | Name, a space and a decimal count, at column 0       | Starts the entry of one room of the area                 | Every one of the 1,250 unindented lines has this form, except one without a count.                              | high       |
-| Visible-room line   | Two spaces and a name                               | A room visible from the room of the preceding room line  | All 8,905 indented lines have this form. None comes before the first room line.                                | high       |
+| Line              | Form                                           | Meaning                                                 | Evidence                                                                           | Confidence |
+| ----------------- | ---------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------- |
+| Room line         | Name, a space and a decimal count, at column 0 | Starts the entry of one room of the area                | Every one of the 1,250 unindented lines has this form, except one without a count. | high       |
+| Visible-room line | Two spaces and a name                          | A room visible from the room of the preceding room line | All 8,905 indented lines have this form. None comes before the first room line.    | high       |
 
 The count is meant to give the number of visible-room lines that follow. It does so for 1,246 of the 1,250 rooms. The parser takes the list of visible rooms from the indentation, not from the count, because the count is wrong in four rooms. Three of them list one room fewer than the count (`m38ab_08`, `m38ab_06`) or one more (`m39aa_15`). The fourth, `m17aa_09w` in `m17aa`, has no count and no visible rooms. If the game read a fixed number of lines from the count, the next room line would be taken as a visible room. Whether the game reads by count or by indentation is UNKNOWN.
 
@@ -1526,7 +1526,7 @@ The visible rooms are not simply the rooms nearby. Using the layout positions, t
 
 ## Conversion and verification
 
-The `tga` stage of `cmd/convert` writes each file to `extracted/data/lightmaps/<area>.vis.json`, beside the lightmaps. The JSON object has "rooms", an array with one object per room line in file order. Each room has "room", the name as written; "count", the count as written, or null when the line has none; and "visible", the names of the visible-room lines in file order. Extra spaces and a missing final line break are not kept.
+The `tga` stage of `cmd/extract` writes each file to `extracted/data/lightmaps/<area>.vis.json`, beside the lightmaps. The JSON object has "rooms", an array with one object per room line in file order. Each room has "room", the name as written; "count", the count as written, or null when the line has none; and "visible", the names of the visible-room lines in file order. Extra spaces and a missing final line break are not kept.
 
 The parser passes for all 112 files: it consumes every byte, finds only printable ASCII and CRLF line breaks, and finds no line of another form. Its report lists the irregularities of each file.
 
@@ -1534,7 +1534,7 @@ The `tga` stage of `cmd/verify` reads each JSON file with jq, reports in `temp/r
 
 # User interface layouts: GUI
 
-A GUI file (resource type 2047) describes one screen or panel of the user interface. It lists the screen's controls, such as buttons, labels and list boxes, with their position, size, textures, font and text. The game contains 91 GUI resources. 84 are in `data/gui.bif`, which holds nothing else, and 7 are in `patch.erf`. No other archive holds one: `chitin.key` lists type 2047 only for `gui.bif`, the 246 RIM files hold none, and the signature "GUI V3.2" occurs in no other file. The reader is `ReadGff` in `kotor/gff.go`. The `gui` stage of `cmd/convert` writes one JSON file per resource of `gui.bif` to `extracted/data/gui/`, and the `patch` stage writes those of `patch.erf` to `extracted/patch/`.
+A GUI file (resource type 2047) describes one screen or panel of the user interface. It lists the screen's controls, such as buttons, labels and list boxes, with their position, size, textures, font and text. The game contains 91 GUI resources. 84 are in `data/gui.bif`, which holds nothing else, and 7 are in `patch.erf`. No other archive holds one: `chitin.key` lists type 2047 only for `gui.bif`, the 246 RIM files hold none, and the signature "GUI V3.2" occurs in no other file. The reader is `ReadGff` in `kotor/gff.go`. The `gui` stage of `cmd/extract` writes one JSON file per resource of `gui.bif` to `extracted/data/gui/`, and the `patch` stage writes those of `patch.erf` to `extracted/patch/`.
 
 A GUI file is a GFF file of file type "GUI " (see "Generic file format: GFF"). All 91 files parse under the strict rules of the reader. In addition, every byte of their three data regions is referenced, and every label is used. In the 84 `gui.bif` files, every struct has between 4 and 14 fields, and nine field types occur: 0, 4, 5, 8, 10, 11, 14, 15 and 17. The only list (type 15) is CONTROLS, the only u32 (type 4) is STRREF, and the only vector (type 17) is COLOR.
 
@@ -1578,7 +1578,7 @@ The meanings of FILLSTYLE (0, 1 or 2), DIMENSION, INNEROFFSET, PULSING, DRAWSTYL
 
 # Patch archive: patch.erf
 
-`patch.erf` is an ERF archive (see "ERF archive") in the game folder. It holds 97 resources that replace or add to resources stored elsewhere. Its header holds the build date day 47 of 2004, which is later than that of any other archive of the installation, so it is probably an update made after the game's release. Only the archives of the saved game, which the game writes when it saves, are later. Whether the game prefers these copies to the copies of the same name in other archives has not been observed. The `patch` stage of `cmd/convert` converts every resource to `extracted/patch/`, and the `patch` stage of `cmd/verify` checks the output.
+`patch.erf` is an ERF archive (see "ERF archive") in the game folder. It holds 97 resources that replace or add to resources stored elsewhere. Its header holds the build date day 47 of 2004, which is later than that of any other archive of the installation, so it is probably an update made after the game's release. Only the archives of the saved game, which the game writes when it saves, are later. Whether the game prefers these copies to the copies of the same name in other archives has not been observed. The `patch` stage of `cmd/extract` converts every resource to `extracted/patch/`, and the `patch` stage of `cmd/verify` checks the output.
 
 The table below lists the contents by resource type.
 
@@ -1637,7 +1637,7 @@ Most differing bytes lie in unused bytes or in regions that the MDL section does
 
 ## Conversion and verification
 
-The `patch` stage of `cmd/convert` passes every resource to the converter that the BIF and RIM stages use. Textures become 8-bit RGBA PNG files, as in the texture packs, and a TXI file is written when the trailer holds text. Tables become CSV files, layouts become JSON files, and the model becomes an OBJ file with an MTL file. The MTL file refers to the PNG files in `extracted/TexturePacks/swpc_tex_tpa/` by relative paths, and both textures exist there. All 97 resources pass: 84 textures, 7 layouts, 4 tables, the model, and the MDX resource, whose report line only confirms that a model of the same name exists.
+The `patch` stage of `cmd/extract` passes every resource to the converter that the BIF and RIM stages use. Textures become 8-bit RGBA PNG files, as in the texture packs, and a TXI file is written when the trailer holds text. Tables become CSV files, layouts become JSON files, and the model becomes an OBJ file with an MTL file. The MTL file refers to the PNG files in `extracted/TexturePacks/swpc_tex_tpa/` by relative paths, and both textures exist there. All 97 resources pass: 84 textures, 7 layouts, 4 tables, the model, and the MDX resource, whose report line only confirms that a model of the same name exists.
 
 The `patch` stage of `cmd/verify` checks the output with independent tools. All checks pass:
 
@@ -1683,11 +1683,11 @@ The decoder was checked as follows. Each block header stores the sample the enco
 
 ## Conversion and verification
 
-The `music` stage of `cmd/convert` writes the 68 Layout A files to `extracted/streammusic/` as MP3 files, with the fake header removed. It writes the 51 Layout B files as WAV files with 16-bit PCM audio, with the stub removed and ADPCM decoded. ffprobe opens all 119 outputs without error. It reports all 51 WAV outputs as 16-bit stereo PCM, 50 at 44,100 Hz and one at 22,050 Hz.
+The `music` stage of `cmd/extract` writes the 68 Layout A files to `extracted/streammusic/` as MP3 files, with the fake header removed. It writes the 51 Layout B files as WAV files with 16-bit PCM audio, with the stub removed and ADPCM decoded. ffprobe opens all 119 outputs without error. It reports all 51 WAV outputs as 16-bit stereo PCM, 50 at 44,100 Hz and one at 22,050 Hz.
 
 # Sound effects and voices: streamsounds/\*.wav
 
-The folder `streamsounds/` holds 970 files with the extension `.wav`. They are combat voice lines, creature sounds, ambient loops and a few music stingers that the game streams from disk instead of loading from the BIF archives. Every file uses Layout B from the music section: the same 470-byte MP3 stub, followed by a complete WAV file at offset 0x1D6 (470). No file uses Layout A, and none uses ADPCM. The converter `cmd/convert` (stage `sounds`) strips the stub and writes the embedded WAV unchanged to `extracted/streamsounds/`.
+The folder `streamsounds/` holds 970 files with the extension `.wav`. They are combat voice lines, creature sounds, ambient loops and a few music stingers that the game streams from disk instead of loading from the BIF archives. Every file uses Layout B from the music section: the same 470-byte MP3 stub, followed by a complete WAV file at offset 0x1D6 (470). No file uses Layout A, and none uses ADPCM. The converter `cmd/extract` (stage `sounds`) strips the stub and writes the embedded WAV unchanged to `extracted/streamsounds/`.
 
 ## Embedded WAV
 
@@ -1743,7 +1743,7 @@ All 970 files pass the parser: the chunk walk of each embedded WAV ends exactly 
 
 # Voice-over: streamwaves/\*\*/\*.wav
 
-The folder `streamwaves/` holds the spoken dialog of the game: 13,799 files with the extension `.wav`, 552 MB in total. Every file uses Layout A from the music section: a 58-byte fake WAV header followed by an MP3 stream. No file uses Layout B. The converter `cmd/convert` (stage `waves`) strips the header and writes the MP3 stream unchanged to `extracted/streamwaves/`, keeping the folder structure.
+The folder `streamwaves/` holds the spoken dialog of the game: 13,799 files with the extension `.wav`, 552 MB in total. Every file uses Layout A from the music section: a 58-byte fake WAV header followed by an MP3 stream. No file uses Layout B. The converter `cmd/extract` (stage `waves`) strips the header and writes the MP3 stream unchanged to `extracted/streamwaves/`, keeping the folder structure.
 
 ## Fake header
 
@@ -1782,13 +1782,13 @@ All 13,310 files in conversation folders are named N, then the module folder nam
 
 The module dialogs hold 34,673 voice references of this form. Each is 16 characters long, the length of a resref: a leading character, a module code of five characters, a conversation code of six characters, three digits, and a final character. The conversation code is four letters and two digits in 29,536 references. The table below describes the parts. The meanings come from the dialogs and are not confirmed in the game.
 
-| Part              | Meaning                                    | Evidence                                                                                                                                    | Confidence |
-| ----------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| Leading character | "n" for a spoken line, "_" for a player reply | "n" in 17,811 of the 17,812 references of NPC lines (EntryList), and "_" in all 16,861 references of player replies (ReplyList). No player reply has a file, because the player character is not voiced. | high       |
-| Module code       | The module's `Mod_VO_ID`, such as `m24aa`  | Equals the `Mod_VO_ID` of the dialog's module in 30,923 references (see "Module and area names"). Shared lines use `globe`.                 | medium     |
-| Conversation code | A name for the conversation, such as `droi01` | It is not the dialog resref: for example, `unk42_breed02.dlg` names `nm42aabree02001_`.                                                    | medium     |
-| Three digits      | UNKNOWN                                    | They are not the index of the line in its list: they equal it in only 994 of the 34,673 references.                                        | low        |
-| Final character   | "_", or "A" and "B" for the parts of a split line | See above.                                                                                                                             | medium     |
+| Part              | Meaning                                            | Evidence                                                                                                                                                                                                  | Confidence |
+| ----------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| Leading character | "n" for a spoken line, "\_" for a player reply     | "n" in 17,811 of the 17,812 references of NPC lines (EntryList), and "\_" in all 16,861 references of player replies (ReplyList). No player reply has a file, because the player character is not voiced. | high       |
+| Module code       | The module's `Mod_VO_ID`, such as `m24aa`          | Equals the `Mod_VO_ID` of the dialog's module in 30,923 references (see "Module and area names"). Shared lines use `globe`.                                                                               | medium     |
+| Conversation code | A name for the conversation, such as `droi01`      | It is not the dialog resref: for example, `unk42_breed02.dlg` names `nm42aabree02001_`.                                                                                                                   | medium     |
+| Three digits      | UNKNOWN                                            | They are not the index of the line in its list: they equal it in only 994 of the 34,673 references.                                                                                                       | low        |
+| Final character   | "\_", or "A" and "B" for the parts of a split line | See above.                                                                                                                                                                                                | medium     |
 
 Of the 13,799 voice files, 109 are named by no dialog, no entry of `dialog.tlk` and no string constant of a script. They include the eight cutscene lines in the table below, such as `BA02CS001.wav`, and 41 lines of the conversation `m01aa/tras02`. How the game finds them is UNKNOWN.
 
@@ -1862,7 +1862,7 @@ The name of every LIP resource equals the name of a voice file in `streamwaves/`
 
 ## Conversion and verification
 
-No standard file format exists for lip sync keyframes, so each LIP resource is converted to a CSV (comma-separated values) file. The reader is `ParseLip` in `kotor/lip.go`, and the converter is the `lips` stage of `cmd/convert`. It writes `extracted/lips/<archive>/<resref>.csv`, with one folder per archive, named after the archive without `.mod`. The 14 empty archives produce no folder, so 109 folders are written. A name that occurs in several archives is written once per archive.
+No standard file format exists for lip sync keyframes, so each LIP resource is converted to a CSV (comma-separated values) file. The reader is `ParseLip` in `kotor/lip.go`, and the converter is the `lips` stage of `cmd/extract`. It writes `extracted/lips/<archive>/<resref>.csv`, with one folder per archive, named after the archive without `.mod`. The 14 empty archives produce no folder, so 109 folders are written. A name that occurs in several archives is written once per archive.
 
 The following example shows the first lines of `extracted/lips/danm14ad_loc/nm14adc86901000_.csv`.
 
@@ -1881,7 +1881,7 @@ The `lips` stage of `cmd/verify` reads every CSV file with Go's `encoding/csv` r
 
 # Movies: movies/\*.bik
 
-The game's 61 cutscenes and logo screens are in `movies/`. They are Bink video files, a format by RAD Game Tools that the game plays with `binkw32.dll`. All 61 files begin with the signature "BIKi", which `file` identifies as Bink Video revision i. The parser is `kotor/bink.go`, and the converter is the `movies` stage of `cmd/convert`. All 61 files pass the parser's check: the header size field matches the file size, the frame index ends exactly at the end of the file, the largest-frame field equals the largest frame, and every audio packet fits inside its frame.
+The game's 61 cutscenes and logo screens are in `movies/`. They are Bink video files, a format by RAD Game Tools that the game plays with `binkw32.dll`. All 61 files begin with the signature "BIKi", which `file` identifies as Bink Video revision i. The parser is `kotor/bink.go`, and the converter is the `movies` stage of `cmd/extract`. All 61 files pass the parser's check: the header size field matches the file size, the frame index ends exactly at the end of the file, the largest-frame field equals the largest frame, and every audio packet fits inside its frame.
 
 The video and audio compression schemes are not documented here. The conversion uses ffmpeg's decoders, `binkvideo` and `binkaudio_dct`, which decode all 61 files.
 
@@ -1935,7 +1935,7 @@ The decoded sizes of a track's packets add up to the length of the movie. Dividi
 
 ## Conversion and verification
 
-The `movies` stage of `cmd/convert` uses ffmpeg to convert each movie to an MP4 file in `extracted/movies/`, with H.264 video and AAC audio. The video uses a constant quality setting (CRF 12), because at CRF 18 frames in 12 movies fell below 40 dB PSNR (peak signal-to-noise ratio, a measure of how closely the output matches the source).
+The `movies` stage of `cmd/extract` uses ffmpeg to convert each movie to an MP4 file in `extracted/movies/`, with H.264 video and AAC audio. The video uses a constant quality setting (CRF 12), because at CRF 18 frames in 12 movies fell below 40 dB PSNR (peak signal-to-noise ratio, a measure of how closely the output matches the source).
 
 `cmd/verify` checks all 61 outputs with ffprobe and ffmpeg. For each movie, ffprobe must report the frame size, the frame count, the sample rate, the channel count and the audio duration of the Bink file, with the duration within 0.1 seconds. Every output frame must also reach at least 40 dB PSNR against the decoded Bink frame. All 61 outputs pass. The lowest PSNR of any frame is 41.8 dB.
 
@@ -1951,13 +1951,13 @@ Every file except the screenshot is either a GFF file or an ERF archive of GFF f
 
 The table below lists the files of the saved game.
 
-| File             | Format                    | Size in bytes | Content                                                          |
-| ---------------- | ------------------------- | ------------- | ---------------------------------------------------------------- |
-| `savenfo.res`    | GFF, file type "NFO "     | 681           | Summary shown in the load menu                                   |
-| `GLOBALVARS.res` | GFF, file type "GVT "     | 57,656        | Global script variables                                          |
-| `PARTYTABLE.res` | GFF, file type "PT  "     | 11,209        | Party, journal, messages and other state shared across modules   |
-| `SAVEGAME.sav`   | ERF archive, "MOD V1.0"   | 585,947       | Party member templates, inventory, factions and saved modules    |
-| `Screen.tga`     | TGA, 256x256, 24-bit      | 196,626       | Screenshot shown in the load menu                                |
+| File             | Format                  | Size in bytes | Content                                                        |
+| ---------------- | ----------------------- | ------------- | -------------------------------------------------------------- |
+| `savenfo.res`    | GFF, file type "NFO "   | 681           | Summary shown in the load menu                                 |
+| `GLOBALVARS.res` | GFF, file type "GVT "   | 57,656        | Global script variables                                        |
+| `PARTYTABLE.res` | GFF, file type "PT "    | 11,209        | Party, journal, messages and other state shared across modules |
+| `SAVEGAME.sav`   | ERF archive, "MOD V1.0" | 585,947       | Party member templates, inventory, factions and saved modules  |
+| `Screen.tga`     | TGA, 256x256, 24-bit    | 196,626       | Screenshot shown in the load menu                              |
 
 All four GFF file types have the version "V3.2". The extension ".res" therefore marks a GFF file of any file type.
 
@@ -1965,12 +1965,12 @@ All four GFF file types have the version "V3.2". The extension ".res" therefore 
 
 `SAVEGAME.sav` is an ERF archive with the signature "MOD V1.0". Its header and tables follow the ERF layout described above: no localized strings, the key table at 160, the resource table directly after it, and the field at 0x28 equal to 0. The resources start directly after the resource table, lie in table order without gaps, and end exactly at the end of the file. The archive holds four resources, listed in the table below.
 
-| Resref      | Type | Extension | Content                                              |
-| ----------- | ---- | --------- | ---------------------------------------------------- |
-| `AVAILNPC0` | 2027 | utc       | Creature template of party member slot 0             |
-| `END_M01AA` | 2057 | sav       | Nested "MOD V1.0" archive: the saved module          |
-| `INVENTORY` | 0    | res       | GFF file of file type "INV ": the party's items      |
-| `REPUTE`    | 2038 | fac       | Faction table                                        |
+| Resref      | Type | Extension | Content                                         |
+| ----------- | ---- | --------- | ----------------------------------------------- |
+| `AVAILNPC0` | 2027 | utc       | Creature template of party member slot 0        |
+| `END_M01AA` | 2057 | sav       | Nested "MOD V1.0" archive: the saved module     |
+| `INVENTORY` | 0    | res       | GFF file of file type "INV ": the party's items |
+| `REPUTE`    | 2038 | fac       | Faction table                                   |
 
 Resource types 0 and 2057 occur nowhere else in the game files. Their extensions come from the pool of extension strings in the `.rdata` section of `swkotor.exe`, which is not encrypted. The pool lists the extensions roughly in descending type order: "sav" stands between "utw" (2058) and "jrl" (2056), and "res" stands last, after "bmp", "mve" and "tga" (types 1 to 3). The confidence of both names is medium. No table that pairs each code with its string was found in the file, because the `.text` section is encrypted by the Steam wrapper (every 64 KB block of it compresses to more than its own size).
 
@@ -1980,11 +1980,11 @@ The resrefs in the outer archive are uppercase, and those in the nested archive 
 
 The nested archive `END_M01AA` (type 2057) holds one module in the same layout as the outer archive. Its header holds the same date. It holds the three resources of the module's main archive, in the order `m01aa.git`, `m01aa.are` and `module.ifo`. The table below compares them with the same resources in `modules/end_m01aa.rim`.
 
-| Resource     | Original size | Saved size | Original structs | Saved structs | Difference                                                                 |
-| ------------ | ------------- | ---------- | ---------------- | ------------- | -------------------------------------------------------------------------- |
-| `m01aa.are`  | 3,621         | 3,621      | 17               | 17            | None: the two files are identical byte for byte.                           |
-| `m01aa.git`  | 50,049        | 509,329    | 322              | 7,046         | Each instance holds its full state instead of a template reference.        |
-| `module.ifo` | 1,623         | 30,923     | 2                | 346           | Adds the game clock, the event queue and the player character.             |
+| Resource     | Original size | Saved size | Original structs | Saved structs | Difference                                                          |
+| ------------ | ------------- | ---------- | ---------------- | ------------- | ------------------------------------------------------------------- |
+| `m01aa.are`  | 3,621         | 3,621      | 17               | 17            | None: the two files are identical byte for byte.                    |
+| `m01aa.git`  | 50,049        | 509,329    | 322              | 7,046         | Each instance holds its full state instead of a template reference. |
+| `module.ifo` | 1,623         | 30,923     | 2                | 346           | Adds the game clock, the event queue and the player character.      |
 
 In the original GIT file, `UseTemplates` is 1 and a creature instance holds only its position, orientation and `TemplateResRef`. In the saved GIT file, `UseTemplates` is absent, and each creature instance holds its whole creature record, including `ObjectId`, hit points, classes, skills, effects and equipment. The saved file also adds `VarTable`, `SWVarTable`, `AreaEffectList` and weather and transition fields at the root. The creature list shrinks from 26 to 25 instances: Trask (`end_trask`) is no longer in the area, because Trask has joined the party (see `AVAILNPC0` below).
 
@@ -2015,16 +2015,16 @@ The saved game is the only source of two GFF field types: type 1, a signed 8-bit
 
 The root struct holds eight fields. Four lists hold the names, and four fields hold the values.
 
-| Label         | Type        | Content                                                                                   | Evidence                                                                                                        | Confidence |
-| ------------- | ----------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------- |
-| `CatBoolean`  | list (15)   | One struct per boolean with a string field `Name`                                         | 809 items, the same names as the booleans of `globalcat.2da`.                                                   | high       |
-| `CatNumber`   | list (15)   | One struct per number with a string field `Name`                                          | 369 items, the same names as the numbers of `globalcat.2da`.                                                    | high       |
-| `CatLocation` | list (15)   | One struct per location with a string field `Name`                                        | 5 items, the same names as the locations of `globalcat.2da`.                                                    | high       |
-| `CatString`   | list (15)   | One struct per string with a string field `Name`                                          | 2 items, the same names as the strings of `globalcat.2da`.                                                      | high       |
-| `ValBoolean`  | binary (13) | One bit per boolean, in the order of `CatBoolean`                                         | 102 bytes, which is 809 bits rounded up to whole bytes. Every byte is 0.                                        | medium     |
-| `ValNumber`   | binary (13) | One signed byte per number, in the order of `CatNumber`                                   | 369 bytes. `nwscript.nss` limits global numbers to -128 to +127. The values are plausible (see below).          | high       |
-| `ValLocation` | binary (13) | The location values                                                                       | 2,400 bytes, all 0. The layout is UNKNOWN.                                                                      | low        |
-| `ValString`   | list (15)   | One struct per string with a string field `String`, in the order of `CatString`          | 2 items, both empty.                                                                                            | medium     |
+| Label         | Type        | Content                                                                         | Evidence                                                                                               | Confidence |
+| ------------- | ----------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ---------- |
+| `CatBoolean`  | list (15)   | One struct per boolean with a string field `Name`                               | 809 items, the same names as the booleans of `globalcat.2da`.                                          | high       |
+| `CatNumber`   | list (15)   | One struct per number with a string field `Name`                                | 369 items, the same names as the numbers of `globalcat.2da`.                                           | high       |
+| `CatLocation` | list (15)   | One struct per location with a string field `Name`                              | 5 items, the same names as the locations of `globalcat.2da`.                                           | high       |
+| `CatString`   | list (15)   | One struct per string with a string field `Name`                                | 2 items, the same names as the strings of `globalcat.2da`.                                             | high       |
+| `ValBoolean`  | binary (13) | One bit per boolean, in the order of `CatBoolean`                               | 102 bytes, which is 809 bits rounded up to whole bytes. Every byte is 0.                               | medium     |
+| `ValNumber`   | binary (13) | One signed byte per number, in the order of `CatNumber`                         | 369 bytes. `nwscript.nss` limits global numbers to -128 to +127. The values are plausible (see below). | high       |
+| `ValLocation` | binary (13) | The location values                                                             | 2,400 bytes, all 0. The layout is UNKNOWN.                                                             | low        |
+| `ValString`   | list (15)   | One struct per string with a string field `String`, in the order of `CatString` | 2 items, both empty.                                                                                   | medium     |
 
 Four numbers are not 0. `K_CURRENT_PLANET` is 5, `END_TRASK_DLG` is 11, and `END_CARTH_DLG` and `End_TraskTalk` are 1. All four belong to the Endar Spire, where the game was saved. This supports one byte per number in the order of `CatNumber`.
 
@@ -2034,27 +2034,27 @@ The layout of `ValLocation` is UNKNOWN. A location in NWScript holds an area, a 
 
 ## Party table: PARTYTABLE.res
 
-`PARTYTABLE.res` (file type "PT  ") holds the state that is shared across modules. The table below lists its root fields. The meanings follow from the labels and the values; those marked with an asterisk are confirmed by another file.
+`PARTYTABLE.res` (file type "PT ") holds the state that is shared across modules. The table below lists its root fields. The meanings follow from the labels and the values; those marked with an asterisk are confirmed by another file.
 
-| Label                          | Type        | Value in the save | Probable meaning                                                                        |
-| ------------------------------ | ----------- | ----------------- | --------------------------------------------------------------------------------------- |
-| `PT_GOLD`                      | u32         | 0                 | Credits                                                                                 |
-| `PT_XP_POOL`                   | s32         | 150               | Experience points                                                                       |
-| `PT_PLAYEDSECONDS`             | u32         | 1,163             | Time played in seconds\*. Equals `TIMEPLAYED` in `savenfo.res`.                        |
-| `PT_CONTROLLED_NP`             | s32         | -1                | Party member under the player's control; -1 for the player character                    |
-| `PT_SOLOMODE`, `PT_CHEAT_USED` | u8          | 0                 | Flags                                                                                   |
-| `PT_NUM_MEMBERS`, `PT_MEMBERS` | u8, list    | 1                 | Party members besides the player\*. One member with `PT_MEMBER_ID` 0, matching `AVAILNPC0`. |
-| `PT_AVAIL_NPCS`                | list        | 9 items           | One entry per party member slot with `PT_NPC_AVAIL` and `PT_NPC_SELECT`                 |
-| `PT_AISTATE`, `PT_FOLLOWSTATE` | s32         | 0                 | Party behaviour settings                                                                |
-| `GlxyMap`                      | struct      |                   | Galaxy map: 16 points, a planet mask of 0 and no selected point                         |
-| `PT_PAZAAKCARDS`               | list        | 19 items          | Count per pazaak card                                                                   |
-| `PT_PAZSIDELIST`               | list        | 10 items          | Pazaak side deck, -1 for an empty slot                                                  |
-| `PT_TUT_WND_SHOWN`             | binary      | 6 bytes           | Tutorial windows already shown, probably one bit each. The layout is UNKNOWN.           |
-| `PT_LAST_GUI_PNL`              | s32         | 7                 | Last menu panel opened                                                                  |
-| `PT_FB_MSG_LIST`               | list        | 10 items          | Feedback messages, with text, type and colour                                           |
-| `PT_DLG_MSG_LIST`              | list        | 34 items          | Dialog history, with speaker and text                                                   |
-| `PT_COST_MULT_LIS`             | list        | 92 items          | Price multipliers, all 1.0                                                              |
-| `JNL_SortOrder`, `JNL_Entries` | s32, list   | 1 entry           | Journal: plot `end_attack` at state 20, with the date and time of the entry\*            |
+| Label                          | Type      | Value in the save | Probable meaning                                                                            |
+| ------------------------------ | --------- | ----------------- | ------------------------------------------------------------------------------------------- |
+| `PT_GOLD`                      | u32       | 0                 | Credits                                                                                     |
+| `PT_XP_POOL`                   | s32       | 150               | Experience points                                                                           |
+| `PT_PLAYEDSECONDS`             | u32       | 1,163             | Time played in seconds\*. Equals `TIMEPLAYED` in `savenfo.res`.                             |
+| `PT_CONTROLLED_NP`             | s32       | -1                | Party member under the player's control; -1 for the player character                        |
+| `PT_SOLOMODE`, `PT_CHEAT_USED` | u8        | 0                 | Flags                                                                                       |
+| `PT_NUM_MEMBERS`, `PT_MEMBERS` | u8, list  | 1                 | Party members besides the player\*. One member with `PT_MEMBER_ID` 0, matching `AVAILNPC0`. |
+| `PT_AVAIL_NPCS`                | list      | 9 items           | One entry per party member slot with `PT_NPC_AVAIL` and `PT_NPC_SELECT`                     |
+| `PT_AISTATE`, `PT_FOLLOWSTATE` | s32       | 0                 | Party behaviour settings                                                                    |
+| `GlxyMap`                      | struct    |                   | Galaxy map: 16 points, a planet mask of 0 and no selected point                             |
+| `PT_PAZAAKCARDS`               | list      | 19 items          | Count per pazaak card                                                                       |
+| `PT_PAZSIDELIST`               | list      | 10 items          | Pazaak side deck, -1 for an empty slot                                                      |
+| `PT_TUT_WND_SHOWN`             | binary    | 6 bytes           | Tutorial windows already shown, probably one bit each. The layout is UNKNOWN.               |
+| `PT_LAST_GUI_PNL`              | s32       | 7                 | Last menu panel opened                                                                      |
+| `PT_FB_MSG_LIST`               | list      | 10 items          | Feedback messages, with text, type and colour                                               |
+| `PT_DLG_MSG_LIST`              | list      | 34 items          | Dialog history, with speaker and text                                                       |
+| `PT_COST_MULT_LIS`             | list      | 92 items          | Price multipliers, all 1.0                                                                  |
+| `JNL_SortOrder`, `JNL_Entries` | s32, list | 1 entry           | Journal: plot `end_attack` at state 20, with the date and time of the entry\*               |
 
 ## Save summary: savenfo.res
 
@@ -2066,7 +2066,7 @@ The layout of `ValLocation` is UNKNOWN. A location in NWScript holds an area, a 
 
 ## Conversion and verification
 
-The `saves` stage of `cmd/convert` converts every saved game folder in `saves/` to `extracted/saves/<save>/`. It writes the following files.
+The `saves` stage of `cmd/extract` converts every saved game folder in `saves/` to `extracted/saves/<save>/`. It writes the following files.
 
 - Each GFF file becomes `<name>.res.json` in the JSON form described under "Generic file format: GFF". 64-bit integers are written exactly.
 - `GLOBALVARS.res` also becomes `GLOBALVARS.variables.json`, which pairs each variable name with its value: `booleans` (JSON booleans), `numbers` (integers), `strings`, `locations` (the names only) and `location_data` (`ValLocation` as hexadecimal, because its layout is unknown).
