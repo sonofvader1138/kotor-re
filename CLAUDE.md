@@ -22,6 +22,8 @@ The following tools are installed:
 - pngcheck
 - imagemagick
 - assimp-utils
+- gltf_validator (Khronos glTF validator)
+- xz-utils
 
 ## Rules
 

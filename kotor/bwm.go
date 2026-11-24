@@ -9,7 +9,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"strings"
 )
 
 const (
@@ -373,25 +372,58 @@ func ReportBwm(label string, bwm *Bwm) string {
 		bwm.NormalsChecked, Verdict(bwm.Errors[:min(5, len(bwm.Errors))]...))
 }
 
-// BwmObj writes a walkmesh as Wavefront OBJ. Faces keep their file order; a "usemtl" line names the
-// surface material whenever it changes. materialName maps a material number to its MTL name.
-func BwmObj(bwm *Bwm, label, mtllib string, materialName func(uint32) string) string {
-	var out strings.Builder
-	format := func(value float64) string { return fmt.Sprintf("%.6f", value) }
+// BwmMaterial is a surface material of a walkmesh: its name and a display color, which becomes the glTF base
+// color factor.
+type BwmMaterial struct {
+	Name  string
+	Color [3]float32
+}
 
-	fmt.Fprintf(&out, "# walkmesh %s\nmtllib %s\no %s\n", label, mtllib, label)
+// BwmGltf converts a walkmesh to the JSON text of a glTF file, whose binary buffer is stored at binUri, and
+// that buffer. Every surface material becomes a glTF material of the same index. The vertices are stored once,
+// and each run of consecutive faces with the same material becomes one primitive, so the faces keep their
+// file order. The mesh node holds extras, which the caller gives.
+func BwmGltf(bwm *Bwm, label, binUri string, materials []BwmMaterial, extras any) ([]byte, []byte, error) {
+	doc := newGltf(label)
+	for _, material := range materials {
+		color := [4]float32{material.Color[0], material.Color[1], material.Color[2], 1}
+		gltfMaterialAdd(doc, material.Name, "", &color)
+	}
+
+	positions := make([]float32, 0, 3*len(bwm.Vertices))
 	for _, vertex := range bwm.Vertices {
-		fmt.Fprintf(&out, "v %s %s %s\n", format(vertex[0]), format(vertex[1]), format(vertex[2]))
+		positions = append(positions, float32(vertex[0]), float32(vertex[1]), float32(vertex[2]))
+	}
+	position := gltfFloats(doc, positions, 3, true)
+
+	indices := make([]int, 0, edgesPerFace*len(bwm.Faces))
+	for _, face := range bwm.Faces {
+		indices = append(indices, face[:]...)
+	}
+	view := gltfIndexView(doc, indices)
+
+	var primitives []gltfPrimitive
+	start := 0
+	for end := 1; end <= len(bwm.Faces); end++ {
+		if end < len(bwm.Faces) && bwm.Materials[end] == bwm.Materials[start] {
+			continue
+		}
+
+		material := int(bwm.Materials[start])
+		accessor := gltfAccessorAt(doc, view, 4*edgesPerFace*start, GltfUnsignedInt, edgesPerFace*(end-start), "SCALAR")
+		primitives = append(primitives, gltfPrimitive{
+			Attributes: map[string]int{"POSITION": position},
+			Indices:    accessor,
+			Material:   &material,
+		})
+		start = end
 	}
 
-	current := ""
-	for i, face := range bwm.Faces {
-		name := materialName(bwm.Materials[i])
-		if name != current {
-			fmt.Fprintf(&out, "usemtl %s\n", name)
-			current = name
-		}
-		fmt.Fprintf(&out, "f %d %d %d\n", face[0]+1, face[1]+1, face[2]+1)
-	}
-	return out.String()
+	mesh := 0
+	doc.Meshes = []gltfMesh{{Name: label, Primitives: primitives}}
+	doc.Nodes = append(doc.Nodes, GltfNode{Name: label, Mesh: &mesh, Extras: extras})
+	doc.Nodes[0].Children = []int{1}
+
+	text, err := gltfEncode(doc, binUri)
+	return text, doc.Bin, err
 }

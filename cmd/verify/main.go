@@ -3,16 +3,13 @@
 // as UNVERIFIED. All stages run at the same time, and their checks share jobSlots job slots, so that at
 // most that many external programs run at once. Each report lists its lines in job order.
 //
-// models: assimp must load each OBJ with at least one mesh and the same face count as the file. The import
-// is raw (-r): assimp's default post-processing merges meshes with identical geometry into one, and some
-// models repeat a mesh at the same place, so the default import reports fewer faces than the file has.
-// The raw import also skips assimp's validation of its own data structures. The OBJ parser still runs and
-// still rejects faces whose vertex index is out of range. This includes the walkmesh OBJ files. Each
-// walkmesh JSON file, read with jq, must build again into the source's header values, edge table and
-// perimeter table (see checkWalkmeshJson).
-// Each model JSON file, read with jq, must hold the mesh header fields of the source model, and each face CSV
-// file, read with Go's encoding/csv reader, must build again into the face materials and adjacent faces of the
-// source (see checkModelJson and checkFacesCsv).
+// models: each model and walkmesh glTF file is checked in four ways. assimp must load it with at least one
+// mesh and with the face count that its index accessors give (see assimpGltf). The Khronos glTF validator,
+// when installed, must report no errors. jq must read the mesh header fields of the node extras, which must
+// equal the source model (see checkModelExtras), or the walkmesh values of the node extras, which must build
+// again into the source's header values, edge table and perimeter table (see checkWalkmeshExtras). The
+// binary buffer, located through the accessors that jq reads, must hold the source's vertex positions, face
+// indices and face fields (see checkModelBin and checkWalkmeshBin).
 // textures: ImageMagick's decoding of each PNG must equal the decoded TPC texture, and pngcheck must accept it.
 // tga: ImageMagick's decoding of each PNG must equal its decoding of the source TGA, and pngcheck must
 // accept the PNG. Each TXI must equal the source bytes. Each room visibility list, read with jq, must build
@@ -22,15 +19,13 @@
 // duration (within 0.1 s; ffmpeg's Bink audio decoder emits about 0.03 s more than the packets declare),
 // and every output frame must have a PSNR of at least 40 dB against the decoded Bink frame.
 // gui: jq must parse each JSON file.
-// patch: the resources of patch.erf, checked as addResourceChecks describes, and the OBJ file of its model
-// loaded with assimp.
+// patch: the resources of patch.erf, checked as addResourceChecks describes.
 // lips: Go's encoding/csv reader must read each CSV file, and its keyframes, packed again as f32 and u8, must
 // equal the source LIP keyframe bytes.
 // modules: jq must parse each JSON file. No independent tool reads NCS, so each script listing is
 // assembled again from its text and must equal the source script byte for byte. The assembler shares only
 // the opcode, type and operand tables with the disassembler.
-// rims: assimp must load each OBJ file, and its JSON and face CSV files are checked as for models. Every
-// other resource is checked as addResourceChecks describes: WAV files with ffprobe and ffmpeg, 2DA CSV files with encoding/csv, SSF and LTR JSON files rebuilt from
+// rims: each model is checked as for models. Every other resource is checked as addResourceChecks describes: WAV files with ffprobe and ffmpeg, 2DA CSV files with encoding/csv, SSF and LTR JSON files rebuilt from
 // jq's output, other JSON files with jq, NSS files with iconv, and script listings by assembling them.
 // bifs: the resources of the BIF archives in kotor.ResourceBifs, checked as addResourceChecks describes.
 // tlk: the string table JSON, read with jq, must build again into dialog.tlk byte for byte.
@@ -210,24 +205,36 @@ func imageChecks(summary *kotor.Summary, name, dir string, jobs []job) {
 var (
 	meshesPattern = regexp.MustCompile(`(?m)^Meshes:\s+(\d+)`)
 	facesPattern  = regexp.MustCompile(`(?m)^Faces:\s+(\d+)`)
+
+	assimpErrorPattern = regexp.MustCompile(`(?m)^ERROR: (.*)$`)
 )
 
-// assimpObj loads one OBJ file with assimp and returns its report line. The label is the file name
-// relative to dir.
-func assimpObj(dir, file string) []string {
-	objPath := filepath.Join(dir, file)
-	faces := 0
-	for text := range bytes.SplitSeq(kotor.ReadFile(objPath), []byte("\n")) {
-		if bytes.HasPrefix(text, []byte("f ")) {
-			faces++
-		}
-	}
+// gltfLocation is a jq function that prints the byte offset of an accessor in the binary buffer and its
+// element count. Its input is the accessor index, and $d is the document.
+const gltfLocation = `def location($d): $d.accessors[.] as $a
+	| "\(($d.bufferViews[$a.bufferView].byteOffset // 0) + ($a.byteOffset // 0)) \($a.count)";`
 
-	result := kotor.Exec("assimp", []string{"info", objPath, "-r"}, nil)
+// assimpGltf loads one glTF file with assimp and returns its report line. The import is raw (-r), because
+// assimp's default post-processing merges meshes with identical geometry, and some models repeat a mesh at
+// the same place. The expected face count is the sum of the index counts of all primitives divided by 3, as
+// jq reads it.
+func assimpGltf(path, label string) []string {
+	counted := kotor.Exec("jq", []string{"-r", `. as $d | [.meshes[]?.primitives[].indices | $d.accessors[.].count] | add // 0`, path}, nil)
+	indices, err := strconv.Atoi(strings.TrimSpace(string(counted.Stdout)))
+	if counted.Status != 0 || err != nil {
+		return line(label + " FAIL: jq: " + kotor.FirstLine(counted.Stderr))
+	}
+	faces := indices / 3
+
+	result := kotor.Exec("assimp", []string{"info", path, "-r"}, nil)
 	meshes := meshesPattern.FindSubmatch(result.Stdout)
 	loaded := facesPattern.FindSubmatch(result.Stdout)
 	if result.Status != 0 || meshes == nil || loaded == nil {
-		return line(file + " FAIL: assimp: " + kotor.FirstLine(result.Stderr))
+		message := kotor.FirstLine(result.Stderr)
+		if found := assimpErrorPattern.FindSubmatch(result.Stdout); found != nil {
+			message = string(found[1])
+		}
+		return line(label + " FAIL: assimp: " + message)
 	}
 
 	var errs []string
@@ -235,31 +242,44 @@ func assimpObj(dir, file string) []string {
 		errs = append(errs, "no meshes")
 	}
 	if count, _ := strconv.Atoi(string(loaded[1])); count != faces {
-		errs = append(errs, fmt.Sprintf("assimp loaded %s faces, file has %d", loaded[1], faces))
+		errs = append(errs, fmt.Sprintf("assimp loaded %s faces, accessors give %d", loaded[1], faces))
 	}
-
-	return line(fmt.Sprintf("%s meshes=%s faces=%s %s", file, meshes[1], loaded[1], kotor.Verdict(errs...)))
+	return line(fmt.Sprintf("%s meshes=%s faces=%s %s", label, meshes[1], loaded[1], kotor.Verdict(errs...)))
 }
 
-// Models: extracted/data/<archive>/*.obj for each archive in kotor.ModelBifs, and the walkmesh JSON files of
-// the same folders.
-func models(summary *kotor.Summary) {
-	if !kotor.Has("assimp") {
-		summary.Note("assimp missing: models UNVERIFIED")
-		return
+// validateGltf runs the Khronos glTF validator on one glTF file, which also loads its buffer and images, and
+// returns an error message when the report counts errors.
+func validateGltf(path string) string {
+	result := kotor.Exec("gltf_validator", []string{"-o", path}, nil)
+	var report struct {
+		Issues struct {
+			NumErrors int `json:"numErrors"`
+		} `json:"issues"`
 	}
+	if err := json.Unmarshal(result.Stdout, &report); err != nil {
+		return "gltf_validator: " + kotor.FirstLine(result.Stderr)
+	}
+	if report.Issues.NumErrors > 0 {
+		return fmt.Sprintf("gltf_validator reports %d errors", report.Issues.NumErrors)
+	}
+	return ""
+}
 
+// addGltfChecks adds the checks that every glTF file gets: the assimp import and the validator.
+func addGltfChecks(jobs map[string][]job, label, path string) {
+	jobs["assimp"] = append(jobs["assimp"], func() []string { return assimpGltf(path, label) })
+	jobs["validator"] = append(jobs["validator"], func() []string { return line(label + " " + kotor.Verdict(validateGltf(path))) })
+}
+
+// Models: extracted/data/<archive>/*.gltf for each archive in kotor.ModelBifs, models and walkmeshes. Each
+// written glTF file is checked against its source resource.
+func models(summary *kotor.Summary) {
 	log("models...")
 	data := filepath.Join(kotor.Extracted, "data")
 	key := kotor.ReadKey()
-	var jobs []job
-	var walkmeshJobs []job
 	modelJobs := map[string][]job{}
+	walkmeshJobs := map[string][]job{}
 	for _, name := range kotor.ModelBifs {
-		for _, file := range kotor.ListFiles(filepath.Join(data, name), ".obj", false) {
-			jobs = append(jobs, func() []string { return assimpObj(data, filepath.Join(name, file)) })
-		}
-
 		for _, resource := range kotor.BifResources("data/"+name+".bif", key) {
 			if resource.Ext == "mdl" {
 				file := filepath.Join(name, resource.Resref)
@@ -269,37 +289,39 @@ func models(summary *kotor.Summary) {
 			if resource.Ext != "wok" && resource.Ext != "dwk" && resource.Ext != "pwk" {
 				continue
 			}
-			file := filepath.Join(name, resource.Resref+"."+resource.Ext+".json")
+
+			file := filepath.Join(name, resource.Resref+"."+resource.Ext)
 			path := filepath.Join(data, file)
-			if !exists(path) {
+			if !exists(path + ".gltf") {
 				continue
 			}
-			walkmeshJobs = append(walkmeshJobs, func() []string {
-				return line(file + " " + kotor.Verdict(checkWalkmeshJson(path, resource.Data)))
+			addGltfChecks(walkmeshJobs, file+".gltf", path+".gltf")
+			walkmeshJobs["jq"] = append(walkmeshJobs["jq"], func() []string {
+				return line(file + ".gltf " + kotor.Verdict(checkWalkmeshExtras(path+".gltf", resource.Data)))
+			})
+			walkmeshJobs["gltf"] = append(walkmeshJobs["gltf"], func() []string {
+				return line(file + ".bin " + kotor.Verdict(checkWalkmeshBin(path, resource.Data)))
 			})
 		}
 	}
-	summary.Tally("assimp_models", pool(jobs))
 
+	runResourceChecks(summary, "models", modelJobs)
 	log("walkmeshes...")
-	summary.Tally("jq_walkmeshes", pool(walkmeshJobs))
-
-	log("model metadata...")
-	summary.Tally("jq_models", pool(modelJobs["jq"]))
-	summary.Tally("csv_models", pool(modelJobs["csv"]))
+	runResourceChecks(summary, "walkmeshes", walkmeshJobs)
 }
 
-// walkmeshProgram prints the numbers of a walkmesh JSON file, one per line, in source order: the type, the
-// two relative and the two absolute use points, the position, then for each perimeter its edges as
-// 3 * face + edge and transition (-1 for null), followed by the perimeter's end in the edge list.
-const walkmeshProgram = `.type, (.relative_use + .absolute_use | .[][]), .position[],
+// walkmeshProgram prints the numbers of the mesh node extras of a walkmesh glTF file, one per line, in source
+// order: the type, the two relative and the two absolute use points, the position, then for each perimeter
+// its edges as 3 * face + edge and transition (-1 for null), followed by the perimeter's end in the edge
+// list. Node 1 is the mesh node, below the root node that turns Z-up into Y-up.
+const walkmeshProgram = `.nodes[1].extras | .type, (.relative_use + .absolute_use | .[][]), .position[],
 	(foreach .perimeters[] as $perimeter (0; . + ($perimeter | length);
 		($perimeter[] | (3 * .face + .edge), (.transition // -1)), "end \(.)"))`
 
-// checkWalkmeshJson builds the header bytes 0x08 to 0x47, the edge table and the perimeter table of a
-// walkmesh from the JSON that jq reads, and compares them with the source. The header offsets of the two
-// tables are read from the source.
-func checkWalkmeshJson(path string, source []byte) string {
+// checkWalkmeshExtras builds the header bytes 0x08 to 0x47, the edge table and the perimeter table of a
+// walkmesh from the glTF extras that jq reads, and compares them with the source. The header offsets of the
+// two tables are read from the source.
+func checkWalkmeshExtras(path string, source []byte) string {
 	result := kotor.Exec("jq", []string{"-r", walkmeshProgram, path}, nil)
 	if result.Status != 0 {
 		return "jq: " + kotor.FirstLine(result.Stderr)
@@ -369,6 +391,79 @@ func checkWalkmeshJson(path string, source []byte) string {
 		return fmt.Sprintf("built %d edge bytes differ from the source", len(edges))
 	case !bytes.Equal(perimeters, table(perimeterCount, perimeterOffset, perimeterSize)):
 		return fmt.Sprintf("built %d perimeter bytes differ from the source", len(perimeters))
+	}
+	return ""
+}
+
+// walkmeshBinProgram prints the URI of the binary buffer, the location of the positions and, for each
+// primitive, its material and the location of its indices.
+const walkmeshBinProgram = gltfLocation + ` . as $d | .buffers[0].uri,
+	(.meshes[0].primitives[0].attributes.POSITION | location($d)),
+	(.meshes[0].primitives[] | "\(.material) \(.indices | location($d))")`
+
+// checkWalkmeshBin compares the binary buffer of a walkmesh glTF file with the source's vertex, face and
+// material tables. path is the converted file without the extensions .gltf and .bin. The positions must
+// equal the vertex table byte for byte. The index accessors of the primitives, in order, must cover the
+// buffer's face indices without gaps, and those must equal the face table. The material of each primitive,
+// repeated once per face, must build again into the material table.
+func checkWalkmeshBin(path string, source []byte) string {
+	const (
+		vertexCount    = 0x48
+		vertexOffset   = 0x4C
+		faceCount      = 0x50
+		faceOffset     = 0x54
+		materialOffset = 0x58
+		vertexSize     = 12
+		faceSize       = 12
+		indexSize      = 4
+	)
+	result := kotor.Exec("jq", []string{"-r", walkmeshBinProgram, path + ".gltf"}, nil)
+	if result.Status != 0 {
+		return "jq: " + kotor.FirstLine(result.Stderr)
+	}
+	fields := strings.Split(strings.TrimSuffix(string(result.Stdout), "\n"), "\n")
+	if len(fields) < 3 || fields[0] != filepath.Base(path)+".bin" {
+		return "unexpected buffer or no primitives"
+	}
+	bin, err := os.ReadFile(path + ".bin")
+	if err != nil {
+		return err.Error()
+	}
+
+	u32 := func(offset int) int {
+		return readUint(source, offset, 4)
+	}
+	table := func(offsetField, count, size int) []byte {
+		start := u32(offsetField)
+		return kotor.Slice(source, start, start+count*size)
+	}
+
+	var start, count int
+	if _, err := fmt.Sscan(fields[1], &start, &count); err != nil {
+		return "bad position location " + fields[1]
+	}
+	if count != u32(vertexCount) || !bytes.Equal(kotor.Slice(bin, start, start+vertexSize*count), table(vertexOffset, count, vertexSize)) {
+		return "positions differ from the vertex table"
+	}
+
+	var indices, materials []byte
+	for _, field := range fields[2:] {
+		var material, offset, length int
+		if _, err := fmt.Sscan(field, &material, &offset, &length); err != nil {
+			return "bad primitive " + field
+		}
+		indices = append(indices, kotor.Slice(bin, offset, offset+indexSize*length)...)
+		for range length / 3 {
+			materials = binary.LittleEndian.AppendUint32(materials, uint32(material))
+		}
+	}
+
+	faces := u32(faceCount)
+	switch {
+	case !bytes.Equal(indices, table(faceOffset, faces, faceSize)):
+		return "face indices differ from the face table"
+	case !bytes.Equal(materials, table(materialOffset, faces, indexSize)):
+		return "primitive materials differ from the material table"
 	}
 	return ""
 }
@@ -444,18 +539,19 @@ func modelMeshes(mdl []byte) ([]modelMesh, []byte) {
 	return meshes, data
 }
 
-// modelProgram prints the fields of a model JSON file one per line, mesh by mesh. A mesh without texture
-// scrolling prints 0 in place of the scroll values, and a mesh with it prints 1 followed by them.
-const modelProgram = `.meshes[] | .name, .kind, .render, .shadow, .lightmapped, .texture, .lightmap, .diffuse[],
+// modelProgram prints the mesh header fields of the node extras of a model glTF file one per line, mesh by
+// mesh in node order. A mesh without texture scrolling prints 0 in place of the scroll values, and a mesh with
+// it prints 1 followed by them.
+const modelProgram = `.nodes[] | .extras.mesh // empty | .name, .kind, .render, .shadow, .lightmapped, .texture, .lightmap, .diffuse[],
 	.ambient[], .transparency_hint,
 	(if .uv_scroll then 1, .uv_scroll.direction[], .uv_scroll.jitter, .uv_scroll.jitter_speed else 0 end),
 	.bounds_min[], .bounds_max[], .radius, .average_point[], .surface_area, .vertex_count, .face_count,
 	(.vertex_components | join(" ")), "end"`
 
-// checkModelJson compares the mesh header fields of a model JSON file, as jq prints them, with the fields of
-// the source MDL. Floats are compared bit for bit after rounding to f32, and names up to their first NUL byte.
+// checkModelExtras compares the mesh header fields of a model glTF file, as jq prints them, with the fields
+// of the source MDL. Floats are compared bit for bit after rounding to f32, and names up to their first NUL byte.
 // The mesh kind is compared with the one that the node flags give.
-func checkModelJson(path string, mdl []byte) string {
+func checkModelExtras(path string, mdl []byte) string {
 	result := kotor.Exec("jq", []string{"-r", modelProgram, path}, nil)
 	if result.Status != 0 {
 		return "jq: " + kotor.FirstLine(result.Stderr)
@@ -557,30 +653,46 @@ func checkModelJson(path string, mdl []byte) string {
 	return ""
 }
 
-// checkFacesCsv reads a face CSV file with Go's encoding/csv reader and builds the material and adjacent face
-// bytes, 0x10 to 0x19 of each face, of every mesh whose render byte is set. They must equal the source bytes,
-// with -1 standing for 0xFFFF, and the rows must name the meshes and faces in source order.
-func checkFacesCsv(path string, mdl []byte) string {
+// modelBinProgram prints the URI of the binary buffer and, for each node with a mesh, its name and the
+// locations of its positions, its indices, its face materials and its adjacent faces.
+const modelBinProgram = gltfLocation + ` . as $d | .buffers[0].uri, (.nodes[] | select(.mesh != null) |
+	.name, ($d.meshes[.mesh].primitives[0] as $p
+		| $p.attributes.POSITION, $p.indices, .extras.face_materials, .extras.face_adjacent | location($d)))`
+
+// checkModelBin compares the binary buffer of a model glTF file with the source MDL. path is the converted
+// file without the extensions .gltf and .bin. Every mesh whose render byte is set and that has faces must
+// have a node with a mesh, in source order. Its positions must equal the MDL vertex array byte for byte, its
+// u32 indices the u16 vertex indices of the faces, its face materials the u32 at 0x10 of each face and its
+// adjacent faces the u16[3] at 0x14, byte for byte.
+func checkModelBin(path string, mdl []byte) string {
 	const (
 		faceSize      = 32
-		fieldsStart   = 0x10
-		fieldsEnd     = 0x1a
-		noFace        = 0xffff
+		materialField = 0x10
+		adjacentField = 0x14
+		cornersField  = 0x1a
 		renderOffset  = 0x139
 		facesOffset   = 0x08
 		countOffset   = 0x0c
-		adjacentCount = 3
+		vertexCount   = 0x130
+		vertexOffset  = 0x148
+		vertexSize    = 12
+		corners       = 3
+		fieldsPerMesh = 5
+		materialSize  = 4
+		adjacentSize  = 6
+		indexSize     = 4
 	)
-	file, err := os.ReadFile(path)
+	result := kotor.Exec("jq", []string{"-r", modelBinProgram, path + ".gltf"}, nil)
+	if result.Status != 0 {
+		return "jq: " + kotor.FirstLine(result.Stderr)
+	}
+	fields := strings.Split(strings.TrimSuffix(string(result.Stdout), "\n"), "\n")
+	if fields[0] != filepath.Base(path)+".bin" {
+		return "unexpected buffer " + fields[0]
+	}
+	bin, err := os.ReadFile(path + ".bin")
 	if err != nil {
 		return err.Error()
-	}
-	rows, err := csv.NewReader(bytes.NewReader(file)).ReadAll()
-	if err != nil {
-		return err.Error()
-	}
-	if len(rows) == 0 || strings.Join(rows[0], ",") != kotor.MdlFacesCsvHeader {
-		return "bad header"
 	}
 
 	meshes, data := modelMeshes(mdl)
@@ -588,63 +700,74 @@ func checkFacesCsv(path string, mdl []byte) string {
 		return readUint(data, offset, 4)
 	}
 
-	row := 1
+	field := 1
 	for _, mesh := range meshes {
-		if data[min(mesh.header+renderOffset, len(data)-1)] == 0 {
+		faceCount := u32(mesh.header + countOffset)
+		if data[min(mesh.header+renderOffset, len(data)-1)] == 0 || faceCount == 0 {
 			continue
 		}
+		if field+fieldsPerMesh > len(fields) {
+			return "no glTF mesh for " + mesh.name
+		}
+		if fields[field] != mesh.name {
+			return fmt.Sprintf("glTF mesh %s, source %s", fields[field], mesh.name)
+		}
 
+		var starts, counts [4]int
+		for k := range starts {
+			if _, err := fmt.Sscan(fields[field+1+k], &starts[k], &counts[k]); err != nil {
+				return "bad location " + fields[field+1+k]
+			}
+		}
+		field += fieldsPerMesh
+
+		vertices := u32(mesh.header+vertexCount) & 0xffff
+		vertexStart := u32(mesh.header + vertexOffset)
+		if counts[0] != vertices || !bytes.Equal(kotor.Slice(bin, starts[0], starts[0]+vertexSize*vertices),
+			kotor.Slice(data, vertexStart, vertexStart+vertexSize*vertices)) {
+			return mesh.name + ": positions differ from the source"
+		}
+
+		var indices, materials, adjacent []byte
 		faces := u32(mesh.header + facesOffset)
-		for i := range u32(mesh.header + countOffset) {
-			if row >= len(rows) {
-				return fmt.Sprintf("%d rows, more expected", len(rows)-1)
+		for i := range faceCount {
+			face := faces + faceSize*i
+			for corner := range corners {
+				indices = binary.LittleEndian.AppendUint32(indices, uint32(readUint(data, face+cornersField+2*corner, 2)))
 			}
-			fields := rows[row]
-			row++
-			if fields[0] != mesh.name || fields[1] != strconv.Itoa(i) {
-				return fmt.Sprintf("row %d names %s face %s, source %s face %d", row-1, fields[0], fields[1], mesh.name, i)
-			}
+			materials = append(materials, kotor.Slice(data, face+materialField, face+materialField+materialSize)...)
+			adjacent = append(adjacent, kotor.Slice(data, face+adjacentField, face+adjacentField+adjacentSize)...)
+		}
 
-			material, materialErr := strconv.ParseUint(fields[2], 10, 32)
-			if materialErr != nil {
-				return "bad material " + fields[2]
-			}
-			built := binary.LittleEndian.AppendUint32(nil, uint32(material))
-			for _, text := range fields[3 : 3+adjacentCount] {
-				adjacent, adjacentErr := strconv.Atoi(text)
-				if adjacentErr != nil || adjacent < -1 || adjacent >= noFace {
-					return "bad adjacent face " + text
-				}
-				if adjacent == -1 {
-					adjacent = noFace
-				}
-				built = binary.LittleEndian.AppendUint16(built, uint16(adjacent))
-			}
-
-			start := faces + faceSize*i
-			if !bytes.Equal(built, kotor.Slice(data, start+fieldsStart, start+fieldsEnd)) {
-				return fmt.Sprintf("%s face %d differs from the source", mesh.name, i)
-			}
+		switch {
+		case counts[1] != corners*faceCount || !bytes.Equal(kotor.Slice(bin, starts[1], starts[1]+len(indices)), indices):
+			return mesh.name + ": indices differ from the source"
+		case counts[2] != faceCount || !bytes.Equal(kotor.Slice(bin, starts[2], starts[2]+len(materials)), materials):
+			return mesh.name + ": face materials differ from the source"
+		case counts[3] != faceCount || !bytes.Equal(kotor.Slice(bin, starts[3], starts[3]+len(adjacent)), adjacent):
+			return mesh.name + ": adjacent faces differ from the source"
 		}
 	}
 
-	if row != len(rows) {
-		return fmt.Sprintf("%d rows, %d expected", len(rows)-1, row-1)
+	if field != len(fields) {
+		return fmt.Sprintf("%d glTF meshes, %d expected", (len(fields)-1)/fieldsPerMesh, (field-1)/fieldsPerMesh)
 	}
 	return ""
 }
 
-// addModelChecks adds the JSON and face CSV checks of one converted model to jobs, when the model was written.
-// path is the converted file without extensions, and label is the same path relative to the report folder.
+// addModelChecks adds the checks of one converted model to jobs, when the model was written: the glTF checks
+// of addGltfChecks, the mesh header extras and the binary buffer. path is the converted file without
+// extensions, and label is the same path relative to the report folder.
 func addModelChecks(jobs map[string][]job, label, path string, mdl []byte) {
-	if !exists(path + ".json") {
+	if !exists(path + ".gltf") {
 		return
 	}
+	addGltfChecks(jobs, label+".gltf", path+".gltf")
 	jobs["jq"] = append(jobs["jq"], func() []string {
-		return line(label + ".json " + kotor.Verdict(checkModelJson(path+".json", mdl)))
+		return line(label + ".gltf " + kotor.Verdict(checkModelExtras(path+".gltf", mdl)))
 	})
-	jobs["csv"] = append(jobs["csv"], func() []string {
-		return line(label + ".faces.csv " + kotor.Verdict(checkFacesCsv(path+".faces.csv", mdl)))
+	jobs["gltf"] = append(jobs["gltf"], func() []string {
+		return line(label + ".bin " + kotor.Verdict(checkModelBin(path, mdl)))
 	})
 }
 
@@ -1057,13 +1180,14 @@ func modules(summary *kotor.Summary) {
 // checkTools names the tool that each kind of resource check runs, in report order. A check without a
 // tool runs in Go and builds the source resource again from the converted file.
 var checkTools = []struct{ kind, program string }{
-	{"assimp", "assimp"}, {"ffprobe", "ffprobe"}, {"csv", ""}, {"ncs", ""}, {"jq", "jq"}, {"iconv", "iconv"},
-	{"copy", ""}, {"imagemagick", "convert"}, {"pngcheck", "pngcheck"}, {"globals", "jq"},
+	{"assimp", "assimp"}, {"validator", "gltf_validator"}, {"gltf", "jq"}, {"ffprobe", "ffprobe"}, {"csv", ""},
+	{"ncs", ""}, {"jq", "jq"}, {"iconv", "iconv"}, {"copy", ""}, {"imagemagick", "convert"},
+	{"pngcheck", "pngcheck"}, {"globals", "jq"},
 }
 
 // addResourceChecks adds the check of one converted resource to jobs, keyed by the kind of check. path is
 // the converted file without the extensions that writeResource adds, and label is the same path relative
-// to the folder of the report. The OBJ files of models are not added here, because they are checked by listing.
+// to the folder of the report.
 //
 //   - A WAV file must be read by ffprobe as 16-bit PCM, and its samples must match the source (see
 //     compareSamples).
@@ -1073,9 +1197,9 @@ var checkTools = []struct{ kind, program string }{
 //   - A letter table JSON file, read with jq, must build again into the source letter table.
 //   - A room layout JSON file, read with jq, must build again into the source layout (see checkLytJson).
 //   - A script source, converted back to Windows-1252 by iconv, must equal the source bytes.
-//   - A model JSON file, read with jq, must hold the mesh header fields of the source model, and its face
-//     CSV file, read with Go's encoding/csv reader, must build again into the face materials and adjacent
-//     faces of the source (see checkModelJson and checkFacesCsv).
+//   - A model glTF file must load with assimp and pass the glTF validator, its node extras must hold the mesh
+//     header fields of the source model, and its binary buffer must hold the source's positions, face
+//     indices and face fields (see addModelChecks).
 //   - A TXI file must equal the source bytes.
 //   - A texture PNG, decoded by ImageMagick, must equal the decoded TPC texture, and pngcheck must accept it.
 //     Its TXI file, written when the TPC trailer holds text, must equal the trailer without trailing NUL
@@ -1296,8 +1420,8 @@ func runResourceChecks(summary *kotor.Summary, stage string, jobs map[string][]j
 	}
 }
 
-// Rims: extracted/rims/<archive>/ against rims/<archive>.rim. Each OBJ file must load with assimp, and every
-// other resource is checked as addResourceChecks describes.
+// Rims: extracted/rims/<archive>/ against rims/<archive>.rim. Every resource is checked as addResourceChecks
+// describes.
 func rims(summary *kotor.Summary) {
 	log("rims...")
 	src := filepath.Join(kotor.Game, "rims")
@@ -1312,11 +1436,6 @@ func rims(summary *kotor.Summary) {
 			continue
 		}
 
-		dir := filepath.Join(out, name)
-		for _, file := range kotor.ListFiles(dir, ".obj", false) {
-			jobs["assimp"] = append(jobs["assimp"], func() []string { return assimpObj(out, filepath.Join(name, file)) })
-		}
-
 		for _, entry := range rim.Entries {
 			label := filepath.Join(name, entry.Resref)
 			addResourceChecks(jobs, label, filepath.Join(out, label), entry.Ext, entry.Data)
@@ -1329,15 +1448,11 @@ func rims(summary *kotor.Summary) {
 	runResourceChecks(summary, "rims", jobs)
 }
 
-// Patch: extracted/patch/ against patch.erf. The OBJ file must load with assimp, and every other resource is
-// checked as addResourceChecks describes.
+// Patch: extracted/patch/ against patch.erf. Every resource is checked as addResourceChecks describes.
 func patch(summary *kotor.Summary) {
 	log("patch...")
 	dir := filepath.Join(kotor.Extracted, "patch")
 	jobs := map[string][]job{}
-	for _, file := range kotor.ListFiles(dir, ".obj", false) {
-		jobs["assimp"] = append(jobs["assimp"], func() []string { return assimpObj(dir, file) })
-	}
 	for _, entry := range kotor.ReadErf(filepath.Join(kotor.Game, "patch.erf")) {
 		addResourceChecks(jobs, entry.Resref, filepath.Join(dir, entry.Resref), entry.Ext, entry.Data())
 	}

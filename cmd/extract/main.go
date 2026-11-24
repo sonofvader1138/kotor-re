@@ -64,18 +64,35 @@ func texturePaths() map[string]string {
 
 // modelCounts collects what the models of one stage leave out, for the stage summary.
 type modelCounts struct {
-	skipped int
-	hidden  int
-	missing map[string]bool
+	skipped         int
+	hidden          int
+	normalsReplaced int
+	normalsOmitted  int
+	missing         map[string]bool
 }
 
-// writeModel converts one MDL resource and its MDX data to <resref>.obj and <resref>.mtl in out. The MTL
-// file refers to each texture by its path relative to out. It returns its report line and the names of the
-// files it wrote. A model without rendered geometry is counted and not written.
+// writeModel converts one MDL resource and its MDX data to <resref>.gltf and <resref>.bin in out. The glTF
+// file refers to each texture by the path of its PNG file relative to out. It returns its report line and the
+// names of the files it wrote. A model without rendered geometry is counted and not written.
 func writeModel(out, label, resref string, mdl, mdx []byte, texturePath map[string]string,
 	counts *modelCounts) (string, []string) {
-	model := kotor.ConvertMdl(mdl, mdx, resref+".mdl", resref+".mtl")
+	imageUri := func(texture string) string {
+		path, ok := texturePath[texture]
+		if !ok {
+			return ""
+		}
+
+		relative, err := filepath.Rel(out, filepath.Join(kotor.Extracted, path))
+		if err != nil {
+			kotor.Fatal(err.Error())
+		}
+		return filepath.ToSlash(relative)
+	}
+
+	model := kotor.ConvertMdl(mdl, mdx, resref, resref+".bin", imageUri)
 	counts.hidden += model.Stats.Hidden
+	counts.normalsReplaced += model.Stats.NormalsReplaced
+	counts.normalsOmitted += model.Stats.NormalsOmitted
 	if len(model.Errors) > 0 {
 		return kotor.ReportMdl(label, model), nil
 	}
@@ -84,32 +101,15 @@ func writeModel(out, label, resref string, mdl, mdx []byte, texturePath map[stri
 		return kotor.ReportMdl(label, model), nil
 	}
 
-	mtl := []string{"# materials for " + resref}
 	for _, texture := range model.Textures {
-		mtl = append(mtl, "", "newmtl "+texture, "Kd 1.000000 1.000000 1.000000")
-		if path, ok := texturePath[texture]; ok {
-			relative, err := filepath.Rel(out, filepath.Join(kotor.Extracted, path))
-			if err != nil {
-				kotor.Fatal(err.Error())
-			}
-			mtl = append(mtl, "map_Kd "+filepath.ToSlash(relative))
-		} else {
-			mtl = append(mtl, "# texture not found in the texture packs")
+		if _, ok := texturePath[texture]; !ok {
 			counts.missing[texture] = true
 		}
 	}
 
-	text, err := json.MarshalIndent(map[string][]kotor.MdlMesh{"meshes": model.Meshes}, "", "\t")
-	if err != nil {
-		kotor.Fatal(err.Error())
-	}
-
-	kotor.WriteFile(filepath.Join(out, resref+".obj"), []byte(model.Obj))
-	kotor.WriteFile(filepath.Join(out, resref+".mtl"), []byte(strings.Join(mtl, "\n")+"\n"))
-	kotor.WriteFile(filepath.Join(out, resref+".json"), append(text, '\n'))
-	kotor.WriteFile(filepath.Join(out, resref+".faces.csv"), []byte(model.FacesCsv))
-	files := []string{resref + ".obj", resref + ".mtl", resref + ".json", resref + ".faces.csv"}
-	return kotor.ReportMdl(label, model), files
+	kotor.WriteFile(filepath.Join(out, resref+".gltf"), model.Gltf)
+	kotor.WriteFile(filepath.Join(out, resref+".bin"), model.Bin)
+	return kotor.ReportMdl(label, model), []string{resref + ".gltf", resref + ".bin"}
 }
 
 func noteModels(summary *kotor.Summary, stage string, counts *modelCounts) {
@@ -121,13 +121,15 @@ func noteModels(summary *kotor.Summary, stage string, counts *modelCounts) {
 	*summary = append(*summary,
 		fmt.Sprintf("%s: models without rendered geometry skipped: %d", stage, counts.skipped),
 		fmt.Sprintf("%s: non-rendered meshes omitted: %d", stage, counts.hidden),
+		fmt.Sprintf("%s: zero normals replaced: %d", stage, counts.normalsReplaced),
+		fmt.Sprintf("%s: meshes written without normals, because a normal is not unit length: %d", stage, counts.normalsOmitted),
 		fmt.Sprintf("%s: model textures not found: %d (%s)", stage, len(missingNames), strings.Join(missingNames, " ")))
 }
 
-// Models: data/<archive>.bif -> extracted/data/<archive>/*.obj + *.mtl + *.json + *.faces.csv (passing, with
-// geometry), one folder per archive in kotor.ModelBifs. The JSON file holds the decoded mesh headers and the CSV
-// file the face fields of the meshes in the OBJ file. The walkmeshes of an archive become
-// <resref>.<wok|dwk|pwk>.obj + .json in the same folder, with walkmesh.mtl. Only models.bif holds walkmeshes.
+// Models: data/<archive>.bif -> extracted/data/<archive>/*.gltf + *.bin (passing, with geometry), one folder
+// per archive in kotor.ModelBifs. The glTF node extras hold the decoded mesh headers and the face fields. The
+// walkmeshes of an archive become <resref>.<wok|dwk|pwk>.gltf + .bin in the same folder. Only models.bif holds
+// walkmeshes.
 func convertModels(summary *kotor.Summary) {
 	fmt.Println("models...")
 	texturePath := texturePaths()
@@ -151,7 +153,6 @@ func convertModels(summary *kotor.Summary) {
 		}
 
 		written := map[string]bool{}
-		hasWalkmesh := false
 		for _, resource := range resources {
 			label := name + "/" + resource.Resref + "." + resource.Ext
 			var line string
@@ -162,7 +163,6 @@ func convertModels(summary *kotor.Summary) {
 				report = append(report, line)
 
 			case "wok", "dwk", "pwk":
-				hasWalkmesh = true
 				line, files = writeWalkmesh(out, resource, materials)
 				walkmeshReport = append(walkmeshReport, line)
 				if files == nil {
@@ -175,17 +175,7 @@ func convertModels(summary *kotor.Summary) {
 			}
 		}
 
-		if hasWalkmesh {
-			mtl := []string{"# surface materials of the walkmeshes, from surfacemat.2da"}
-			for _, material := range materials {
-				red, green, blue := material.color()
-				mtl = append(mtl, "", "newmtl "+material.name, fmt.Sprintf("Kd %.6f %.6f %.6f", red, green, blue))
-			}
-			kotor.WriteFile(filepath.Join(out, walkmeshMtl), []byte(strings.Join(mtl, "\n")+"\n"))
-			written[walkmeshMtl] = true
-		}
-
-		prune(out, written, []string{".obj", ".mtl", ".json", ".csv"})
+		prune(out, written, []string{".gltf", ".bin"})
 	}
 
 	summary.Tally("models", report)
@@ -194,9 +184,6 @@ func convertModels(summary *kotor.Summary) {
 	summary.Note(fmt.Sprintf("walkmeshes: without faces, not written: %d wok, %d dwk, %d pwk",
 		walkmeshes["empty wok"], walkmeshes["empty dwk"], walkmeshes["empty pwk"]))
 }
-
-// walkmeshMtl is the material library that all walkmesh OBJ files share.
-const walkmeshMtl = "walkmesh.mtl"
 
 // surfaceMaterial is one row of surfacemat.2da. The name is the row number and the label, such as
 // "07_Nonwalk", because several rows share the label "CRAP".
@@ -256,9 +243,10 @@ func surfaceMaterials() []surfaceMaterial {
 	return nil
 }
 
-// writeWalkmesh converts one walkmesh to <resref>.<ext>.obj, which uses walkmeshMtl, and <resref>.<ext>.json
-// (see walkmeshJson). It returns its report line and the names of the files it wrote. A walkmesh without
-// faces is not written.
+// writeWalkmesh converts one walkmesh to <resref>.<ext>.gltf and <resref>.<ext>.bin. Every row of
+// surfacemat.2da becomes the material of the same index, and the mesh node's extras hold the values of
+// walkmeshJson. It returns its report line and the names of the files it wrote. A walkmesh without faces is
+// not written.
 func writeWalkmesh(out string, resource kotor.Resource, materials []surfaceMaterial) (string, []string) {
 	label := resource.Resref + "." + resource.Ext
 	bwm := kotor.ParseBwm(resource.Data)
@@ -273,15 +261,20 @@ func writeWalkmesh(out string, resource kotor.Resource, materials []surfaceMater
 		}
 	}
 
-	obj := kotor.BwmObj(bwm, label, walkmeshMtl, func(material uint32) string { return materials[material].name })
-	text, err := json.MarshalIndent(walkmeshJson(bwm), "", "\t")
+	colors := make([]kotor.BwmMaterial, len(materials))
+	for i, material := range materials {
+		red, green, blue := material.color()
+		colors[i] = kotor.BwmMaterial{Name: material.name, Color: [3]float32{float32(red), float32(green), float32(blue)}}
+	}
+
+	text, bin, err := kotor.BwmGltf(bwm, label, label+".bin", colors, walkmeshJson(bwm))
 	if err != nil {
 		kotor.Fatal(err.Error())
 	}
 
-	kotor.WriteFile(filepath.Join(out, label+".obj"), []byte(obj))
-	kotor.WriteFile(filepath.Join(out, label+".json"), append(text, '\n'))
-	return line, []string{label + ".obj", label + ".json"}
+	kotor.WriteFile(filepath.Join(out, label+".gltf"), text)
+	kotor.WriteFile(filepath.Join(out, label+".bin"), bin)
+	return line, []string{label + ".gltf", label + ".bin"}
 }
 
 // Textures: TexturePacks/<pack>.erf -> extracted/TexturePacks/<pack>/*.png (+ *.txi when present)
@@ -572,7 +565,7 @@ func convertPatch(summary *kotor.Summary) {
 		}
 	}
 
-	prune(out, written, []string{".json", ".png", ".txi", ".csv", ".obj", ".mtl"})
+	prune(out, written, []string{".json", ".png", ".txi", ".csv", ".gltf", ".bin"})
 	summary.Tally("patch", report)
 	noteModels(summary, "patch", inputs.counts)
 }
@@ -734,7 +727,7 @@ func newResourceInputs() *resourceInputs {
 // writeResource converts one resource of a RIM or BIF archive into dir and returns its report line and the
 // names of the files it wrote. mdx is the MDX data of a model and is ignored for other types.
 //
-//   - A model becomes <resref>.obj and <resref>.mtl (see writeModel).
+//   - A model becomes <resref>.gltf and <resref>.bin (see writeModel).
 //   - A sound becomes <resref>.wav as 16-bit PCM: 16-bit PCM files are copied, and IMA ADPCM and 8-bit PCM
 //     files are converted (see kotor.DecodeAdpcm).
 //   - A 2DA table becomes <resref>.2da.csv (see kotor.TwoDaCsv).
@@ -980,7 +973,7 @@ func convertRims(summary *kotor.Summary) {
 		}
 	}
 
-	prune(out, written, []string{".obj", ".mtl", ".wav", ".csv", ".json", ".txt"})
+	prune(out, written, []string{".gltf", ".bin", ".wav", ".csv", ".json", ".txt"})
 	summary.Tally("rims", report)
 	noteModels(summary, "rims", inputs.counts)
 	slices.Sort(orphans)

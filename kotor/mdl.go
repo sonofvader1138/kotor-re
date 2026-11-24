@@ -1,5 +1,6 @@
-// This file converts MDL models with their MDX vertex data to Wavefront OBJ, together with the decoded mesh
-// headers as JSON and the face fields as CSV. Layout: see README.md. MDL offsets are relative to file offset 12.
+// This file converts MDL models with their MDX vertex data to glTF 2.0. The node tree, the rendered meshes
+// and their textures become glTF nodes, meshes and materials. The decoded mesh headers and the face fields
+// become extras of the nodes. Layout: see README.md. MDL offsets are relative to file offset 12.
 
 package kotor
 
@@ -103,10 +104,6 @@ var vertexComponents = []struct {
 // The vertex records of a skinned mesh carry 32 more bytes, which the skin header describes.
 const skinVertexExtra = 32
 
-// MdlFacesCsvHeader is the first line of a face CSV file. Each row gives a face of a mesh in the OBJ file, its
-// material and its three adjacent faces, with -1 for none.
-const MdlFacesCsvHeader = "mesh,face,material,adjacent_0,adjacent_1,adjacent_2"
-
 // Deeper node trees are treated as corrupt.
 const maxNodeDepth = 200
 
@@ -119,6 +116,17 @@ const minCrossLength = 1e-9
 // A stored face normal agrees with the winding when the cosine between them exceeds this value.
 const minNormalCosine = 0.99
 
+// A vertex normal counts as unit length when its length differs from 1 by less than this value, and as zero
+// when its length is below zeroLength. glTF requires unit normals. Zero normals are replaced (see the mesh
+// conversion), and a mesh with any other normal is written without normals.
+const (
+	unitTolerance = 1e-3
+	zeroLength    = 1e-6
+)
+
+// upAxis replaces a zero normal of a vertex that no face uses.
+var upAxis = vec3{0, 0, 1}
+
 // Tolerances for the derived mesh header values: the plane distance, the radius and the surface area.
 const (
 	planeTolerance        = 1e-3
@@ -128,32 +136,6 @@ const (
 )
 
 type vec3 = [3]float64
-
-// quat is [w, x, y, z].
-type quat = [4]float64
-
-// qrot rotates a vector by a unit quaternion.
-func qrot(q quat, v vec3) vec3 {
-	w, x, y, z := q[0], q[1], q[2], q[3]
-	vx, vy, vz := v[0], v[1], v[2]
-	tx := 2 * (y*vz - z*vy)
-	ty := 2 * (z*vx - x*vz)
-	tz := 2 * (x*vy - y*vx)
-	return vec3{
-		vx + w*tx + y*tz - z*ty,
-		vy + w*ty + z*tx - x*tz,
-		vz + w*tz + x*ty - y*tx,
-	}
-}
-
-func qmul(a, b quat) quat {
-	return quat{
-		a[0]*b[0] - a[1]*b[1] - a[2]*b[2] - a[3]*b[3],
-		a[0]*b[1] + a[1]*b[0] + a[2]*b[3] - a[3]*b[2],
-		a[0]*b[2] - a[1]*b[3] + a[2]*b[0] + a[3]*b[1],
-		a[0]*b[3] + a[1]*b[2] - a[2]*b[1] + a[3]*b[0],
-	}
-}
 
 // MdlStats counts what the converter found. Each "Matching" count goes with a "Checked" count.
 type MdlStats struct {
@@ -175,6 +157,12 @@ type MdlStats struct {
 	RadiusChecked    int
 	AreaMatching     int
 	AreaChecked      int
+
+	// NormalsReplaced counts the zero MDX normals that are replaced. NormalsOmitted counts the rendered
+	// meshes with MDX normals that are written without them, because a normal is neither zero nor of unit
+	// length.
+	NormalsReplaced int
+	NormalsOmitted  int
 
 	// HdrNodes is the node count field of the header, as text: "?" when it lies outside the file.
 	HdrNodes string
@@ -210,20 +198,30 @@ type MdlMesh struct {
 	VertexComponents []string     `json:"vertex_components"`
 }
 
+// MdlNodeExtras holds the extras of a mesh node in the glTF file: the decoded mesh header and, for a
+// rendered mesh with faces, the accessors of the face materials (u32 per face) and of the adjacent faces
+// (u16[3] per face, 0xFFFF for none).
+type MdlNodeExtras struct {
+	Mesh          MdlMesh `json:"mesh"`
+	FaceMaterials *int    `json:"face_materials,omitempty"`
+	FaceAdjacent  *int    `json:"face_adjacent,omitempty"`
+}
+
 type MdlResult struct {
-	Obj      string
-	FacesCsv string
-	Meshes   []MdlMesh
+	Gltf     []byte
+	Bin      []byte
 	Stats    MdlStats
 	Textures []string
 	Errors   []string
 }
 
-// ConvertMdl converts a model and returns the OBJ text, the face CSV, the decoded mesh headers, its statistics,
-// its texture names and its errors. When mtllib is not empty, the OBJ names it as its material library. Meshes
-// whose render byte is 0 are left out of the OBJ and the CSV, because the game does not appear to draw them,
-// but their headers are decoded.
-func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
+// ConvertMdl converts a model to the JSON text of a glTF file, whose binary buffer is stored at binUri, and
+// that buffer. It also returns its statistics, its texture names and its errors. The label names the scene.
+// texturePath gives the image URI of a texture name, relative to the glTF file, or "" when the texture is not
+// known; it may be nil. Every node of the tree becomes a glTF node in depth-first order, with its position
+// and rotation relative to its parent. Meshes whose render byte is 0 get no geometry, because the game does
+// not appear to draw them, but their headers are decoded.
+func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) string) MdlResult {
 	data := mdl[min(fileHeaderSize, len(mdl)):]
 	length := len(data)
 	var errors []string
@@ -303,21 +301,12 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 		names = append(names, name)
 	}
 
-	var out strings.Builder
-	fmt.Fprintf(&out, "# converted from %s\n", label)
-	if mtllib != "" {
-		fmt.Fprintf(&out, "mtllib %s\n", mtllib)
-	}
-
-	var facesCsv strings.Builder
-	facesCsv.WriteString(MdlFacesCsvHeader + "\n")
-
+	doc := newGltf(label)
+	materials := map[string]int{}
 	textures := map[string]bool{}
-	var meshes []MdlMesh
-	vbase := 1
 	seen := map[int]bool{}
 
-	mesh := func(header int, name string, flags int, rotation quat, position vec3) {
+	mesh := func(header int, name string, flags int) (extras *MdlNodeExtras, meshIndex *int) {
 		problem := func(text string) {
 			errors = append(errors, text+" in "+name)
 		}
@@ -360,7 +349,7 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 		mdxOffset, _ := u32(header + meshMdxOffset)
 		vertexOffset, ok := u32(header + meshVertexOffset)
 		if !ok {
-			return
+			return nil, nil
 		}
 		render, _ := u8(header + meshRender)
 		lightmapped, _ := u8(header + meshLightmapped)
@@ -437,7 +426,7 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 				JitterSpeed: single(header + meshUvScroll + 12),
 			}
 		}
-		meshes = append(meshes, decoded)
+		extras = &MdlNodeExtras{Mesh: decoded}
 
 		if !inBounds(faceOffset, faceSize*faceCount, "faces "+name) ||
 			!inBounds(vertexOffset, vertexSize*vertexCount, "verts "+name) {
@@ -614,73 +603,140 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 		}
 		if render == 0 {
 			stats.Hidden++
-			return
+			return extras, nil
 		}
 
-		positionOffset, hasPosition := componentOffsets["position"]
-		uvOffset, hasUv := componentOffsets["uv1"]
-		hasUv = hasUv && hasMdx
 		stats.Meshes++
 		stats.Verts += vertexCount
 		stats.Faces += faceCount
-
-		fmt.Fprintf(&out, "o %s\n", name)
-		material := strings.ToLower(texture)
-		if texture != "" && material != "null" {
-			fmt.Fprintf(&out, "usemtl %s\n", material)
-			textures[material] = true
+		if faceCount == 0 {
+			return extras, nil
 		}
 
-		for i, vertex := range verts {
-			if hasMdx && hasPosition {
-				mdxPosition := mdxOffset + stride*i + positionOffset
+		// The positions come from the MDL and must match their MDX copies. The normals and texture
+		// coordinates come from the MDX. glTF puts v = 0 at the top of an image and the game at the bottom
+		// (see "Pixel data layout" in README.md), so v becomes 1 - v.
+		positionOffset, hasPosition := componentOffsets["position"]
+		normalOffset, normalPresent := componentOffsets["normal"]
+		hasNormal := normalPresent && hasMdx
+		// A zero normal becomes the normalized sum of the stored normals of the faces that use the vertex.
+		faceNormalSums := make([]vec3, vertexCount)
+		for _, current := range faces {
+			for _, corner := range current.corners {
 				for axis := range 3 {
-					if math.Abs(vertex[axis]-mdxFloat(mdxPosition+4*axis)) > positionTolerance {
+					faceNormalSums[corner][axis] += current.normal[axis]
+				}
+			}
+		}
+		length := func(vector vec3) float64 {
+			return math.Sqrt(vector[0]*vector[0] + vector[1]*vector[1] + vector[2]*vector[2])
+		}
+
+		positions := make([]float32, 0, 3*vertexCount)
+		var normals []float32
+		uvSetsWritten := map[string][]float32{}
+		for i, vertex := range verts {
+			record := mdxOffset + stride*i
+			if hasMdx && hasPosition {
+				for axis := range 3 {
+					if math.Abs(vertex[axis]-mdxFloat(record+positionOffset+4*axis)) > positionTolerance {
 						stats.Mismatch++
 						break
 					}
 				}
 			}
+			positions = append(positions, float32(vertex[0]), float32(vertex[1]), float32(vertex[2]))
 
-			world := qrot(rotation, vertex)
-			fmt.Fprintf(&out, "v %.6f %.6f %.6f\n", world[0]+position[0], world[1]+position[1], world[2]+position[2])
-
-			// Every vertex gets a texture coordinate, so that vertex and texture coordinate indices agree.
-			u, v := 0.0, 0.0
-			if hasUv {
-				u = mdxFloat(mdxOffset + stride*i + uvOffset)
-				v = mdxFloat(mdxOffset + stride*i + uvOffset + 4)
-			}
-			fmt.Fprintf(&out, "vt %.6f %.6f\n", u, v)
-		}
-
-		for i, current := range faces {
-			ix := current.corners
-			fmt.Fprintf(&out, "f %d/%d %d/%d %d/%d\n",
-				ix[0]+vbase, ix[0]+vbase, ix[1]+vbase, ix[1]+vbase, ix[2]+vbase, ix[2]+vbase)
-
-			fmt.Fprintf(&facesCsv, "%s,%d,%d", name, i, current.material)
-			for _, adjacent := range current.adjacent {
-				if adjacent == noAdjacentFace {
-					adjacent = -1
+			if hasNormal {
+				normal := vec3{mdxFloat(record + normalOffset), mdxFloat(record + normalOffset + 4), mdxFloat(record + normalOffset + 8)}
+				if length(normal) < zeroLength {
+					stats.NormalsReplaced++
+					normal = upAxis
+					if sum := faceNormalSums[i]; length(sum) >= zeroLength {
+						normal = vec3{sum[0] / length(sum), sum[1] / length(sum), sum[2] / length(sum)}
+					}
 				}
-				fmt.Fprintf(&facesCsv, ",%d", adjacent)
+				hasNormal = math.Abs(length(normal)-1) < unitTolerance
+				normals = append(normals, float32(normal[0]), float32(normal[1]), float32(normal[2]))
 			}
-			facesCsv.WriteString("\n")
+
+			for _, uv := range []string{"uv1", "uv2"} {
+				if offset, present := componentOffsets[uv]; present && hasMdx {
+					uvSetsWritten[uv] = append(uvSetsWritten[uv], float32(mdxFloat(record+offset)), float32(1-mdxFloat(record+offset+4)))
+				}
+			}
+		}
+		if normalPresent && hasMdx && !hasNormal {
+			stats.NormalsOmitted++
 		}
 
-		vbase += vertexCount
+		attributes := map[string]int{"POSITION": gltfFloats(doc, positions, 3, true)}
+		if hasNormal {
+			attributes["NORMAL"] = gltfFloats(doc, normals, 3, false)
+		}
+		// glTF numbers texture coordinate sets from 0 without gaps, so a mesh with only the second set
+		// writes it as TEXCOORD_0.
+		uvSet := 0
+		for _, uv := range []string{"uv1", "uv2"} {
+			if values, present := uvSetsWritten[uv]; present {
+				attributes[fmt.Sprintf("TEXCOORD_%d", uvSet)] = gltfFloats(doc, values, 2, false)
+				uvSet++
+			}
+		}
+
+		indices := make([]int, 0, cornersPerFace*faceCount)
+		var faceMaterials, faceAdjacent []byte
+		for _, current := range faces {
+			indices = append(indices, current.corners[:]...)
+			faceMaterials = binary.LittleEndian.AppendUint32(faceMaterials, uint32(current.material))
+			for _, adjacent := range current.adjacent {
+				faceAdjacent = binary.LittleEndian.AppendUint16(faceAdjacent, uint16(adjacent))
+			}
+		}
+		indexView := gltfIndexView(doc, indices)
+		primitive := gltfPrimitive{
+			Attributes: attributes,
+			Indices:    gltfAccessorAt(doc, indexView, 0, GltfUnsignedInt, len(indices), "SCALAR"),
+		}
+
+		// glTF forbids a texture on a primitive without texture coordinates, so such a mesh gets a material of
+		// the same name without the texture.
+		material := strings.ToLower(texture)
+		if texture != "" && material != "null" {
+			_, hasUv := attributes["TEXCOORD_0"]
+			key := fmt.Sprintf("%s %t", material, hasUv)
+			index, known := materials[key]
+			if !known {
+				uri := ""
+				if texturePath != nil && hasUv {
+					uri = texturePath(material)
+				}
+				index = gltfMaterialAdd(doc, material, uri, nil)
+				materials[key] = index
+			}
+			primitive.Material = &index
+			textures[material] = true
+		}
+
+		materialAccessor := gltfAccessorAt(doc, gltfView(doc, faceMaterials, 0), 0, GltfUnsignedInt, faceCount, "SCALAR")
+		adjacentAccessor := gltfAccessorAt(doc, gltfView(doc, faceAdjacent, 0), 0, GltfUnsignedShort, faceCount, "VEC3")
+		extras.FaceMaterials = &materialAccessor
+		extras.FaceAdjacent = &adjacentAccessor
+
+		doc.Meshes = append(doc.Meshes, gltfMesh{Name: name, Primitives: []gltfPrimitive{primitive}})
+		index := len(doc.Meshes) - 1
+		return extras, &index
 	}
 
-	var node func(offset int, parentRotation quat, parentPosition vec3, depth int)
-	node = func(offset int, parentRotation quat, parentPosition vec3, depth int) {
+	var node func(offset int, depth int) int
+	node = func(offset int, depth int) int {
 		if seen[offset] {
 			errors = append(errors, fmt.Sprintf("node loop at %d", offset))
-			return
+			return -1
 		}
 		if depth > maxNodeDepth {
 			errors = append(errors, "depth")
-			return
+			return -1
 		}
 
 		seen[offset] = true
@@ -693,32 +749,48 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 		childOffset, _ := u32(offset + 0x2c)
 		childCount, _ := u32(offset + 0x30)
 		if !posOk || !rotationOk {
-			return
+			return -1
 		}
 
-		worldRotation := qmul(parentRotation, quat{rotation[0], rotation[1], rotation[2], rotation[3]})
-		rotated := qrot(parentRotation, vec3{pos[0], pos[1], pos[2]})
-		worldPosition := vec3{
-			rotated[0] + parentPosition[0],
-			rotated[1] + parentPosition[1],
-			rotated[2] + parentPosition[2],
-		}
+		// The game stores the rotation as w, x, y, z and glTF as x, y, z, w.
 		name := fmt.Sprintf("node%d", offset)
 		if nameIndex < len(names) {
 			name = names[nameIndex]
 		}
+		index := len(doc.Nodes)
+		doc.Nodes = append(doc.Nodes, GltfNode{
+			Name:        name,
+			Translation: &[3]float32{float32(pos[0]), float32(pos[1]), float32(pos[2])},
+			Rotation:    &[4]float32{float32(rotation[1]), float32(rotation[2]), float32(rotation[3]), float32(rotation[0])},
+		})
+
 		if flags&nodeFlagMesh != 0 {
-			mesh(offset+nodeHeaderSize, name, flags, worldRotation, worldPosition)
+			extras, meshIndex := mesh(offset+nodeHeaderSize, name, flags)
+			if extras != nil {
+				doc.Nodes[index].Extras = extras
+			}
+			doc.Nodes[index].Mesh = meshIndex
 		}
 
+		var children []int
 		for i := range childCount {
 			if child, ok := u32(childOffset + 4*i); ok {
-				node(child, worldRotation, worldPosition, depth+1)
+				if childIndex := node(child, depth+1); childIndex >= 0 {
+					children = append(children, childIndex)
+				}
 			}
 		}
+		doc.Nodes[index].Children = children
+		return index
 	}
 
-	node(root, quat{1, 0, 0, 0}, vec3{0, 0, 0}, 0)
+	if rootIndex := node(root, 0); rootIndex >= 0 {
+		doc.Nodes[0].Children = []int{rootIndex}
+	}
+	text, err := gltfEncode(doc, binUri)
+	if err != nil {
+		errors = append(errors, err.Error())
+	}
 
 	sorted := make([]string, 0, len(textures))
 	for texture := range textures {
@@ -727,9 +799,8 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 	slices.Sort(sorted)
 
 	return MdlResult{
-		Obj:      out.String(),
-		FacesCsv: facesCsv.String(),
-		Meshes:   meshes,
+		Gltf:     text,
+		Bin:      doc.Bin,
 		Stats:    stats,
 		Textures: sorted,
 		Errors:   errors,
@@ -739,10 +810,11 @@ func ConvertMdl(mdl, mdx []byte, label, mtllib string) MdlResult {
 func ReportMdl(label string, result MdlResult) string {
 	stats := result.Stats
 	return fmt.Sprintf("%s nodes=%d meshes=%d hidden=%d verts=%d faces=%d mdl/mdx_mismatch=%d hdrnodes=%s "+
-		"normals_ok=%d/%d planes_ok=%d/%d adjacent_ok=%d/%d adjacent_outside=%d radius_ok=%d/%d area_ok=%d/%d %s",
+		"normals_ok=%d/%d planes_ok=%d/%d adjacent_ok=%d/%d adjacent_outside=%d radius_ok=%d/%d area_ok=%d/%d "+
+		"normals_replaced=%d normals_omitted=%d %s",
 		label, stats.Nodes, stats.Meshes, stats.Hidden, stats.Verts, stats.Faces, stats.Mismatch, stats.HdrNodes,
 		stats.NormalsMatching, stats.NormalsChecked, stats.PlanesMatching, stats.PlanesChecked,
 		stats.AdjacentMatching, stats.AdjacentChecked, stats.AdjacentOutside, stats.RadiusMatching,
-		stats.RadiusChecked, stats.AreaMatching, stats.AreaChecked,
+		stats.RadiusChecked, stats.AreaMatching, stats.AreaChecked, stats.NormalsReplaced, stats.NormalsOmitted,
 		Verdict(result.Errors[:min(5, len(result.Errors))]...))
 }
