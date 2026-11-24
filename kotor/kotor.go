@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -71,6 +72,11 @@ var extensions = map[uint32]string{
 	// The room layouts are named after the extension ".lyt", which swkotor.exe stores beside the keywords
 	// "roomcount" and "trackcount".
 	3000: "lyt",
+
+	// These types occur only in saved games. They are named after the extension pool of swkotor.exe, where
+	// "sav" stands between "utw" (2058) and "jrl" (2056), and "res" stands beside "bmp", "mve" and "tga"
+	// (1 to 3). A saved module is an ERF archive, and a type 0 resource is a GFF file of any file type.
+	0: "res", 2057: "sav",
 }
 
 // Ext returns the file extension of a resource type, or the type code in decimal when the type is unknown.
@@ -107,7 +113,7 @@ var TgaGroups = []TgaGroup{
 }
 
 // reportOrder is the order in which RunStages prints the stage summaries.
-var reportOrder = []string{"models", "textures", "tga", "music", "sounds", "waves", "movies", "gui", "patch", "lips", "modules", "rims", "bifs", "tlk"}
+var reportOrder = []string{"models", "textures", "tga", "music", "sounds", "waves", "movies", "gui", "patch", "lips", "modules", "rims", "bifs", "tlk", "saves"}
 
 // A resource reference (resref) is a resource name of at most 16 bytes, padded with NUL bytes.
 const ResrefLength = 16
@@ -403,7 +409,7 @@ type ErfEntry struct {
 	Ext    string
 	Offset uint32
 	Size   uint32
-	file   *os.File
+	file   io.ReaderAt
 }
 
 // Data reads the entry's resource from the archive. ReadErf has checked that the resource lies inside
@@ -415,7 +421,7 @@ func (entry ErfEntry) Data() []byte {
 }
 
 // readAt fills buffer from file at offset and exits when the file ends early or the read fails.
-func readAt(file *os.File, buffer []byte, offset int64) {
+func readAt(file io.ReaderAt, buffer []byte, offset int64) {
 	if _, err := file.ReadAt(buffer, offset); err != nil {
 		Fatal(err.Error())
 	}
@@ -423,10 +429,8 @@ func readAt(file *os.File, buffer []byte, offset int64) {
 
 var erfSignature = regexp.MustCompile(`^(ERF |MOD |HAK |SAV )V1\.0$`)
 
-// ReadErf reads the tables of an ERF V1.0 archive. Each entry reads its resource on demand, since the
-// texture packs are up to 400 MB. The file stays open for the life of the process.
-// ERF V1.0: 160-byte header. 0x10 u32 entryCount, 0x18 u32 keyListOff, 0x1C u32 resListOff.
-// Key entry 24 bytes: char[16] resref, u32 id, u16 type, u16 unused. Resource entry 8 bytes: u32 offset, u32 size.
+// ReadErf reads the tables of an ERF V1.0 archive file (see ErfEntries). The file stays open for the life
+// of the process.
 func ReadErf(path string) []ErfEntry {
 	file, err := os.Open(path)
 	if err != nil {
@@ -437,12 +441,20 @@ func ReadErf(path string) []ErfEntry {
 	if err != nil {
 		Fatal(err.Error())
 	}
+	return ErfEntries(file, info.Size(), path)
+}
 
+// ErfEntries reads the tables of an ERF V1.0 archive of the given size from file. name is used in error
+// messages. Each entry reads its resource on demand, since the texture packs are up to 400 MB. A saved
+// game nests one archive in another, so file can also be a bytes.Reader.
+// ERF V1.0: 160-byte header. 0x10 u32 entryCount, 0x18 u32 keyListOff, 0x1C u32 resListOff.
+// Key entry 24 bytes: char[16] resref, u32 id, u16 type, u16 unused. Resource entry 8 bytes: u32 offset, u32 size.
+func ErfEntries(file io.ReaderAt, fileSize int64, name string) []ErfEntry {
 	header := make([]byte, erfHeaderSize)
 	readAt(file, header, 0)
 
 	if !erfSignature.MatchString(Latin1(header[:signatureLength])) {
-		Fatal(path + ": not ERF V1.0")
+		Fatal(name + ": not ERF V1.0")
 	}
 
 	entryCount := int(u32(header, 0x10))
@@ -459,8 +471,8 @@ func ReadErf(path string) []ErfEntry {
 		keyEntry := erfKeyEntrySize * i
 		offset := u32(resourceList, resourceEntry)
 		size := u32(resourceList, resourceEntry+4)
-		if int64(offset)+int64(size) > info.Size() {
-			Fatal(fmt.Sprintf("%s: entry %d out of bounds", path, i))
+		if int64(offset)+int64(size) > fileSize {
+			Fatal(fmt.Sprintf("%s: entry %d out of bounds", name, i))
 		}
 
 		resourceType := u16(keyList, keyEntry+20)
@@ -475,6 +487,24 @@ func ReadErf(path string) []ErfEntry {
 	}
 
 	return entries
+}
+
+// ErfLayoutProblem returns an error text when the resources of an ERF archive do not start directly after
+// the resource table, lie in table order without gaps, and end exactly at the end of the file, or an empty
+// string when they do. All archives of the game files have this layout.
+func ErfLayoutProblem(entries []ErfEntry, fileSize int64) string {
+	position := int64(erfHeaderSize + (erfKeyEntrySize+erfResourceEntrySize)*len(entries))
+	for i, entry := range entries {
+		if int64(entry.Offset) != position {
+			return fmt.Sprintf("entry %d starts at %d, expected %d", i, entry.Offset, position)
+		}
+		position += int64(entry.Size)
+	}
+
+	if position != fileSize {
+		return fmt.Sprintf("resources end at %d of %d bytes", position, fileSize)
+	}
+	return ""
 }
 
 const (

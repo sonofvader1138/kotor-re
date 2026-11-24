@@ -7,7 +7,8 @@ import (
 	"math"
 )
 
-// Generic tree file (GFF), used by GUI layouts and by most module resources such as "ARE V3.2" and "UTC V3.2". 56-byte header: char[4] fileType, char[4] version,
+// Generic tree file (GFF), used by GUI layouts, by most module resources such as "ARE V3.2" and "UTC V3.2",
+// and by saved games. 56-byte header: char[4] fileType, char[4] version,
 // then six u32 pairs: structs (off, count), fields (off, count), labels (off, count),
 // fieldData (off, bytes), fieldIndices (off, bytes), listIndices (off, bytes).
 // Struct 12 bytes: u32 type, u32 data, u32 fieldCount. Field 12 bytes: u32 type, u32 labelIndex, u32 value.
@@ -20,15 +21,21 @@ const (
 	gffLabelSize  = 16
 )
 
-// Field type codes. Types 0, 2, 3, 4, 5 and 8 store their value in the field itself; the others point into
-// the field data, the struct table or the list indices. Other codes have not been seen.
+// Field type codes. Types 0 to 5 and 8 store their value in the field itself; signed types are stored
+// sign-extended to 32 bits. Types 6, 7 and 9 store an 8-byte value in the field data. The others point
+// into the field data, the struct table or the list indices. Types 7 and 9 have not been seen, and their
+// readings as i64 and f64 are UNKNOWN.
 const (
 	GffU8          = 0
+	GffI8          = 1
 	GffU16         = 2
 	GffI16         = 3
 	GffU32         = 4
 	GffI32         = 5
+	GffU64         = 6
+	GffI64         = 7
 	GffF32         = 8
+	GffF64         = 9
 	GffString      = 10
 	GffResref      = 11
 	GffLocString   = 12
@@ -51,10 +58,12 @@ type GffSubstring struct {
 }
 
 // GffFieldValue holds a field's value. Only the members for the field's type are set: Number for the
-// integer and f32 types, Text for string and resref, Number (string number) and Substrings for localized
-// string, Bytes for binary, Struct, List, or Vector (three components for vector, four for orientation).
+// integer and float types, and Bits as well for the 8-byte types, since Number cannot hold every u64
+// exactly; Text for string and resref; Number (string number) and Substrings for localized string; Bytes
+// for binary; Struct; List; or Vector (three components for vector, four for orientation).
 type GffFieldValue struct {
 	Number     float64
+	Bits       uint64
 	Text       string
 	Substrings []GffSubstring
 	Bytes      []byte
@@ -203,6 +212,27 @@ func ReadGff(data []byte) (*Gff, string) {
 			}
 			value.Number = float64(raw)
 
+		case GffI8:
+			if int32(raw) < math.MinInt8 || int32(raw) > math.MaxInt8 {
+				fail(fmt.Sprintf("i8 field %d value %d", fieldIndex, int32(raw)))
+			}
+			value.Number = float64(int32(raw))
+
+		case GffU64, GffI64, GffF64:
+			if !mark("data", offset, 8) {
+				break
+			}
+			bits := binary.LittleEndian.Uint64(data[fieldDataOffset+offset:])
+			value.Bits = bits
+			switch fieldType {
+			case GffU64:
+				value.Number = float64(bits)
+			case GffI64:
+				value.Number = float64(int64(bits))
+			default:
+				value.Number = math.Float64frombits(bits)
+			}
+
 		case GffU16:
 			if raw > 0xffff {
 				fail(fmt.Sprintf("u16 field %d value %d", fieldIndex, raw))
@@ -210,10 +240,10 @@ func ReadGff(data []byte) (*Gff, string) {
 			value.Number = float64(raw)
 
 		case GffI16:
-			if raw > 0xffff {
-				fail(fmt.Sprintf("i16 field %d value %d", fieldIndex, raw))
+			if int32(raw) < math.MinInt16 || int32(raw) > math.MaxInt16 {
+				fail(fmt.Sprintf("i16 field %d value %d", fieldIndex, int32(raw)))
 			}
-			value.Number = float64(int16(raw))
+			value.Number = float64(int32(raw))
 
 		case GffU32:
 			value.Number = float64(raw)

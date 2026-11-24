@@ -97,7 +97,7 @@ In the "V3.2" row, the four characters before the version differ by type and are
 
 ## ERF archive
 
-An ERF archive is a self-contained archive: unlike a BIF archive, it stores the name of each resource itself. The four texture packs in `TexturePacks/` are ERF archives. The reader is `ReadErf` in `kotor/kotor.go`. `patch.erf` is also an ERF archive, and `ReadErf` reads its tables without error. It holds 97 resources: 84 TPC textures, 7 GUI layouts, 4 2DA tables (type 2017), and the MDL and MDX resources of one model. The section "Patch archive: patch.erf" describes them. The 123 files in `lips/` are ERF archives with the signature "MOD V1.0" instead of "ERF V1.0" (see the lip sync section). The files in `modules/` and `rims/` are not ERF archives (see the RIM section below).
+An ERF archive is a self-contained archive: unlike a BIF archive, it stores the name of each resource itself. The four texture packs in `TexturePacks/` are ERF archives. The reader is `ReadErf` in `kotor/kotor.go`. `patch.erf` is also an ERF archive, and `ReadErf` reads its tables without error. It holds 97 resources: 84 TPC textures, 7 GUI layouts, 4 2DA tables (type 2017), and the MDL and MDX resources of one model. The section "Patch archive: patch.erf" describes them. The 123 files in `lips/` are ERF archives with the signature "MOD V1.0" instead of "ERF V1.0" (see the lip sync section). A saved game also stores its resources in "MOD V1.0" archives (see "Saved games" below); the counts in this section do not include them. The files in `modules/` and `rims/` are not ERF archives (see the RIM section below).
 
 An ERF archive begins with a 160-byte header. The evidence below covers 128 archives: the 4 texture packs, `patch.erf` and the 123 MOD archives in `lips/`.
 
@@ -115,7 +115,7 @@ An ERF archive begins with a 160-byte header. The evidence below covers 128 arch
 | 0x28   | u32     | UNKNOWN, probably uninitialized            | The value is 0 in the texture packs, 0x45207A6C in `patch.erf`, and takes 56 different values in `lips/`.         | low        |
 | 0x2C   | u8[116] | Padding                                    | All bytes are 0 in all 128 archives.                                                                              | medium     |
 
-The build date fields agree between the KEY file and the archives built with it, and `patch.erf`, which was presumably built later, holds a later date. This supports the reading as a date, but it has not been confirmed.
+The build date fields agree between the KEY file and the archives built with it, and `patch.erf`, which was presumably built later, holds a later date. The two archives of the saved game hold year 126 (2026) and day 324, which is 20 November 2026 when 1 January is day 1. The save files were copied on 22 November 2026, so the fields are the date when the archive was written. Whether the day count starts at 0 or 1 is UNKNOWN.
 
 The key table has one 24-byte entry per resource.
 
@@ -244,7 +244,7 @@ Module files use five GFF field types that GUI files do not use. The table below
 | Type | Count  | Value                                                                                  | Evidence                                                                                                                                                                                         | Confidence |
 | ---- | ------ | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
 | 2    | 34,944 | u16 stored in the field entry                                                          | All values are at most 0xFFFF. Labels include Feat, Spell and PortraitId.                                                                                                                        | medium     |
-| 3    | 19,768 | 16-bit integer stored in the field entry, probably signed                              | All values lie between 0 and 1,000. Labels are hit points and levels, such as HitPoints and ClassLevel. No negative value occurs, so signed and unsigned readings cannot be told apart.          | low        |
+| 3    | 19,768 | Signed 16-bit integer stored in the field entry, sign-extended to 32 bits               | All values in module files lie between 0 and 1,000. Labels are hit points and levels, such as HitPoints and ClassLevel. The saved game settles the sign: 150 DamageValue fields hold 0xFFFFFFFF, which is -1 sign-extended. | high       |
 | 12   | 77,261 | Localized string: offset into field data (layout below)                                | The size field matches the content in all 77,261 fields. Labels include Text, Description and LocalizedName.                                                                                     | high       |
 | 13   | 117    | Binary data: offset into field data, where a u32 length is followed by that many bytes | Used only by Mod_ID in the IFO files, where the length is always 16. The field data region is covered exactly.                                                                                   | medium     |
 | 16   | 1,137  | Orientation: offset into field data, where four f32 values are stored                  | Used only by Orientation in the GIT camera lists. The squared length of every value lies between 0.99999 and 1.00001, so the four values are probably a unit quaternion. Their order is UNKNOWN. | medium     |
@@ -1260,7 +1260,7 @@ The nine field types that occur are listed below. Types 0, 4, 5 and 8 store thei
 | 15   | 84     | List: offset into the list index region, where a u32 count is followed by that many struct indices | Used only by CONTROLS. The list index region is covered exactly.                     | high       |
 | 17   | 5,549  | Vector: offset into field data, where three f32 values are stored                                  | Used only by COLOR. Components lie between 0 and 1, except the value (-1, -1, -1).   | high       |
 
-Types 2, 3, 12, 13 and 16 do not occur in GUI files but occur in module files (see the section on modules below). Types 1, 6, 7 and 9 occur in no file examined and are UNKNOWN.
+Types 2, 3, 12, 13 and 16 do not occur in GUI files but occur in module files (see the section on modules below). Types 1 and 6 occur only in saved games (see "Saved games" below). Types 7 and 9 occur in no file examined and are UNKNOWN.
 
 ## GUI layout content
 
@@ -1640,3 +1640,150 @@ The decoded sizes of a track's packets add up to the length of the movie. Dividi
 The `movies` stage of `cmd/convert` uses ffmpeg to convert each movie to an MP4 file in `assets/movies/`, with H.264 video and AAC audio. The video uses a constant quality setting (CRF 12), because at CRF 18 frames in 12 movies fell below 40 dB PSNR (peak signal-to-noise ratio, a measure of how closely the output matches the source).
 
 `cmd/verify` checks all 61 outputs with ffprobe and ffmpeg. For each movie, ffprobe must report the frame size, the frame count, the sample rate, the channel count and the audio duration of the Bink file, with the duration within 0.1 seconds. Every output frame must also reach at least 40 dB PSNR against the decoded Bink frame. All 61 outputs pass. The lowest PSNR of any frame is 41.8 dB.
+
+# Saved games: saves/\*/
+
+A saved game is a folder in `saves/` that holds the complete state of a game in progress: the global script variables, the party, the player's inventory and the state of every visited module. The game files contain one saved game, `saves/000002 - Game1/`, made on the first module of the game (`end_m01aa`, "Endar Spire - Command Module") after 1,163 seconds of play. The file `saves/steam_autocloud.vdf` belongs to the Steam client, not to the game, and is not examined.
+
+Only one saved game exists, so most findings below rest on a single sample. Where possible, they are checked against other files: the original module in `modules/`, the table `globalcat.2da`, and fields of other save files that must agree.
+
+Every file except the screenshot is either a GFF file or an ERF archive of GFF files. The readers are `ReadGff` in `kotor/gff.go`, `ReadErf` and `ErfEntries` in `kotor/kotor.go`, and `ReadGlobals` in `kotor/save.go`. All nine GFF files of the saved game parse under the strict rules of `ReadGff`: every field and struct is used once, every byte of the three data regions is used exactly once, and the regions end exactly at the end of the file.
+
+## Files of a saved game
+
+The table below lists the files of the saved game.
+
+| File             | Format                    | Size in bytes | Content                                                          |
+| ---------------- | ------------------------- | ------------- | ---------------------------------------------------------------- |
+| `savenfo.res`    | GFF, file type "NFO "     | 681           | Summary shown in the load menu                                   |
+| `GLOBALVARS.res` | GFF, file type "GVT "     | 57,656        | Global script variables                                          |
+| `PARTYTABLE.res` | GFF, file type "PT  "     | 11,209        | Party, journal, messages and other state shared across modules   |
+| `SAVEGAME.sav`   | ERF archive, "MOD V1.0"   | 585,947       | Party member templates, inventory, factions and saved modules    |
+| `Screen.tga`     | TGA, 256x256, 24-bit      | 196,626       | Screenshot shown in the load menu                                |
+
+All four GFF file types have the version "V3.2". The extension ".res" therefore marks a GFF file of any file type.
+
+## Saved game archive: SAVEGAME.sav
+
+`SAVEGAME.sav` is an ERF archive with the signature "MOD V1.0". Its header and tables follow the ERF layout described above: no localized strings, the key table at 160, the resource table directly after it, and the field at 0x28 equal to 0. The resources start directly after the resource table, lie in table order without gaps, and end exactly at the end of the file. The archive holds four resources, listed in the table below.
+
+| Resref      | Type | Extension | Content                                              |
+| ----------- | ---- | --------- | ---------------------------------------------------- |
+| `AVAILNPC0` | 2027 | utc       | Creature template of party member slot 0             |
+| `END_M01AA` | 2057 | sav       | Nested "MOD V1.0" archive: the saved module          |
+| `INVENTORY` | 0    | res       | GFF file of file type "INV ": the party's items      |
+| `REPUTE`    | 2038 | fac       | Faction table                                        |
+
+Resource types 0 and 2057 occur nowhere else in the game files. Their extensions come from the pool of extension strings in the `.rdata` section of `swkotor.exe`, which is not encrypted. The pool lists the extensions roughly in descending type order: "sav" stands between "utw" (2058) and "jrl" (2056), and "res" stands last, after "bmp", "mve" and "tga" (types 1 to 3). The confidence of both names is medium. No table that pairs each code with its string was found in the file, because the `.text` section is encrypted by the Steam wrapper (every 64 KB block of it compresses to more than its own size).
+
+The resrefs in the outer archive are uppercase, and those in the nested archive are mixed: `m01aa` and `Module`. The converter writes all resrefs in lowercase, as for the other archives.
+
+### Saved module
+
+The nested archive `END_M01AA` (type 2057) holds one module in the same layout as the outer archive. Its header holds the same date. It holds the three resources of the module's main archive, in the order `m01aa.git`, `m01aa.are` and `module.ifo`. The table below compares them with the same resources in `modules/end_m01aa.rim`.
+
+| Resource     | Original size | Saved size | Original structs | Saved structs | Difference                                                                 |
+| ------------ | ------------- | ---------- | ---------------- | ------------- | -------------------------------------------------------------------------- |
+| `m01aa.are`  | 3,621         | 3,621      | 17               | 17            | None: the two files are identical byte for byte.                           |
+| `m01aa.git`  | 50,049        | 509,329    | 322              | 7,046         | Each instance holds its full state instead of a template reference.        |
+| `module.ifo` | 1,623         | 30,923     | 2                | 346           | Adds the game clock, the event queue and the player character.             |
+
+In the original GIT file, `UseTemplates` is 1 and a creature instance holds only its position, orientation and `TemplateResRef`. In the saved GIT file, `UseTemplates` is absent, and each creature instance holds its whole creature record, including `ObjectId`, hit points, classes, skills, effects and equipment. The saved file also adds `VarTable`, `SWVarTable`, `AreaEffectList` and weather and transition fields at the root. The creature list shrinks from 26 to 25 instances: Trask (`end_trask`) is no longer in the area, because Trask has joined the party (see `AVAILNPC0` below).
+
+In the saved IFO file, `Mod_IsSaveGame` is 1 instead of 0, and `Mod_PlayerList` holds the player character, whose first name is a literal substring. `Mod_ID` grows from 16 to 32 bytes. The first 16 bytes equal the original, and the other 16 read "Bad StrRef", a NUL byte and "n.wav". These bytes are probably uninitialized memory.
+
+The saved IFO file holds the game clock in two forms that agree with each other.
+
+- `Mod_PauseDay` is 450,382. The date fields give year 1340, month 6 and day 3. With 12 months of 28 days, 1340 × 336 + 5 × 28 + 2 = 450,382. The day count is therefore the number of days since year 0, month 1, day 1.
+- `Mod_PauseTime` is 852,106. With `Mod_MinPerHour` 2, one game hour lasts 120,000 milliseconds. 7 hours × 120,000 + 12 seconds × 1,000 + 106 milliseconds = 852,106, which matches `Mod_StartHour` 7, `Mod_StartMinute` 0, `Mod_StartSecond` 12 and `Mod_StartMiliSec` 106. The time is therefore in real milliseconds since the start of the game day. How `Mod_StartMinute` advances is UNKNOWN, because it is 0.
+
+The journal entry in `PARTYTABLE.res` uses the same clock: `JNL_Date` is 450,382 and `JNL_Time` is 843,530.
+
+### Other resources
+
+`AVAILNPC0` is a creature template (UTC) of the party member in slot 0. Its tag is `end_trask` and its conversation is `end_trask01`. Only slot 0 has a template, and only the first of the nine entries of `PT_AVAIL_NPCS` in `PARTYTABLE.res` has `PT_NPC_AVAIL` 1. The digit in the resref is therefore probably the slot number.
+
+`INVENTORY` (type 0, file type "INV ") holds one list, `ItemList`, with four items, such as a short sword and two medical kits (stack size 2).
+
+`REPUTE` is a faction table (FAC). It lists 21 factions in `FactionList`, from "Player" to "Sacrifice", and 405 relationships in `RepList`. The faction tables in the module support archives list 5 factions and 20 or 0 relationships. The rule that decides which of the 441 faction pairs are stored is UNKNOWN.
+
+## GFF field types in saved games
+
+The saved game uses two GFF field types that no other file uses. The table below describes them. Both were added to `ReadGff`, and all nine GFF files parse with them under the strict rules.
+
+| Type | Count | Value                                                                      | Evidence                                                                                                                                                                                                         | Confidence |
+| ---- | ----- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 1    | 407   | Signed 8-bit integer stored in the field entry, sign-extended to 32 bits   | Values such as 0xFFFFFFFB (-5) and 0xFFFFFFFC (-4) occur in labels such as `Modifier` and `RefSaveThrow`. All values lie between -5 and 16.                                                                          | high       |
+| 6    | 128   | Unsigned 64-bit integer: offset into field data, where 8 bytes are stored  | Used by `Id` in effect lists (127 fields) and by `Mod_Effect_NxtId` in the IFO file. Each value uses 8 bytes of the field data, and the field data regions are covered exactly. The 127 `Id` values are distinct and at most 504, which is the value of `Mod_Effect_NxtId`. | medium     |
+
+The signedness of type 6 is UNKNOWN, because no value is large enough to tell. Types 7 and 9 occur in no file. By analogy with types 0 to 5 they are probably a signed 64-bit integer and a 64-bit float, and `ReadGff` reads them so, but this is unverified.
+
+## Global variables: GLOBALVARS.res
+
+`GLOBALVARS.res` stores the values of the global script variables, which scripts read and write with routines such as `GetGlobalBoolean` and `SetGlobalNumber`. The table `globalcat.2da` declares them: 809 booleans, 369 numbers, 5 locations and 2 strings. The file holds exactly these names, with the same counts. The names are in the same order as in `globalcat.2da` only for the strings; the order of the others is UNKNOWN.
+
+The root struct holds eight fields. Four lists hold the names, and four fields hold the values.
+
+| Label         | Type        | Content                                                                                   | Evidence                                                                                                        | Confidence |
+| ------------- | ----------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------- |
+| `CatBoolean`  | list (15)   | One struct per boolean with a string field `Name`                                         | 809 items, the same names as the booleans of `globalcat.2da`.                                                   | high       |
+| `CatNumber`   | list (15)   | One struct per number with a string field `Name`                                          | 369 items, the same names as the numbers of `globalcat.2da`.                                                    | high       |
+| `CatLocation` | list (15)   | One struct per location with a string field `Name`                                        | 5 items, the same names as the locations of `globalcat.2da`.                                                    | high       |
+| `CatString`   | list (15)   | One struct per string with a string field `Name`                                          | 2 items, the same names as the strings of `globalcat.2da`.                                                      | high       |
+| `ValBoolean`  | binary (13) | One bit per boolean, in the order of `CatBoolean`                                         | 102 bytes, which is 809 bits rounded up to whole bytes. Every byte is 0.                                        | medium     |
+| `ValNumber`   | binary (13) | One signed byte per number, in the order of `CatNumber`                                   | 369 bytes. `nwscript.nss` limits global numbers to -128 to +127. The values are plausible (see below).          | high       |
+| `ValLocation` | binary (13) | The location values                                                                       | 2,400 bytes, all 0. The layout is UNKNOWN.                                                                      | low        |
+| `ValString`   | list (15)   | One struct per string with a string field `String`, in the order of `CatString`          | 2 items, both empty.                                                                                            | medium     |
+
+Four numbers are not 0. `K_CURRENT_PLANET` is 5, `END_TRASK_DLG` is 11, and `END_CARTH_DLG` and `End_TraskTalk` are 1. All four belong to the Endar Spire, where the game was saved. This supports one byte per number in the order of `CatNumber`.
+
+The order of the bits within a byte of `ValBoolean` is UNKNOWN. Every boolean is false, so this save cannot tell the two orders apart, and the engine code that packs them is encrypted. `ReadGlobals` takes the high bit of each byte first and rejects a set bit beyond the last boolean. A save in which a known boolean is true would settle the order.
+
+The layout of `ValLocation` is UNKNOWN. A location in NWScript holds an area, a position and an orientation. The 2,400 bytes are 480 bytes per location, or 100 entries of 24 bytes (six f32 values), but no reading can be tested while every byte is 0.
+
+## Party table: PARTYTABLE.res
+
+`PARTYTABLE.res` (file type "PT  ") holds the state that is shared across modules. The table below lists its root fields. The meanings follow from the labels and the values; those marked with an asterisk are confirmed by another file.
+
+| Label                          | Type        | Value in the save | Probable meaning                                                                        |
+| ------------------------------ | ----------- | ----------------- | --------------------------------------------------------------------------------------- |
+| `PT_GOLD`                      | u32         | 0                 | Credits                                                                                 |
+| `PT_XP_POOL`                   | s32         | 150               | Experience points                                                                       |
+| `PT_PLAYEDSECONDS`             | u32         | 1,163             | Time played in seconds\*. Equals `TIMEPLAYED` in `savenfo.res`.                        |
+| `PT_CONTROLLED_NP`             | s32         | -1                | Party member under the player's control; -1 for the player character                    |
+| `PT_SOLOMODE`, `PT_CHEAT_USED` | u8          | 0                 | Flags                                                                                   |
+| `PT_NUM_MEMBERS`, `PT_MEMBERS` | u8, list    | 1                 | Party members besides the player\*. One member with `PT_MEMBER_ID` 0, matching `AVAILNPC0`. |
+| `PT_AVAIL_NPCS`                | list        | 9 items           | One entry per party member slot with `PT_NPC_AVAIL` and `PT_NPC_SELECT`                 |
+| `PT_AISTATE`, `PT_FOLLOWSTATE` | s32         | 0                 | Party behaviour settings                                                                |
+| `GlxyMap`                      | struct      |                   | Galaxy map: 16 points, a planet mask of 0 and no selected point                         |
+| `PT_PAZAAKCARDS`               | list        | 19 items          | Count per pazaak card                                                                   |
+| `PT_PAZSIDELIST`               | list        | 10 items          | Pazaak side deck, -1 for an empty slot                                                  |
+| `PT_TUT_WND_SHOWN`             | binary      | 6 bytes           | Tutorial windows already shown, probably one bit each. The layout is UNKNOWN.           |
+| `PT_LAST_GUI_PNL`              | s32         | 7                 | Last menu panel opened                                                                  |
+| `PT_FB_MSG_LIST`               | list        | 10 items          | Feedback messages, with text, type and colour                                           |
+| `PT_DLG_MSG_LIST`              | list        | 34 items          | Dialog history, with speaker and text                                                   |
+| `PT_COST_MULT_LIS`             | list        | 92 items          | Price multipliers, all 1.0                                                              |
+| `JNL_SortOrder`, `JNL_Entries` | s32, list   | 1 entry           | Journal: plot `end_attack` at state 20, with the date and time of the entry\*            |
+
+## Save summary: savenfo.res
+
+`savenfo.res` (file type "NFO ") is a single struct with 16 fields. `AREANAME` is the area's display name, `LASTMODULE` is the module resref in uppercase, `TIMEPLAYED` is the time played in seconds, and `SAVEGAMENAME` is the name typed by the player. `PORTRAIT0` and `PORTRAIT1` are the portraits of the party (`po_pmhc4` for the player and `po_ptrask` for Trask). `CHEATUSED`, `GAMEPLAYHINT` and `STORYHINT` are bytes. The six strings `LIVE1` to `LIVE6` and the byte `LIVECONTENT` are empty or 0; they probably refer to downloadable content of the Xbox version, but this has not been confirmed.
+
+## Screenshot: Screen.tga
+
+`Screen.tga` is an uncompressed TGA image (image type 2) of 256x256 pixels with 24 bits per pixel, no alpha channel and the origin at the bottom left. It has no image ID, colour map or trailer: its size is exactly the 18-byte header plus 196,608 bytes of pixels. The existing TGA reader decodes it.
+
+## Conversion and verification
+
+The `saves` stage of `cmd/convert` converts every saved game folder in `saves/` to `assets/saves/<save>/`. It writes the following files.
+
+- Each GFF file becomes `<name>.res.json` in the JSON form of the other GFF files (see `gffJson`). 64-bit integers are written exactly.
+- `GLOBALVARS.res` also becomes `GLOBALVARS.variables.json`, which pairs each variable name with its value: `booleans` (JSON booleans), `numbers` (integers), `strings`, `locations` (the names only) and `location_data` (`ValLocation` as hexadecimal, because its layout is unknown).
+- `Screen.tga` becomes `Screen.png`, a 24-bit PNG with the top row first.
+- `SAVEGAME.sav` becomes the folder `SAVEGAME/`. Each GFF resource becomes `<resref>.<ext>.json`, and the saved module becomes the subfolder `SAVEGAME/end_m01aa/`.
+
+The stage writes 13 report lines to `temp/reports/saves.txt`, and all 13 pass: both archives have the expected layout, all nine GFF files parse, the variables decode, and the screenshot decodes.
+
+The `saves` stage of `cmd/verify` checks the outputs with independent tools. jq parses all nine GFF JSON files. ImageMagick's decoding of `Screen.png` equals its decoding of `Screen.tga`, and pngcheck accepts the PNG. The decoded variables, read with jq, are packed again into `ValBoolean` and `ValNumber`, and these bytes, the names and the strings must equal the fields of the source file. All four checks pass. A test in which one number in `GLOBALVARS.variables.json` was changed made the last check fail. This check confirms only that the JSON file holds every bit of the source; it cannot confirm the bit order of `ValBoolean`, because the same order is used to pack the bits again.
+
+The new field types and the sign extension of type 3 changed no other output: after the change, the `gui`, `patch`, `modules`, `rims` and `bifs` stages produce the same 11,698 JSON files byte for byte and the same reports.

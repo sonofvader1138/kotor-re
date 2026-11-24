@@ -3,7 +3,7 @@
 // Movies require ffmpeg. All stages run at the same time. Each stage writes its own outputs and reports
 // and keeps its own summary lines, which are printed in stage order at the end.
 //
-// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [patch] [lips] [modules] [rims] [bifs] [tlk]   (default: all)
+// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [patch] [lips] [modules] [rims] [bifs] [tlk] [saves]   (default: all)
 package main
 
 import (
@@ -487,11 +487,13 @@ func dialogTlk() *kotor.Tlk {
 }
 
 // gffFile converts a GFF resource to the JSON form of gffJson and returns the text, notes for the report
-// line and an error text. The file type must match the resource extension, and the version must be V3.2.
-// Unreferenced bytes are noted, not rejected, because 29 module files have them.
+// line and an error text. The file type must match the resource extension, except for the extension "res",
+// which saved games use for GFF files of several file types. The version must be V3.2. Unreferenced bytes
+// are noted, not rejected, because 29 module files have them.
 func gffFile(data []byte, ext string, tlk *kotor.Tlk) ([]byte, string, string) {
 	gff, problem := kotor.ReadGff(data)
-	if problem == "" && (gff.FileType != fmt.Sprintf("%-4s", strings.ToUpper(ext)) || gff.Version != "V3.2") {
+	typeMatches := ext == "res" || gff != nil && gff.FileType == fmt.Sprintf("%-4s", strings.ToUpper(ext))
+	if problem == "" && (!typeMatches || gff.Version != "V3.2") {
 		problem = "unexpected " + gff.FileType + gff.Version
 	}
 	if problem != "" {
@@ -505,6 +507,9 @@ func gffFile(data []byte, ext string, tlk *kotor.Tlk) ([]byte, string, string) {
 	}
 
 	notes := fmt.Sprintf(" %d structs %d fields", gff.Counts.Structs, gff.Counts.Fields)
+	if ext == "res" {
+		notes = " type=" + strings.TrimSpace(gff.FileType) + notes
+	}
 	for _, region := range []string{"idx", "list"} {
 		if gff.Counts.UnusedBytes[region] > 0 {
 			notes += fmt.Sprintf(" %d unreferenced %s bytes", gff.Counts.UnusedBytes[region], region)
@@ -911,6 +916,126 @@ func convertTlk(summary *kotor.Summary) {
 	summary.Tally("tlk", []string{line})
 }
 
+// Saves: saves/<save>/ -> assets/saves/<save>/, one folder per saved game. Files outside the save folders
+// are not converted.
+//
+//   - A GFF file (*.res) becomes <name>.res.json in the form of gffJson. GLOBALVARS.res also becomes
+//     GLOBALVARS.variables.json, its decoded variables (see globalsJson).
+//   - The screenshot Screen.tga becomes Screen.png, 8-bit with the same channels.
+//   - The archive SAVEGAME.sav becomes the folder SAVEGAME/. Each resource is converted by writeResource,
+//     and a nested archive (type 2057, a saved module) becomes a subfolder named after its resref.
+//     Every archive must have the layout that kotor.ErfLayoutProblem checks.
+func convertSaves(summary *kotor.Summary) {
+	fmt.Println("saves...")
+	inputs := &resourceInputs{tlk: dialogTlk()}
+	src := filepath.Join(kotor.Game, "saves")
+	out := filepath.Join(kotor.Assets, "saves")
+	kotor.MakeDir(out)
+
+	var report []string
+	written := map[string]bool{}
+	write := func(file string, data []byte) {
+		kotor.WriteFile(filepath.Join(out, file), data)
+		written[file] = true
+	}
+
+	// convertArchive converts the resources of an ERF archive into the folder dir, relative to out.
+	var convertArchive func(dir string, data []byte)
+	convertArchive = func(dir string, data []byte) {
+		entries := kotor.ErfEntries(bytes.NewReader(data), int64(len(data)), dir)
+		problem := kotor.ErfLayoutProblem(entries, int64(len(data)))
+		report = append(report, fmt.Sprintf("%s resources=%d %s", dir, len(entries), kotor.Verdict(problem)))
+		if problem != "" {
+			return
+		}
+
+		kotor.MakeDir(filepath.Join(out, dir))
+		for _, entry := range entries {
+			if entry.Ext == "sav" {
+				convertArchive(filepath.Join(dir, entry.Resref), entry.Data())
+				continue
+			}
+
+			label := filepath.Join(dir, entry.Resref+"."+entry.Ext)
+			resource := kotor.Resource{Resref: entry.Resref, Type: entry.Type, Ext: entry.Ext, Data: entry.Data()}
+			line, files := writeResource(filepath.Join(out, dir), label, resource, nil, inputs)
+			report = append(report, line)
+			for _, file := range files {
+				written[filepath.Join(dir, file)] = true
+			}
+		}
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		kotor.Fatal(err.Error())
+	}
+	for _, save := range entries {
+		if !save.IsDir() {
+			continue
+		}
+
+		files, err := os.ReadDir(filepath.Join(src, save.Name()))
+		if err != nil {
+			kotor.Fatal(err.Error())
+		}
+
+		kotor.MakeDir(filepath.Join(out, save.Name()))
+		for _, file := range files {
+			name := file.Name()
+			label := filepath.Join(save.Name(), name)
+			data := kotor.ReadFile(filepath.Join(src, label))
+			base := strings.TrimSuffix(name, filepath.Ext(name))
+			switch strings.ToLower(filepath.Ext(name)) {
+			case ".res":
+				text, notes, problem := gffFile(data, "res", inputs.tlk)
+				report = append(report, label+notes+" "+kotor.Verdict(problem))
+				if problem != "" {
+					continue
+				}
+				write(label+".json", text)
+				if base != "GLOBALVARS" {
+					continue
+				}
+
+				gff, _ := kotor.ReadGff(data)
+				globals, problem := kotor.ReadGlobals(gff)
+				if problem == "" {
+					text, err = json.MarshalIndent(globalsJson(globals), "", "\t")
+					if err != nil {
+						problem = err.Error()
+					}
+				}
+				if problem != "" {
+					report = append(report, label+" variables FAIL: "+problem)
+					continue
+				}
+
+				report = append(report, fmt.Sprintf("%s variables booleans=%d numbers=%d strings=%d locations=%d PASS",
+					label, len(globals.Booleans), len(globals.Numbers), len(globals.Strings), len(globals.Locations)))
+				write(filepath.Join(save.Name(), base+".variables.json"), append(text, '\n'))
+
+			case ".tga":
+				header := kotor.ParseTga(data)
+				image := kotor.DecodeTga(data, header)
+				report = append(report, kotor.ReportTga(label, header))
+				if image != nil {
+					write(filepath.Join(save.Name(), base+".png"), kotor.EncodePng(image.Width, image.Height, image.Pix, image.Channels))
+				}
+
+			case ".sav":
+				convertArchive(filepath.Join(save.Name(), base), data)
+
+			default:
+				report = append(report, label+" FAIL: unknown file")
+			}
+		}
+	}
+
+	prune(out, written, []string{".json", ".png"})
+	summary.Tally("saves", report)
+}
+
 // Movies start first because they take longest.
 var stages = []kotor.Stage{
 	{Name: "movies", Run: convertMovies},
@@ -927,6 +1052,7 @@ var stages = []kotor.Stage{
 	{Name: "rims", Run: convertRims},
 	{Name: "bifs", Run: convertBifs},
 	{Name: "tlk", Run: convertTlk},
+	{Name: "saves", Run: convertSaves},
 }
 
 func main() {

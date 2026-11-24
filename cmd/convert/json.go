@@ -66,8 +66,9 @@ func number(value float64, bitSize int) any {
 
 // gffJson turns a struct into an object keyed by field label, in file order. A struct type other than 0 is
 // kept as "__struct_type". Lists become arrays of objects, vectors become 3-element arrays and orientations
-// 4-element arrays, and f32 values use the shortest decimal that round-trips as an f32. Binary data becomes
-// a lowercase hexadecimal string. A localized string becomes an object with "strref", the string number
+// 4-element arrays, f32 values use the shortest decimal that round-trips as an f32, and 64-bit integers
+// are written exactly. Binary data becomes a lowercase hexadecimal string. A localized string becomes an
+// object with "strref", the string number
 // (null for 0xFFFFFFFF); "text", the string's text in dialog.tlk when the number names an entry with text;
 // and "substrings", when there are any, as objects with "id" and "text". unresolved counts the string
 // numbers that name no entry of dialog.tlk.
@@ -92,6 +93,12 @@ func gffJson(structValue *kotor.GffStructValue, tlk *kotor.Tlk, unresolved *int)
 
 		case kotor.GffF32:
 			value = number(field.Value.Number, 32)
+
+		case kotor.GffU64:
+			value = json.Number(strconv.FormatUint(field.Value.Bits, 10))
+
+		case kotor.GffI64:
+			value = json.Number(strconv.FormatInt(int64(field.Value.Bits), 10))
 
 		case kotor.GffVector, kotor.GffOrientation:
 			components := []any{}
@@ -294,5 +301,47 @@ func lytJson(lyt *kotor.Lyt) *orderedObject {
 	object.set("obstacles", placements(lyt.Obstacles))
 	object.set("doorhooks", hooks)
 	object.set("trailer", lyt.Trailer)
+	return object
+}
+
+// globalsJson turns the global variables of a saved game into an object with "booleans" and "numbers",
+// one object per variable with "name" and "value" (a JSON boolean or an integer); "strings", likewise with
+// a string value; "locations", the location names; and "location_data", ValLocation as a lowercase
+// hexadecimal string, because its layout is unknown. Every list keeps the order of the file.
+func globalsJson(globals *kotor.Globals) *orderedObject {
+	values := func(variables []kotor.GlobalValue, boolean bool) []any {
+		list := make([]any, len(variables))
+		for i, variable := range variables {
+			object := &orderedObject{}
+			object.set("name", variable.Name)
+			if boolean {
+				object.set("value", variable.Value != 0)
+			} else {
+				object.set("value", variable.Value)
+			}
+			list[i] = object
+		}
+		return list
+	}
+
+	stringList := make([]any, len(globals.Strings))
+	for i, variable := range globals.Strings {
+		object := &orderedObject{}
+		object.set("name", variable.Name)
+		object.set("value", variable.Value)
+		stringList[i] = object
+	}
+
+	locations := make([]any, len(globals.Locations))
+	for i, name := range globals.Locations {
+		locations[i] = name
+	}
+
+	object := &orderedObject{}
+	object.set("booleans", values(globals.Booleans, true))
+	object.set("numbers", values(globals.Numbers, false))
+	object.set("strings", stringList)
+	object.set("locations", locations)
+	object.set("location_data", hex.EncodeToString(globals.LocationData))
 	return object
 }

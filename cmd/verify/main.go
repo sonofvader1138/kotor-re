@@ -29,8 +29,11 @@
 // jq's output, other JSON files with jq, NSS files with iconv, and script listings by assembling them.
 // bifs: the resources of the BIF archives in kotor.ResourceBifs, checked as addResourceChecks describes.
 // tlk: the string table JSON, read with jq, must build again into dialog.tlk byte for byte.
+// saves: the GFF files and archive resources of each saved game, checked as addResourceChecks describes;
+// the screenshot PNG against ImageMagick and pngcheck; and the decoded global variables, read with jq,
+// built again into the value fields of GLOBALVARS.res.
 //
-// usage: go run ./cmd/verify [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [patch] [lips] [modules] [rims] [bifs] [tlk]   (default: all)
+// usage: go run ./cmd/verify [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [patch] [lips] [modules] [rims] [bifs] [tlk] [saves]   (default: all)
 package main
 
 import (
@@ -38,6 +41,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -658,7 +662,7 @@ func modules(summary *kotor.Summary) {
 // tool runs in Go and builds the source resource again from the converted file.
 var checkTools = []struct{ kind, program string }{
 	{"assimp", "assimp"}, {"ffprobe", "ffprobe"}, {"csv", ""}, {"ncs", ""}, {"jq", "jq"}, {"iconv", "iconv"},
-	{"copy", ""}, {"imagemagick", "convert"}, {"pngcheck", "pngcheck"},
+	{"copy", ""}, {"imagemagick", "convert"}, {"pngcheck", "pngcheck"}, {"globals", "jq"},
 }
 
 // addResourceChecks adds the check of one converted resource to jobs, keyed by the kind of check. path is
@@ -1387,6 +1391,167 @@ func checkTlkJson(path string, source []byte) string {
 	return ""
 }
 
+// Saves: assets/saves/<save>/ against saves/<save>/. Each GFF file and each resource of the archives is
+// checked as addResourceChecks describes. The screenshot PNG must equal ImageMagick's decoding of the
+// source TGA and pass pngcheck. The decoded variables of GLOBALVARS.res must build again into the source
+// fields (see checkGlobalsJson).
+func saves(summary *kotor.Summary) {
+	log("saves...")
+	src := filepath.Join(kotor.Game, "saves")
+	out := filepath.Join(kotor.Assets, "saves")
+	jobs := map[string][]job{}
+
+	// checkArchive adds the checks of the resources of an ERF archive whose folder is dir, relative to out.
+	var checkArchive func(dir string, data []byte)
+	checkArchive = func(dir string, data []byte) {
+		for _, entry := range kotor.ErfEntries(bytes.NewReader(data), int64(len(data)), dir) {
+			label := filepath.Join(dir, entry.Resref)
+			if entry.Ext == "sav" {
+				checkArchive(label, entry.Data())
+				continue
+			}
+			addResourceChecks(jobs, label, filepath.Join(out, label), entry.Ext, entry.Data())
+		}
+	}
+
+	saveDirs, err := os.ReadDir(src)
+	if err != nil {
+		kotor.Fatal(err.Error())
+	}
+	for _, save := range saveDirs {
+		if !save.IsDir() {
+			continue
+		}
+
+		files, err := os.ReadDir(filepath.Join(src, save.Name()))
+		if err != nil {
+			kotor.Fatal(err.Error())
+		}
+		for _, file := range files {
+			name := file.Name()
+			data := kotor.ReadFile(filepath.Join(src, save.Name(), name))
+			label := filepath.Join(save.Name(), strings.TrimSuffix(name, filepath.Ext(name)))
+			path := filepath.Join(out, label)
+			switch strings.ToLower(filepath.Ext(name)) {
+			case ".res":
+				addResourceChecks(jobs, label, path, "res", data)
+				if filepath.Base(label) == "GLOBALVARS" {
+					jobs["globals"] = append(jobs["globals"], func() []string {
+						return line(label + ".variables.json " + kotor.Verdict(checkGlobalsJson(path+".variables.json", data)))
+					})
+				}
+
+			case ".tga":
+				jobs["imagemagick"] = append(jobs["imagemagick"], func() []string {
+					source := magickDecode("tga", data)
+					if source.err != "" {
+						return line(label + ".png FAIL: source TGA: " + source.err)
+					}
+					width, height, _ := strings.Cut(source.size, " ")
+					return pngCheck(label+".png", path+".png", width, height, source.rgba)
+				})
+				jobs["pngcheck"] = append(jobs["pngcheck"], func() []string {
+					result := kotor.Exec("pngcheck", []string{path + ".png"}, nil)
+					if result.Status != 0 {
+						return line(label + ".png FAIL: pngcheck: " + kotor.FirstLine(string(result.Stdout)))
+					}
+					return line(label + ".png PASS")
+				})
+
+			case ".sav":
+				checkArchive(label, data)
+			}
+		}
+	}
+	runResourceChecks(summary, "saves", jobs)
+}
+
+// checkGlobalsJson reads the decoded variables of a saved game with jq and builds the value fields of
+// GLOBALVARS.res again: ValBoolean with eight booleans per byte, high bit first; ValNumber with one signed
+// byte per number; and the strings of ValString. The names must equal the Name fields of the Cat lists,
+// and location_data must equal ValLocation. It returns an error message when anything differs from the
+// source, or an empty string when everything matches.
+func checkGlobalsJson(path string, source []byte) string {
+	queries := []string{
+		"[.booleans[].name]", "[.booleans[].value]", "[.numbers[].name]", "[.numbers[].value]",
+		"[.strings[].name]", "[.strings[].value]", ".locations", "[.location_data]",
+	}
+	result := kotor.Exec("jq", []string{"-c", strings.Join(queries, ", "), path}, nil)
+	if result.Status != 0 {
+		return "jq: " + kotor.FirstLine(result.Stderr)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(result.Stdout)), "\n")
+	if len(lines) != len(queries) {
+		return fmt.Sprintf("jq printed %d lines for %d queries", len(lines), len(queries))
+	}
+
+	var booleanNames, numberNames, stringNames, stringValues, locationNames, locationData []string
+	var booleans []bool
+	var numbers []int
+	targets := []any{&booleanNames, &booleans, &numberNames, &numbers, &stringNames, &stringValues, &locationNames, &locationData}
+	for i, target := range targets {
+		if err := json.Unmarshal([]byte(lines[i]), target); err != nil {
+			return queries[i] + ": " + err.Error()
+		}
+	}
+
+	const bitsPerByte, highBit = 8, 0x80
+	bits := make([]byte, (len(booleans)+bitsPerByte-1)/bitsPerByte)
+	for i, value := range booleans {
+		if value {
+			bits[i/bitsPerByte] |= highBit >> (i % bitsPerByte)
+		}
+	}
+
+	numberBytes := make([]byte, len(numbers))
+	for i, value := range numbers {
+		if value < math.MinInt8 || value > math.MaxInt8 {
+			return fmt.Sprintf("number %d out of range", value)
+		}
+		numberBytes[i] = byte(int8(value))
+	}
+
+	gff, problem := kotor.ReadGff(source)
+	if problem != "" {
+		return "source: " + problem
+	}
+
+	fields := map[string]kotor.GffFieldValue{}
+	for _, field := range gff.Root.Fields {
+		fields[field.Label] = field.Value
+	}
+	listTexts := func(label string) []string {
+		var texts []string
+		for _, item := range fields[label].List {
+			for _, field := range item.Fields {
+				texts = append(texts, field.Value.Text)
+			}
+		}
+		return texts
+	}
+
+	checks := []struct {
+		name      string
+		got, want any
+	}{
+		{"boolean names", booleanNames, listTexts("CatBoolean")},
+		{"number names", numberNames, listTexts("CatNumber")},
+		{"string names", stringNames, listTexts("CatString")},
+		{"location names", locationNames, listTexts("CatLocation")},
+		{"ValBoolean", bits, fields["ValBoolean"].Bytes},
+		{"ValNumber", numberBytes, fields["ValNumber"].Bytes},
+		{"ValString", stringValues, listTexts("ValString")},
+		{"ValLocation", locationData, []string{hex.EncodeToString(fields["ValLocation"].Bytes)}},
+	}
+	for _, check := range checks {
+		if fmt.Sprint(check.got) != fmt.Sprint(check.want) {
+			return check.name + " differ from the source"
+		}
+	}
+	return ""
+}
+
 // Movies queue their jobs first because each one takes longest, so short jobs fill the other slots.
 var stages = []kotor.Stage{
 	{Name: "movies", Run: movies},
@@ -1403,6 +1568,7 @@ var stages = []kotor.Stage{
 	{Name: "rims", Run: rims},
 	{Name: "bifs", Run: bifs},
 	{Name: "tlk", Run: tlk},
+	{Name: "saves", Run: saves},
 }
 
 func main() {
