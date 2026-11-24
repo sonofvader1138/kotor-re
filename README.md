@@ -47,6 +47,16 @@ All integers and floats are little-endian. Offsets are in hexadecimal and count 
   - [Mesh header](#mesh-header)
   - [Face](#face)
   - [MDX file](#mdx-file)
+  - [Skin header](#skin-header)
+  - [Dangly mesh header](#dangly-mesh-header)
+  - [AABB tree of a mesh](#aabb-tree-of-a-mesh)
+  - [Lightsaber header](#lightsaber-header)
+  - [Light header](#light-header)
+  - [Emitter header](#emitter-header)
+  - [Reference header](#reference-header)
+  - [Controllers](#controllers)
+  - [Animations](#animations)
+  - [Conversion of animations](#conversion-of-animations)
   - [Walkmeshes in models.bif](#walkmeshes-in-modelsbif)
 - [Walkmeshes: BWM](#walkmeshes-bwm)
   - [Header](#header-1)
@@ -776,7 +786,7 @@ The `rims` stage of `cmd/extract` writes one folder `extracted/rims/<archive>/` 
 
 | Resource     | Output                         | Form                                                                                                                           |
 | ------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| MDL with MDX | `<resref>.gltf`, `<resref>.bin`  | As for `data/models.bif` (see "3D models: MDL and MDX"). 151 models have no rendered geometry and are not written.             |
+| MDL with MDX | `<resref>.gltf`, `<resref>.bin`  | As for `data/models.bif` (see "3D models: MDL and MDX"). 16 models have neither rendered geometry nor animations and are not written. |
 | WAV          | `<resref>.wav`                 | 16-bit PCM. PCM files are copied unchanged, and the four IMA ADPCM files are decoded.                                          |
 | 2DA          | `<resref>.2da.csv`             | CSV. The first line holds an empty cell and the column labels. Each further line holds the row label and the cells.            |
 | SSF          | `<resref>.ssf.json`            | JSON with an array `slots`. Each slot has `strref` (null when empty) and the `text` and `sound` of that entry in `dialog.tlk`. |
@@ -792,7 +802,7 @@ The models refer to textures by the same relative path as the models of `data/mo
 2,JEDI,1121,1114,5
 ```
 
-The `rims` stage of `cmd/verify` writes seven reports, and every line passes. In `temp/reports/assimp_rims.txt`, assimp loads all 88 glTF files with the face count that their index accessors give. In `temp/reports/gltf_rims.txt`, the binary buffers of the 88 models hold the source positions, face indices and face fields, as for `data/models.bif`. In `temp/reports/validator_rims.txt`, the Khronos glTF validator reports no errors in the 88 glTF files. In `temp/reports/ffprobe_rims.txt`, ffprobe reads all 375 WAV files as 16-bit PCM (`pcm_s16le`), and ffmpeg decodes each output and its source to 16-bit samples, which must be equal. For the four IMA ADPCM sources, the samples may differ by rounding (see "Conversion and verification" under "Tables, sounds, scripts and templates in the BIF archives"). In `temp/reports/csv_rims.txt`, Go's `encoding/csv` reader reads each of the 306 CSV files, and the table built again from it must equal the source table byte for byte. The builder is part of `cmd/verify` and shares no code with the parser; it takes the separator byte from the source. A test in which one cell of `aiscripts.2da.csv` was altered made that file fail. In `temp/reports/jq_rims.txt`, jq reads the mesh header extras of the 88 glTF files, which must equal the source, reads the string numbers of all 210 SSF JSON files, which must build again into the source sound set, and parses all 62 UTI JSON files. In `temp/reports/ncs_rims.txt`, all 492 script listings assemble to their source scripts.
+The `rims` stage of `cmd/verify` writes nine reports, and every line passes. In `temp/reports/assimp_rims.txt`, assimp loads all 223 glTF files with the face, animation, channel and bone counts of the glTF files. In `temp/reports/gltf_rims.txt`, the binary buffers of the 223 models hold the source positions, face indices and face fields, as for `data/models.bif`. In `temp/reports/validator_rims.txt`, the Khronos glTF validator reports no errors in the 223 glTF files. In `temp/reports/animation_rims.txt`, the animations of the 223 models equal their source, as for `data/models.bif`. In `temp/reports/skin_rims.txt`, the joints of each skin are the bones of the source. This stage reads each resource on its own, so the MDX data is not at hand there, and the weights are compared only for the BIF archives. In `temp/reports/ffprobe_rims.txt`, ffprobe reads all 375 WAV files as 16-bit PCM (`pcm_s16le`), and ffmpeg decodes each output and its source to 16-bit samples, which must be equal. For the four IMA ADPCM sources, the samples may differ by rounding (see "Conversion and verification" under "Tables, sounds, scripts and templates in the BIF archives"). In `temp/reports/csv_rims.txt`, Go's `encoding/csv` reader reads each of the 306 CSV files, and the table built again from it must equal the source table byte for byte. The builder is part of `cmd/verify` and shares no code with the parser; it takes the separator byte from the source. A test in which one cell of `aiscripts.2da.csv` was altered made that file fail. In `temp/reports/jq_rims.txt`, jq reads the node extras of the 223 glTF files, which must equal the source, reads the string numbers of all 210 SSF JSON files, which must build again into the source sound set, and parses all 62 UTI JSON files. In `temp/reports/ncs_rims.txt`, all 492 script listings assemble to their source scripts.
 
 # Tables, sounds, scripts and templates in the BIF archives
 
@@ -995,16 +1005,16 @@ The parser passes on the only sample. The report `temp/reports/tlk.txt` lists 49
 
 # 3D models: MDL and MDX
 
-Each 3D model is stored as two resources with the same resref. The MDL resource (type 2002) holds the model's structure: a tree of nodes, some of which carry meshes. The MDX resource (type 3008) holds the vertex data for those meshes. The converter is `ConvertMdl` in `kotor/mdl.go`, which writes glTF 2.0 files (GL Transmission Format, the Khronos standard for 3D scenes). Each glTF file is a JSON description of the node tree, meshes and materials, with a binary buffer beside it that holds the vertex, index and face data. The `models` stage of `cmd/extract` runs it on every model of the four BIF archives that hold models, and `cmd/mdl2gltf` runs it on one model.
+Each 3D model is stored as two resources with the same resref. The MDL resource (type 2002) holds the model's structure: a tree of nodes, some of which carry meshes, lights, particle emitters or references to other models, and the model's animations. The MDX resource (type 3008) holds the vertex data for the meshes. The converter is `ConvertMdl` in `kotor/mdl.go`, with the node class headers in `kotor/mdlnode.go` and the controllers and animations in `kotor/mdlanim.go`. It writes glTF 2.0 files (GL Transmission Format, the Khronos standard for 3D scenes). Each glTF file is a JSON description of the node tree, meshes, materials, skins and animations, with a binary buffer beside it that holds the vertex, index, face, skin and keyframe data. The `models` stage of `cmd/extract` runs it on every model of the four BIF archives that hold models, and `cmd/mdl2gltf` runs it on one model.
 
 Four BIF archives hold models. Each holds one MDX resource for every MDL resource and no other resources, except that `models.bif` also holds the walkmeshes (see "Walkmeshes: BWM"). The table below lists the archives, what their model names suggest they hold, and their counts.
 
-| Archive      | MDL and MDX pairs | Content, as suggested by the names                                                                                 | Written | Without rendered geometry |
-| ------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------ | ------- | ------------------------- |
-| `models.bif` | 2,445             | Area rooms such as `m01aa_01a` (1,329 of the written models), creatures, placeables and effects                    | 1,972   | 473                       |
-| `items.bif`  | 305               | Items (`i_`, 124 written), weapons (`w_`, 118 written) such as `w_lghtsbr_008`, and 32 player body models         | 286     | 19                        |
-| `party.bif`  | 19                | Bodies and heads of the party members, such as `p_carthba` and `p_carthh`                                          | 19      | 0                         |
-| `player.bif` | 63                | Bodies and heads of the player character, such as `pmbal` and `pfha01`, which are probably male and female variants | 63      | 0                         |
+| Archive      | MDL and MDX pairs | Content, as suggested by the names                                                                                 | Written | Not written |
+| ------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------ | ------- | ----------- |
+| `models.bif` | 2,445             | Area rooms such as `m01aa_01a` (1,474 of the written models), creatures, placeables and effects                    | 2,243   | 202         |
+| `items.bif`  | 305               | Items (`i_`, 124 written), weapons (`w_`, 130 written) such as `w_lghtsbr_008`, and 32 player body models         | 298     | 7           |
+| `party.bif`  | 19                | Bodies and heads of the party members, such as `p_carthba` and `p_carthh`                                          | 19      | 0           |
+| `player.bif` | 63                | Bodies and heads of the player character, such as `pmbal` and `pfha01`, which are probably male and female variants | 63      | 0           |
 
 The player body models are split between two archives. Most of their names have the form `p<f|m>b<letter><s|m|l>`, for example `pfbcm`. The letters a and b occur only in `player.bif`. For the letters c to j, `items.bif` holds the female "s" and "m" variants and the male "m" and "l" variants, and `player.bif` holds the rest. The letter may select an armor appearance and the last letter a body size, but this is not verified, and why the models are split this way is UNKNOWN.
 
@@ -1012,7 +1022,9 @@ Unless a statement names another archive, the field statistics in the tables bel
 
 All 2,832 models of the four archives pass the converter's checks. Every read stays inside the file, every face index refers to an existing vertex, and the vertex positions stored in the MDL match those stored in the MDX. In `models.bif` this was checked for all 11,248,282 vertices. In the other three archives it was checked for the 217,294 vertices of the rendered meshes, because the converter checks only the meshes it writes. Of the models of `models.bif`, 368 contain no meshes.
 
-The converter omits meshes whose render flag is 0 (see the mesh header). This removes 18,058 meshes: 14,055 in `models.bif`, 1,394 in `items.bif`, 737 in `party.bif` and 1,872 in `player.bif`. After this, 492 models have no meshes left and are not written, and 2,340 models are written. The 19 such models in `items.bif` are `i_null`, `w_null_001`, the laser bolts `w_laserfire` and `w_lfire_pb_*`, and six blaster models whose names end in `_006` or `_004`. Each archive becomes the folder `extracted/data/<archive>/`, which holds two files for each written model: `<resref>.gltf` and its binary buffer `<resref>.bin`.
+The converter also records, for every byte, which decoded structure it belongs to. In all 2,832 models, every byte of the model data belongs to exactly one structure of the tables in this section, and no byte belongs to two. Every MDX byte belongs to a vertex record or a terminator record, except 391,680 bytes of padding in 1,549 models that follow the rule given in "MDX file". The file therefore holds no data that this description leaves out, although the meaning of some fields is UNKNOWN.
+
+The converter omits meshes whose render flag is 0 (see the mesh header). This removes 18,058 meshes: 14,055 in `models.bif`, 1,394 in `items.bif`, 737 in `party.bif` and 1,872 in `player.bif`. After this, 492 models have no meshes left. 283 of them have animations and are written without meshes. Most of these are the 90 visual effect models `v_*`, cutscene models such as `m17mg_*` and `m45mg_*`, placeables, and the laser bolts `w_laserfire` and `w_lfire_pb_*`. The other 209 models are not written, so 2,623 models are written. The 7 models of `items.bif` that are not written are `i_null` and six blaster models whose names end in `_006` or `_004`. Each archive becomes the folder `extracted/data/<archive>/`, which holds two files for each written model: `<resref>.gltf` and its binary buffer `<resref>.bin`.
 
 The glTF file keeps the node tree of the model. Every node becomes a glTF node in the order of a depth-first walk, children in stored order, with its name, its position and its rotation relative to its parent. The rotation is reordered from the game's w, x, y, z to glTF's x, y, z, w. The game uses +Z as up and glTF uses +Y, so the scene has one extra root node above the model's root node, which rotates by -90 degrees about X. No coordinate in the buffer is changed by this. The table below lists what a mesh node holds.
 
@@ -1021,28 +1033,50 @@ The glTF file keeps the node tree of the model. Every node becomes a glTF node i
 | `POSITION`                  | The vertex positions of the MDL vertex array, as f32, relative to the node.                                                                               |
 | `NORMAL`                    | The MDX normals. Zero normals are replaced, as described below.                                                                                            |
 | `TEXCOORD_0`, `TEXCOORD_1`  | The first and second MDX texture coordinates, with v written as 1 - v. A mesh with only the second set writes it as `TEXCOORD_0`.                         |
+| `JOINTS_0`, `WEIGHTS_0`     | For a skinned mesh, the four local bone indices of each vertex as u16 and its four bone weights as f32 (see "Skin header").                                 |
 | Indices                     | The three vertex indices of each face, as u32, in face order.                                                                                              |
-| Material                    | One glTF material per texture name, whose base color texture is the PNG file of that texture. glTF forbids a texture on a primitive without texture coordinates, so such a mesh, such as a lightsaber blade, gets a material of the same name without the texture. |
+| Material                    | One glTF material per texture name, whose base color texture is the PNG file of that texture. glTF forbids a texture on a primitive without texture coordinates, so such a mesh gets a material of the same name without the texture. |
 | `extras.mesh`               | The decoded mesh header, described below.                                                                                                                  |
 | `extras.face_materials`     | The index of an accessor that holds the material of each face, as u32.                                                                                     |
 | `extras.face_adjacent`      | The index of an accessor that holds the three adjacent faces of each face, as u16, with 0xFFFF for none.                                                  |
+| `extras.dangly`             | For a dangly mesh, the fields of its header and the index of an accessor that holds its constraints (see "Dangly mesh header").                           |
+| `extras.aabb`               | For an AABB mesh, the indices of two accessors that hold its AABB tree (see "AABB tree of a mesh").                                                        |
+| `extras.skin`               | For a rendered skinned mesh, `node`: the index of the glTF node that carries the skinned mesh, as described below.                                         |
 
-glTF puts v = 0 at the top of an image, whereas the game puts it at the first stored row, which is the bottom row of the PNG file (see "Pixel data layout" in the texture section). This is why v is written as 1 - v. The tangent space component and the 32 extra bytes of skinned vertex records are not written, because their layouts are not verified.
+A lightsaber mesh has no MDX vertex records. Its normals and texture coordinates come from the arrays of its lightsaber header (see "Lightsaber header"), so it is written with `NORMAL`, `TEXCOORD_0` and a textured material.
+
+The table below lists the other parts of the glTF file.
+
+| Part                        | Content                                                                                                                                                    |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scenes[0].extras`          | The model header fields `classification`, `supermodel` and `animation_scale` (see "Model header").                                                        |
+| `extras.controllers`        | On any node, the controllers of the model tree other than position and orientation, each as `name` and `values` (see "Controllers").                      |
+| `extras.light`              | On a light node, the light header (see "Light header").                                                                                                    |
+| `extras.emitter`            | On an emitter node, the emitter header (see "Emitter header").                                                                                             |
+| `extras.reference`          | On a reference node, the reference header (see "Reference header").                                                                                        |
+| `skins`                     | One glTF skin per rendered skinned mesh. Its joints are the nodes of the mesh's local bones, and its inverse bind matrices are computed from the node tree. |
+| `animations`                | One glTF animation per MDL animation, in stored order, as described in "Conversion of animations".                                                         |
+
+glTF puts v = 0 at the top of an image, whereas the game puts it at the first stored row, which is the bottom row of the PNG file (see "Pixel data layout" in the texture section). This is why v is written as 1 - v. The tangent space component is not written, because its layout is not verified.
+
+glTF ignores the transform of the node that carries a skinned mesh, and the validator warns when that node is not a root node. Each rendered skinned mesh therefore moves to a new root node of the scene, named after its node with the suffix `_skin`. Its original node keeps its place in the tree, its extras and `extras.skin.node`, which gives the index of the new node. The inverse bind matrix of each joint maps the space of the original node into the space of the joint in the rest pose, so the mesh appears in the rest pose exactly where its node is.
 
 The `extras.mesh` object holds the fields described in the section "Mesh header" under these names: `name`, `kind` (`trimesh`, `aabb`, `lightsaber`, `dangly` or `skin`), `render`, `shadow`, `lightmapped`, `texture`, `lightmap`, `diffuse`, `ambient`, `transparency_hint`, `uv_scroll` (present only when the scroll flag is set), `bounds_min`, `bounds_max`, `radius`, `average_point`, `surface_area`, `vertex_count`, `face_count` and `vertex_components`. Fields whose meaning is UNKNOWN are not written. Every mesh node has this object, including the nodes of meshes that are not rendered, which have no glTF mesh. The face normal and plane distance are not written, because both follow from the vertices (see "Face"). The faces of the non-rendered AABB meshes are not written either. Their materials are the same as those of the area walkmeshes, which are converted separately. A rendered mesh without faces also has no glTF mesh. The models of `rims/` and `patch.erf` are written in the same way.
 
 glTF requires every normal to have unit length. All non-zero MDX normals of the rendered meshes have unit length within 0.001, but 12,939 normals in 3,058 meshes of the four archives are exactly (0, 0, 0). The converter replaces each of them with the normalized sum of the stored normals of the faces that use the vertex, or with (0, 0, 1) when no face uses it. The summary of `cmd/extract` counts the replaced normals. Whether the game uses these vertices is UNKNOWN.
 
-The glTF files are verified in four ways by `cmd/verify`, which walks the node tree of the source on its own. The table below lists the reports for the four archives. All lines pass.
+The glTF files are verified in six ways by `cmd/verify`, which walks the node tree and the animation trees of the source on its own (`cmd/verify/animation.go`). The table below lists the reports for the four archives. All lines pass.
 
-| Report              | Files | Check                                                                                                                                                                                                                                   |
-| ------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `validator_models.txt` | 2,340 | The Khronos glTF validator, which also loads the binary buffer and the images, reports no errors. |
-| `assimp_models.txt` | 2,340 | assimp, an independent model loader, imports the glTF file without post-processing. It must find at least one mesh and as many faces as the index accessors give.                                                                       |
-| `jq_models.txt`     | 2,340 | jq, an independent JSON processor, reads the `extras.mesh` objects, and every field must equal the source bytes. Floats must match bit for bit after rounding to f32.                                                                   |
-| `gltf_models.txt`   | 2,340 | jq locates the accessors of each mesh node in the binary buffer. The positions must equal the MDL vertex array byte for byte, the indices the face vertex indices, and the face materials and adjacent faces the face bytes 0x10 to 0x19. |
+| Report                 | Files | Check |
+| ---------------------- | ----- | ----- |
+| `validator_models.txt` | 2,623 | The Khronos glTF validator, which also loads the binary buffer and the images, reports no errors. It also checks that skin weights sum to 1, that joints are valid, and that animation times increase and outputs match their samplers. |
+| `assimp_models.txt`    | 2,623 | assimp, an independent model loader, imports the glTF file without post-processing. It must find at least one mesh or one animation, and as many faces as the index accessors give. Its counts of animations, of animation channels and of bones must equal those of the glTF file. assimp merges the channels of one node, so its channel count is compared with the number of animated nodes. |
+| `jq_models.txt`        | 2,623 | jq, an independent JSON processor, reads the `extras.mesh` objects, and every field must equal the source bytes. It also reads the light, emitter, reference and dangly fields, which must equal the header bytes, and the static controllers, which must equal the stored values. The dangly constraints and the AABB trees in the binary buffer must equal the source, the trees in depth-first order. Floats must match bit for bit after rounding to f32. |
+| `gltf_models.txt`      | 2,623 | jq locates the accessors of each mesh node in the binary buffer. The positions must equal the MDL vertex array byte for byte, the indices the face vertex indices, and the face materials and adjacent faces the face bytes 0x10 to 0x19. |
+| `animation_models.txt` | 2,623 | jq reads each animation. Its name, length, transition time, root and events must equal the animation header. Each controller is decoded again from the source and matched to its node. The key times of each channel and track must equal the source bytes, and the values must equal the decoded values within 1e-5, as "Conversion of animations" describes. |
+| `skin_models.txt`      | 2,623 | jq reads each skin. Its joints must be the nodes named by the bone map, in local bone order. `JOINTS_0` must equal the stored bone indices, with 0 for -1, and `WEIGHTS_0` the stored weights divided by their sum within 1e-5. |
 
-Across all 3,687 glTF files of models and walkmeshes, the validator reports no errors and no warnings. Its remaining messages are informational: nodes without a mesh or children, and the face accessors that no mesh primitive reads. Every one of the 12,685 image URIs in the glTF files names an existing PNG file. A test in which one byte of `m01aa_01a.bin` was changed made that file fail. Positions and texture coordinates were also compared with the earlier OBJ output of three models, after assimp applied the node transforms. All distinct positions agree to 0.001 after the axis rotation, except one value that rounds differently, and all distinct texture coordinates agree. A pass means that the files hold the source values. It does not show that the meanings given to those values are correct.
+Across all 3,881 glTF files of models and walkmeshes, the validator reports no errors and no warnings. Its remaining messages are informational: nodes without a mesh or children, a few degenerate triangles, and the face, skin and track accessors that no mesh primitive reads. Every one of the 12,584 image URIs in the model glTF files names an existing PNG file. A test in which one byte of `m01aa_01a.bin` was changed made that file fail. In a second test, the highest byte of one rotation value of `c_bantha.bin` and one weight byte of `pfbjm.bin` were changed. The animation, skin and validator reports failed for these files. A change of the lowest byte of a rotation value lies within the tolerance of 1e-5 and was not detected by the animation report. The validator rejects such changes only when they break a rule of glTF. Positions and texture coordinates were also compared with the earlier OBJ output of three models, after assimp applied the node transforms. All distinct positions agree to 0.001 after the axis rotation, except one value that rounds differently, and all distinct texture coordinates agree. A pass means that the files hold the source values. It does not show that the meanings given to those values are correct.
 
 ## MDL file header
 
@@ -1067,41 +1101,81 @@ The model header is at the start of the model data.
 | 0x08   | char[32] | Model name                                                     | Equals the resref in 2,444 of 2,445 models.                                                                                                                                                      | high       |
 | 0x28   | u32      | Offset of the root node                                        | The node tree parses from this offset in all 2,445 models.                                                                                                                                       | high       |
 | 0x2C   | u32      | Number of nodes                                                | Equals the number of nodes in the tree in 2,187 of 2,445 models. See below.                                                                                                                      | medium     |
-| 0x68   | f32[6]   | Probably a bounding box: minimum x, y, z, then maximum x, y, z | The minimum is at most the maximum on every axis in all 2,445 models. The converted geometry lies inside the box in only 709 of the 1,972 converted models, so what the box encloses is UNKNOWN. | low        |
+| 0x30   | u32[6]   | UNKNOWN, always 0                                              | 0 in all 2,832 models of the four archives. Other descriptions of the format name two runtime array descriptors here.                                                                            | low        |
+| 0x48   | u32      | UNKNOWN, always 0                                              | 0 in all 2,832 models. Other descriptions of the format name a reference count here.                                                                                                             | low        |
+| 0x4C   | u8       | Geometry type: 2 for a model                                   | 2 in all 2,832 models. The animation headers hold 5 at the same offset (see "Animations").                                                                                                      | high       |
+| 0x4D   | u8[3]    | UNKNOWN, probably padding                                      | The values vary without a pattern, and 608 models hold zeros.                                                                                                                                    | low        |
+| 0x50   | u8       | Classification                                                 | See below.                                                                                                                                                                                       | medium     |
+| 0x51   | u8       | UNKNOWN                                                        | 0 in 2,548 models, 4 in 214 and 2 in 70.                                                                                                                                                         | low        |
+| 0x52   | u8       | UNKNOWN, always 0                                              | 0 in all 2,832 models.                                                                                                                                                                           | low        |
+| 0x53   | u8       | UNKNOWN                                                        | 1 in 2,743 models and 0 in 89. Other descriptions of the format call it a fog flag.                                                                                                              | low        |
+| 0x54   | u32      | UNKNOWN, always 0                                              | 0 in all 2,832 models.                                                                                                                                                                           | low        |
+| 0x58   | u32[3]   | Array descriptor of the animations: the offset of an array of u32 animation header offsets, the count and the capacity | Every animation decodes, as "Animations" describes. 1,027 models hold 6,213 animations. | high |
+| 0x64   | u32      | UNKNOWN, probably a pointer left from the game's tools         | 0 in 2,464 models. The others hold large values such as 293,195,784 that point nowhere in the file.                                                                                             | low        |
+| 0x68   | f32[6]   | Probably a bounding box: minimum x, y, z, then maximum x, y, z | The minimum is at most the maximum on every axis in all 2,445 models. The converted geometry lies inside the box in only 709 of the 1,972 models with rendered geometry, so what the box encloses is UNKNOWN. | low        |
+| 0x80   | f32      | Probably a radius                                              | Positive in all 2,832 models. What it encloses is not verified.                                                                                                                                  | low        |
+| 0x84   | f32      | Animation scale                                                | 1 in 2,671 models. The others hold values from 0.278 to 1.6, such as 1.06 in 81 models. The name follows the property `animscale` of other descriptions of the format, and the effect is not tested. | low        |
 | 0x88   | char[32] | Name of the supermodel, or "NULL"                              | Contains model names such as S_Female02.                                                                                                                                                         | high       |
 | 0xA8   | u32      | Probably the offset of the root node (repeated)                | Equals the value at 0x28 in 2,374 of 2,445 models. The other 71 hold other values between 2,138 and 45,068.                                                                                      | low        |
+| 0xAC   | u32      | UNKNOWN, always 0                                              | 0 in all 2,832 models.                                                                                                                                                                           | low        |
 | 0xB0   | u32      | Size of the MDX file (repeated)                                | Equals the size of the MDX resource in all 2,445 models.                                                                                                                                         | high       |
+| 0xB4   | u32      | UNKNOWN, always 0                                              | 0 in all 2,832 models.                                                                                                                                                                           | low        |
 | 0xB8   | u32      | Offset of the name table                                       | All node names resolve in all 2,445 models.                                                                                                                                                      | high       |
-| 0xC0   | u32      | Number of entries in the name table                            | All node names resolve in all 2,445 models.                                                                                                                                                      | high       |
+| 0xBC   | u32      | Number of entries in the name table                            | Equals the value at 0xC0 in all 2,832 models, so 0xB8 to 0xC3 is an array descriptor.                                                                                                           | high       |
+| 0xC0   | u32      | Number of entries in the name table (repeated)                 | All node names resolve in all 2,445 models.                                                                                                                                                      | high       |
+
+The model header ends at 0xC4. The first 0x50 bytes form a geometry header that the animation headers share: two class addresses, a name, a root node offset, a node count, the zeros at 0x30 to 0x4B and the geometry type.
+
+The classification at 0x50 is a single bit or 0. The names follow other descriptions of the format, and the model names agree with them where the table says so. The table below counts the values in the four archives.
+
+| Value | Models | Name in other descriptions | Examples and agreement |
+| ----- | ------ | -------------------------- | ---------------------- |
+| 0     | 1,304  | Other                      | Rooms and many placeables, such as `crossgob`. |
+| 1     | 387    | Effect                     | `w_laserfire` and other effects. |
+| 2     | 13     | Tile                       | Effects such as `v_fpush_cas` and the room `m17ab_00f`. The name does not fit. |
+| 4     | 630    | Character                  | Creatures and also items such as `i_belt_001`. |
+| 8     | 56     | Door                       | All are door models `dor_*`. |
+| 16    | 22     | Lightsaber                 | All are lightsaber models. |
+| 32    | 417    | Placeable                  | Placeables and items such as `a_jedirobe_001`. |
+| 64    | 3      | Flyer                      | `c_brith` and two cutscene cameras. |
 
 A supermodel is another model whose nodes this model appears to inherit. In 258 models the node count does not match the number of nodes in the tree. All 258 have a supermodel, and in all of them the count exceeds the number of nodes in the tree, so the count probably includes nodes of the supermodel. It is not the sum of the model's nodes and the supermodel's count in any of the 258 models, so how the count is formed is UNKNOWN. The other three archives agree. In 110 of their 387 models, the count exceeds the number of nodes in the tree, and all 110 have a supermodel. This holds for 62 of the 63 models in `player.bif` and 16 of the 19 in `party.bif`.
 
-The name table is an array of u32 offsets. Each offset points to a NUL-terminated node name.
+The name table is an array of u32 offsets. Each offset points to a NUL-terminated node name. Two entries of the same name table can hold the same text, as in `c_drdprot`, where two nodes are named `Rwr_box`.
 
 ## Node
 
-A node is an 80-byte structure. Nodes form a tree that starts at the root node.
+A node is an 80-byte structure. The nodes of the model tree start at the root node of the model header. Each animation has a tree of its own made of the same structure (see "Animations"). Unless a statement names the animation nodes, the statistics below count the nodes of the model trees.
 
 | Offset | Type   | Meaning                                                              | Evidence                                                                                                       | Confidence |
 | ------ | ------ | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------- |
 | 0x00   | u16    | Flags                                                                | See the flag table below.                                                                                      | medium     |
 | 0x02   | u16    | Node number                                                          | Exceeds the name count in 256 models, which suggests it includes supermodel nodes. This has not been verified. | low        |
 | 0x04   | u16    | Index into the name table                                            | Within range for all 107,605 nodes.                                                                            | high       |
-| 0x10   | f32[3] | Position relative to the parent                                      | Converted models render with correct part placement.                                                           | medium     |
-| 0x1C   | f32[4] | Rotation relative to the parent, as a quaternion in w, x, y, z order | All 107,605 rotations have unit length, and all 2,445 root nodes hold (1, 0, 0, 0).                            | medium     |
-| 0x2C   | u32    | Offset of the child offset array                                     | The tree stays inside the file in all 2,445 models.                                                            | high       |
-| 0x30   | u32    | Number of children                                                   | The tree stays inside the file in all 2,445 models.                                                            | high       |
+| 0x06   | u16    | UNKNOWN, always 0                                                    | 0 in all 114,865 nodes of the model trees and all 182,636 animation nodes of the four archives.                | low        |
+| 0x08   | u32    | Offset of the header that owns the tree                              | 0, the model header, in every node of every model tree, and the offset of the animation header in every animation node. | high |
+| 0x0C   | u32    | Offset of the parent node, or 0 for the root                         | True for every node of every tree in the four archives.                                                        | high       |
+| 0x10   | f32[3] | Position relative to the parent                                      | Converted models render with correct part placement. It equals the single key of the node's position controller in all 112,038 nodes with one (see "Controllers"). | high |
+| 0x1C   | f32[4] | Rotation relative to the parent, as a quaternion in w, x, y, z order | All 107,605 rotations have unit length, and all 2,445 root nodes hold (1, 0, 0, 0). It equals the single key of the node's orientation controller within 0.01 radians in all 112,038 nodes with one. | high |
+| 0x2C   | u32[3] | Array descriptor of the children: the offset of an array of u32 child node offsets, the count and the capacity | The trees stay inside the file in all 2,832 models. | high |
+| 0x38   | u32[3] | Array descriptor of the controller keys, 16 bytes each               | See "Controllers".                                                                                             | high       |
+| 0x44   | u32[3] | Array descriptor of the controller data, f32 each                    | See "Controllers".                                                                                             | high       |
 
-The child offset array is an array of u32 offsets. Each offset points to a child node.
+The header of the node's class follows the node directly at 0x50: a light header, an emitter header, a reference header or a mesh header, as the flags select.
+
+The node number at 0x02 identifies a node. An animation node animates the node of the model tree with the same node number. The number is unique within its model in 114,795 of the 114,865 nodes of the model trees. The other 70 nodes share a number with another node of the same model, and they lie in five models: 22 each in `pfbcl`, `pfbcm` and `pfbcs`, and 2 each in `twilek_m03` and `comm_a_f2`. None of these models has animations. The model node with the number of an animation node has the same name, compared without regard to case, in all 182,490 animation nodes that have such a model node. The other 146 animation nodes lie in 11 door models, such as `dor_lda03`, and are named after door walkmesh nodes such as `DOR_LDA03_DWK`, which the model tree does not hold. In 18,883 nodes of the model trees the node number differs from the name index. The bone map of a skin, by contrast, is indexed by name index (see "Skin header").
 
 The known flag bits are listed below.
 
 | Bit  | Meaning                                                         | Evidence                                                                                                         | Confidence |
 | ---- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x01 | Set on every node                                               | Set on all 107,605 nodes. Its meaning is not known.                                                              | medium     |
+| 0x01 | Set on every node                                               | Set on all 107,605 nodes. Its meaning is not known. Animation nodes have only this bit.                          | medium     |
+| 0x02 | The node has a light header directly after the node             | Set on 5,563 nodes in the four archives. The header decodes into plausible values (see "Light header"). | high |
+| 0x04 | The node has an emitter header directly after the node          | Set on 8,870 nodes in the four archives. The header holds names such as `Fountain` and `Billboard_to_Local_Z` (see "Emitter header"). | high |
+| 0x10 | The node has a reference header directly after the node         | Set on 1,954 nodes in the four archives. The header holds a model name (see "Reference header"). | high |
 | 0x20 | The node has a mesh header directly after the node              | Meshes parse correctly in all 2,445 models.                                                                      | high       |
-| 0x40 | Probably a skinned mesh, that is, one deformed by several bones | Set on 649 nodes in 220 models, always together with 0x20. Most of these models are creatures, such as c_bantha. Its mesh headers carry their own class addresses, and its vertex records are 32 bytes longer (see "Mesh header"). | medium     |
-| 0x100 | A mesh of a second subclass, probably a dangly mesh, which sways with movement | Set on 2,586 nodes, always together with 0x20. Its mesh headers carry their own class addresses. In all four archives 2,619 meshes have it. 2,433 of them are named "branchie" with an optional number and lie in the Kashyyyk rooms `m14aa` to `m14ad`, and the rest include tarps, wires, hair and hoods. The name is not verified. | low        |
+| 0x40 | A skinned mesh, that is, one deformed by several bones | Set on 649 nodes in 220 models, always together with 0x20. Most of these models are creatures, such as c_bantha. Its mesh headers carry their own class addresses, its vertex records are 32 bytes longer, and a skin header follows the mesh header (see "Skin header"). Posed with the decoded bone weights and the animations, the meshes follow their bones. | high |
+| 0x100 | A mesh of a second subclass, probably a dangly mesh, which sways with movement | Set on 2,586 nodes, always together with 0x20. Its mesh headers carry their own class addresses. In all four archives 2,619 meshes have it. 2,433 of them are named "branchie" with an optional number and lie in the Kashyyyk rooms `m14aa` to `m14ad`, and the rest include tarps, wires, hair and hoods. A header with one constraint per vertex and the names `displacement`, `tightness` and `period` of the game executable fit this (see "Dangly mesh header"). | medium |
 | 0x200 | A mesh with an AABB tree, which is a tree of axis-aligned bounding boxes used for collision | Each of its faces stores a row of `surfacemat.2da` as its material, and the materials equal those of the room's walkmesh (see "Face"). | medium     |
 | 0x800 | A lightsaber blade mesh                                         | Set on 64 nodes in `items.bif`, all in the 22 lightsaber models `w_lghtsbr_*`, `w_dblsbr_*` and `w_shortsbr_*`. These meshes have no MDX vertex records and no index list. | medium     |
 
@@ -1114,7 +1188,7 @@ The flags take eight combinations in models.bif. The table below counts the node
 | 0x005 | 8,848  | 0x121 | 2,586  |
 | 0x011 | 1,954  | 0x221 | 1,102  |
 
-Bits 0x02, 0x04 and 0x10 never occur together with 0x20, so these nodes carry no mesh. Bits 0x100 and 0x200 occur only together with 0x20. Bit 0x200 probably marks the walkmesh node of a room model. Each of the 980 room models whose area walkmesh has faces has exactly one node with this bit, and that node's position is stored in the walkmesh header (see "Walkmeshes: BWM"). The names of these nodes vary, and 698 contain "walk", such as `walkmesh_12` and `01awalkmesh`, and the others have generic names such as `Object125`. The other 122 nodes with bit 0x200 are one each in 122 models that have no area walkmesh, such as the swoop race obstacles `m03mg_mgo01` to `m03mg_mgo22` and the rooms `m12ad_01a` to `m12ah_01a`. The meanings of bits 0x02, 0x04 and 0x10 are UNKNOWN. The converter decodes the mesh header of every node with 0x20 and names its kind after bits 0x40, 0x100, 0x200 and 0x800. It does not read the additional data that follows the mesh header of skinned, dangly, AABB and lightsaber meshes, so the layout of that data is UNKNOWN.
+Bits 0x02, 0x04 and 0x10 never occur together with 0x20 or with each other, so the class headers never share a node. Bits 0x100 and 0x200 occur only together with 0x20. Bit 0x200 probably marks the walkmesh node of a room model. Each of the 980 room models whose area walkmesh has faces has exactly one node with this bit, and that node's position is stored in the walkmesh header (see "Walkmeshes: BWM"). The names of these nodes vary, and 698 contain "walk", such as `walkmesh_12` and `01awalkmesh`, and the others have generic names such as `Object125`. The other 122 nodes with bit 0x200 are one each in 122 models that have no area walkmesh, such as the swoop race obstacles `m03mg_mgo01` to `m03mg_mgo22` and the rooms `m12ad_01a` to `m12ah_01a`. The converter decodes the mesh header of every node with 0x20 and names its kind after bits 0x40, 0x100, 0x200 and 0x800. A second header follows the mesh header of skinned, dangly, AABB and lightsaber meshes, and the sections that follow "MDX file" describe these headers. Bits 0x08 and 0x80 do not occur.
 
 ## Mesh header
 
@@ -1218,9 +1292,214 @@ An MDX file has no header. It is an array of vertex records, each built from f32
 | 0x04 | Second texture coordinates, f32[2] | 0x114                  | 8             | 41,554 |
 | 0x80 | Tangent space, probably f32[9]  | 0x120                     | 36            | 4,914  |
 
-In all meshes the components lie in the order position, normal, first and second texture coordinates, tangent space. The record size equals the sum of the component sizes, plus 32 bytes in the 968 skinned meshes. The skinned mesh data that follows the mesh header probably describes these 32 bytes, which may hold four bone weights and four bone indices, but this is not verified. The lightsaber meshes and the meshes without vertices have no components.
+In all meshes the components lie in the order position, normal, first and second texture coordinates, tangent space. The record size equals the sum of the component sizes, plus 32 bytes in the 968 skinned meshes. These 32 bytes hold four f32 bone weights and four f32 bone indices, at the offsets that the skin header gives (see "Skin header"). The lightsaber meshes and the meshes without vertices have no components.
+
+One terminator record follows the records of each mesh. It is as long as a vertex record. Its position holds 10,000,000 three times in plain, dangly and AABB meshes, and 1,000,000 three times in skinned meshes. The rest of it is zero, except that the first bone weight of a skinned terminator is 1. All 76,703 meshes with vertex records have this terminator.
+
+Between the terminator of one mesh and the records of the next lie as many bytes as the end offset of the terminator, modulo 16. This rule holds for all 74,258 pairs of consecutive meshes in the four archives: 25,412 meshes follow directly, 44,588 follow 8 bytes later, 2,015 follow 4 bytes later and 2,243 follow 12 bytes later. The padding bytes are not always zero, so they are probably uninitialized memory. The rule looks like an exporter that pads by the remainder instead of the complement, but this is a guess. With the records, the terminators and this padding, every byte of all MDX resources is accounted for.
 
 The MDX resources of 368 models are empty, for example those of v_polymorf_imp and m12ah_mgt04. These are exactly the 368 models that contain no meshes.
+
+## Skin header
+
+A skinned mesh is deformed by several bones, which are other nodes of the model tree. Its 100-byte skin header follows the mesh header at 0x14C. The statistics cover the 968 skinned meshes of the four archives. The table below lists its fields.
+
+| Offset | Type     | Meaning | Evidence | Confidence |
+| ------ | -------- | ------- | -------- | ---------- |
+| 0x00   | u32[3]   | UNKNOWN array descriptor, always empty | The count is 0 in all 968 skins. | low |
+| 0x0C   | u32      | Offset of the four bone weights within a vertex record | 32 in the 892 meshes with 64-byte records and 68 in the 76 meshes with 100-byte records, which have a tangent space. It always points to the first of the 32 extra bytes. | high |
+| 0x10   | u32      | Offset of the four bone indices within a vertex record | Always 16 more than the weight offset. | high |
+| 0x14   | u32      | Offset of the bone map, an array of f32 | See below. | high |
+| 0x18   | u32      | Number of entries of the bone map | Equals the number of entries of the name table in 967 of 968 skins. In `plc_firixa01` it is 20 for 23 names. | high |
+| 0x1C   | u32[3]   | Array descriptor of the inverse bind rotations, one f32[4] quaternion in w, x, y, z order per bone map entry | See below. | high |
+| 0x28   | u32[3]   | Array descriptor of the inverse bind translations, one f32[3] per bone map entry | See below. | high |
+| 0x34   | u32[3]   | Array descriptor of an UNKNOWN array with one u32 per bone map entry | Of the 58,872 values, 16,191 are 0 and 1,776 are 1 as f32. The others vary without a pattern, and many are tiny or huge as floats, which suggests uninitialized memory. The executable names a property `boneconstantindices`, which may belong here. | low |
+| 0x40   | u16[16]  | Name table index of each of the first 16 local bones | Equals the inverse of the bone map for every local bone below 16 in all 968 skins. Unused entries hold varying values. | high |
+| 0x60   | u32      | UNKNOWN, probably padding | 0 in 292 skins. The other values vary without a pattern. | low |
+
+The bone map has one entry per entry of the name table, and the entry holds the local bone index of the node with that name as an f32, or -1 when the node is no bone of this mesh. The local bones are numbered from 0 without gaps in all 968 skins. A skin has at most 17 local bones, and 21 skins have 17, so the u16[16] list at 0x40 cannot hold every bone. The bone indices of a vertex record are local bone indices.
+
+The stored rotation and translation of a bone are its inverse bind pose: the transform that maps the space of the mesh's node into the space of the bone node in the rest pose, computed from the positions and rotations of the node tree. For 11,234 of the 11,341 bones of the 968 skins, the stored and the computed pose agree within 0.01 radians and 0.001 units. The stored rotations carry rounding of up to about 0.0015 radians. The exceptions are 8 bones each in `pfbcl`, `pfbcm`, `pfbcs` and `p_bastilabb`, whose stored values belong to the neighbouring bone, and all 75 bones of `mainmenu_model`. The converter writes the poses computed from the node tree, so that the rest pose of the glTF file matches its node tree.
+
+In all 386,120 vertices of the skinned meshes, the four weights sum to 1 within 0.001. Every slot with a non-zero weight holds an integer bone index below the number of local bones, and all 927,654 slots with weight 0 hold the index -1. 196,343 vertices use one bone, 151,729 two, 35,167 three and 2,881 four. The game names these values `weights` in its executable.
+
+## Dangly mesh header
+
+A dangly mesh is a mesh whose vertices may swing, such as hair, cloth and branches. Its 28-byte header follows the mesh header at 0x14C. The names come from the property names `constraints`, `displacement`, `tightness` and `period` in the game executable. Which field holds which property is taken from other descriptions of the format and is not tested in the game. The statistics cover the 2,619 dangly meshes of the four archives.
+
+| Offset | Type   | Meaning | Evidence | Confidence |
+| ------ | ------ | ------- | -------- | ---------- |
+| 0x00   | u32[3] | Array descriptor of the constraints, one f32 per vertex | The count equals the vertex count in all 2,619 meshes. Every value lies from 0 to 255. | high |
+| 0x0C   | f32    | Probably the displacement | 0.1 in 2,444 meshes. Values range from 0.025 to 0.253. | low |
+| 0x10   | f32    | Probably the tightness | 0.5 in 2,444 meshes. Values range from 0.1 to 3. | low |
+| 0x14   | f32    | Probably the period | 0.3 in 2,444 meshes. Values range from 0.11 to 8. | low |
+| 0x18   | u32    | Offset of a copy of the vertex positions, f32[3] per vertex | The copy equals the vertex array of the mesh header in all 2,619 meshes. Its purpose is UNKNOWN. | high |
+
+## AABB tree of a mesh
+
+An AABB mesh holds an AABB tree, a binary tree of axis-aligned bounding boxes over its faces. Its 4-byte header follows the mesh header at 0x14C and holds the offset of the root node. The root node lies directly after the header in all 1,102 AABB meshes of the four archives. Each node is 40 bytes, and the table below lists its fields.
+
+| Offset | Type   | Meaning | Evidence | Confidence |
+| ------ | ------ | ------- | -------- | ---------- |
+| 0x00   | f32[6] | Box: minimum x, y, z, then maximum x, y, z | See below. | high |
+| 0x18   | u32    | Offset of the left child, 0 in a leaf | Every node is reached once, and the tree stays inside the file. | high |
+| 0x1C   | u32    | Offset of the right child, 0 in a leaf | As above. | high |
+| 0x20   | i32    | Face index in a leaf, -1 in an inner node | In 1,101 of 1,102 trees each face has exactly one leaf. | high |
+| 0x24   | u32    | Split direction in an inner node, 0 in a leaf | See below. | medium |
+
+The tree has 200,518 leaves and 199,416 inner nodes. A tree over n faces has 2n - 1 nodes in 1,101 of the 1,102 trees. Each box encloses its face or its children exactly in 131 trees, and within 0.001 in another 894. In 75 trees the boxes miss by up to 0.006, which fits boxes rounded to two decimals. In `mgf_ebonhawk` and `m02af_01a` they miss by 1.7 and 0.74. `m02af_01a` is also the exception among the walkmesh trees. The converter counts a tree as consistent when every face has one leaf and every box encloses what lies below it within 0.006. 1,100 of the 1,102 trees are consistent.
+
+The split direction is 1, 2, 4, 8, 16 or 32, as in the walkmesh trees (see "AABB tree" in the walkmesh section), where these values name the axes +x, +y, +z, -x, -y and -z. The inner nodes hold 1 in 68,749, 2 in 70,731, 4 in 24,207, 8 in 12,343, 16 in 13,995 and 32 in 9,391 cases.
+
+The glTF file stores the tree in `extras.aabb` as two accessors over the nodes in depth-first order, left child first. `boxes` holds two f32[3] per node, the minimum and the maximum. `nodes` holds four u32 per node: the indices of the left and the right child in that order, the face index and the split direction, with 0xFFFFFFFF for none.
+
+## Lightsaber header
+
+A lightsaber mesh is the blade of a lightsaber. Its 20-byte header follows the mesh header at 0x14C. The statistics cover the 64 lightsaber meshes of `items.bif`. Each has 176 vertices and 12 faces, and the faces use only the vertices 0 to 33.
+
+| Offset | Type   | Meaning | Evidence | Confidence |
+| ------ | ------ | ------- | -------- | ---------- |
+| 0x00   | u32    | Offset of the vertex positions, f32[3] per vertex | Equal to the vertex array of the mesh header in all 64 meshes. | high |
+| 0x04   | u32    | Offset of the texture coordinates, f32[2] per vertex | Every value lies from 0 to 1. | medium |
+| 0x08   | u32    | Offset of the normals, f32[3] per vertex | Every normal has unit length. | medium |
+| 0x0C   | u32[2] | UNKNOWN | Small values such as 98 and 97, which differ by -8 to 6. They resemble the counters at 0xC8 of the mesh header. | low |
+
+The purpose of the 142 vertices that no face uses is UNKNOWN.
+
+## Light header
+
+A light node holds a 92-byte light header after the node header. The statistics cover the 5,563 lights of the four archives. The names of the seven u32 fields come from the light property names in the game executable, such as `lightpriority`, `ambientonly`, `nDynamicType`, `affectdynamic`, `shadow`, `generateflare` and `fadingLight`. Their order is taken from other descriptions of the format and is not tested in the game.
+
+| Offset | Type   | Meaning | Evidence | Confidence |
+| ------ | ------ | ------- | -------- | ---------- |
+| 0x00   | f32    | Flare radius | 0 in 5,504 lights. 5,000 in 30 lights. | medium |
+| 0x04   | u32[3] | UNKNOWN array descriptor, always empty | The count is 0 in all lights. | low |
+| 0x10   | u32[3] | Array descriptor of the flare sizes, f32 each | See below. | high |
+| 0x1C   | u32[3] | Array descriptor of the flare positions, f32 each | See below. | high |
+| 0x28   | u32[3] | Array descriptor of the flare colour shifts, f32[3] each | See below. | high |
+| 0x34   | u32[3] | Array descriptor of the flare textures, a u32 offset of a NUL-terminated name each | Names such as `fxpa_flare` and `FX_flare08`. | high |
+| 0x40   | u32    | Probably the priority | 1 to 5. | low |
+| 0x44   | u32    | Probably the ambient-only flag | 1 in 173 lights and 0 in the others. | low |
+| 0x48   | u32    | Probably the dynamic type | 2 in 5,373 lights, 1 in 187 and 0 in 3. | low |
+| 0x4C   | u32    | Probably the affect-dynamic flag | 1 in 29 lights and 0 in the others. | low |
+| 0x50   | u32    | Probably the shadow flag | 1 in 3,017 lights and 0 in 2,546. | low |
+| 0x54   | u32    | Probably the generate-flare flag | 0 in all lights, also in the 59 lights that have flares. | low |
+| 0x58   | u32    | Probably the fading flag | 1 in 5,429 lights and 0 in 134. | low |
+
+The four flare arrays have the same length in every light. 5,504 lights have no flares, 48 have one, 8 have two, one has four and two have six. The flare data and names follow the header.
+
+## Emitter header
+
+An emitter node holds a 224-byte emitter header after the node header. An emitter spawns particles. The statistics cover the 8,870 emitters of the four archives. The names come from the emitter property names in the game executable, and their order from other descriptions of the format. The text fields are evidence for the layout, because they hold readable names at exactly these offsets.
+
+| Offset | Type     | Meaning | Evidence | Confidence |
+| ------ | -------- | ------- | -------- | ---------- |
+| 0x00   | f32      | Dead space | 0 in 8,788 emitters. | low |
+| 0x04   | f32      | Blast radius | 0 in 8,862 emitters. | low |
+| 0x08   | f32      | Blast length | 0 in 8,865 emitters. | low |
+| 0x0C   | u32      | Number of branches | 0 in 8,844 emitters and 1 to 5 in the others. | low |
+| 0x10   | f32      | Control point smoothing | 0 in 8,845 emitters. | low |
+| 0x14   | u32      | Grid size in x | 16 in 4,926 emitters. Values are 0, 1, 2, 4, 5, 8 and 16. | medium |
+| 0x18   | u32      | Grid size in y | Values are 0, 1, 2, 4, 5, 8 and 16. | medium |
+| 0x1C   | u32      | Spawn type | 0 in 8,841 emitters and 1 in 29. | low |
+| 0x20   | char[32] | Update method | `Single`, `Fountain`, `Explosion` or `Lightning`. | high |
+| 0x40   | char[32] | Render method | Names such as `Normal`, `Billboard_to_Local_Z`, `Motion_Blur` and `Linked`. | high |
+| 0x60   | char[32] | Blend mode | `Normal`, `Lighten`, `Punch-Through` or `PunchThrough`. | high |
+| 0x80   | char[32] | Texture name | Names such as `fx_Smoke` and `LKA_bird02`. | high |
+| 0xA0   | char[16] | Chunk name | Empty in 8,663 emitters. | medium |
+| 0xB0   | u32      | Two-sided texture flag | 1 in 230 emitters and 0 in the others. | low |
+| 0xB4   | u32      | Loop flag | 1 in 8 emitters and 0 in the others. | low |
+| 0xB8   | u16      | Render order | 0 to 8. | low |
+| 0xBA   | u8       | Frame blending flag | 0 in all emitters. | low |
+| 0xBB   | char[32] | Depth texture name | Empty or `NULL`, except `fx_depth` in one emitter. | medium |
+| 0xDB   | u8       | UNKNOWN, probably padding | The values vary without a pattern. | low |
+| 0xDC   | u32      | Flags | See below. | low |
+
+The flags take 47 distinct values, and the bits 0x2, 0x20 and 0x100 are the most common. Other descriptions of the format name the bits, from 0x1 upwards, `p2p`, `p2p_sel`, `affectedByWind`, `m_isTinted`, `bounce`, `random`, `inherit`, `inheritvel`, `inherit_local`, `splat`, `inherit_part` and `depth_texture`. The executable holds these names, except `random`, in the reverse of this order. The bit meanings are not tested.
+
+## Reference header
+
+A reference node holds a 36-byte reference header after the node header. It attaches another model at the node. The statistics cover the 1,954 references of the four archives.
+
+| Offset | Type     | Meaning | Evidence | Confidence |
+| ------ | -------- | ------- | -------- | ---------- |
+| 0x00   | char[32] | Name of the referenced model | Model names such as `M24_Vine1`, `OR_SmallShrub01` and `fx_ref`. | high |
+| 0x20   | u32      | Probably a reattachable flag | 1 in 36 references and 0 in 1,918. The executable names a property `reattachable`. | low |
+
+## Controllers
+
+A controller is a track of keyframes for one property of a node, such as its position, its orientation or the colour of a light. Each node holds an array of 16-byte controller keys at 0x38 and an array of f32 controller data at 0x44. The table below lists the fields of a controller key.
+
+| Offset | Type  | Meaning | Evidence | Confidence |
+| ------ | ----- | ------- | -------- | ---------- |
+| 0x00   | u32   | Controller type | See below. | high |
+| 0x04   | i16   | UNKNOWN | -1 in every controller of a model tree. In animation trees it is 16 in every position controller, 28 in every orientation controller and -1 in the others. 16 and 28 are the offsets 0x10 and 0x1C of position and rotation in the node header. | low |
+| 0x06   | u16   | Number of keys | See below. | high |
+| 0x08   | u16   | Index of the first key time in the controller data | See below. | high |
+| 0x0A   | u16   | Index of the first value in the controller data | Equals the time index plus the key count in all 1,056,188 controllers. | high |
+| 0x0C   | u8    | Number of columns, with bit 0x10 set for Bezier keys | See below. | high |
+| 0x0D   | u8[3] | UNKNOWN, probably padding | The values vary without a pattern. | low |
+
+A controller with k keys and c columns stores k f32 times and then k rows of c values. A Bezier controller stores three times as many values per row: the c values, an incoming control offset of c values and an outgoing control offset of c values. An orientation controller with two columns stores each key as one packed u32, described below. In every node that has controllers, each value of the data array belongs to exactly one controller. 126 nodes have controller data but no controllers. Their data is unused. Key times increase strictly in all 254,634 animated controllers.
+
+The controllers of a model tree hold the node's static values. Each of them has exactly one key, at time 0, in all 801,554 such controllers. The position and orientation controllers repeat the values of the node header, as the node table states. The orientation controllers of the model trees always have four columns, x, y, z and w, which is a different order from the node header's w, x, y, z.
+
+The meaning of a controller type depends on the class of the node. The names below are the property names of the game executable, and the numbers come from other descriptions of the format. The code that maps them could not be read, because the code section of `swkotor.exe` is encrypted by a copy protection wrapper (it has a `.bind` section) and the names in its data section have no visible references. The value ranges of the files agree with the names, for example colours from 0 to 1, a `spread` of 6.283 (2π) and `lightningSubDiv` values that are whole numbers. The table below lists the types that occur.
+
+| Node class | Types and names |
+| ---------- | --------------- |
+| All nodes  | 8 `position` (3 columns), 20 `orientation` (4 columns, or 2 for packed keys), 36 `scale` (1 column) |
+| Mesh       | 100 `selfillumcolor` (3 columns), 132 `alpha` (1 column) |
+| Light      | 76 `color` (3), 88 `radius` (1), 96 `shadowradius` (1), 100 `verticaldisplacement` (1), 140 `multiplier` (1) |
+| Emitter    | 80 `alphaEnd`, 84 `alphaStart`, 88 `birthrate`, 92 `bounce_co`, 96 `combinetime`, 100 `drag`, 104 `fps`, 108 `frameEnd`, 112 `frameStart`, 116 `grav`, 120 `lifeExp`, 124 `mass`, 128 `p2p_bezier2`, 132 `p2p_bezier3`, 136 `particleRot`, 140 `randvel`, 144 `sizeStart`, 148 `sizeEnd`, 152 `sizeStart_y`, 156 `sizeEnd_y`, 160 `spread`, 164 `threshold`, 168 `velocity`, 172 `xsize`, 176 `ysize`, 180 `blurlength`, 184 `lightningDelay`, 188 `lightningRadius`, 192 `lightningScale`, 196 `lightningSubDiv`, 200 `lightningZigzag`, 216 `alphaMid`, 220 `percentStart`, 224 `percentMid`, 228 `percentEnd`, 232 `sizeMid`, 236 `sizeMid_y`, 240 `m_fRandomBirthRate`, 252 `targetsize`, 256 `numcontrolpts`, 260 `controlptradius`, 264 `controlptdelay`, 268 `tangentspread`, 272 `tangentlength`, 284 `colorMid`, 380 `colorEnd`, 392 `colorStart` (the last three with 3 columns, the others with 1) |
+
+The value range of type 256 does not fit its name `numcontrolpts`, because it holds fractions such as 0.2 and 0.3. The names of the emitter types therefore have low confidence, and those of the other classes medium confidence. A type that a class does not list is written as `controller_<type>`.
+
+A packed orientation is one u32. Bits 0 to 10 hold x and bits 11 to 21 hold y, each mapped from 0..2046 to 1..-1 as 1 - value / 1023. Bits 22 to 31 hold z, mapped as 1 - value / 511. When x² + y² + z² is below 1, w is -sqrt(1 - x² - y² - z²). Otherwise w is 0 and x, y and z are divided by their length. Unpacked this way, the angle between consecutive keys has a median of 2.8° and a 99th percentile of 80°, close to the 3.2° and 64° of the 363,951 keys stored with four columns. With the bit fields swapped as a control, the 90th percentile is 133°, and the first key of a track lies a median 179° from the rest rotation, against 5° with the correct unpacking. 580,545 animation keys are packed.
+
+A Bezier key holds a value, an incoming control offset and an outgoing control offset. The control points are the value plus the offsets. The outgoing offset points towards the next key in 5,868 of 6,243 cases, and the incoming offset towards the previous key in 5,836 of 6,126 cases. Projected onto the step to the neighbouring key, both offsets have a median length of 0.333 of the step, which is where cubic Bezier curves usually place their control points. 1,440 position controllers and 471 controllers of other types are Bezier controllers.
+
+## Animations
+
+An animation is a named set of controllers over time, such as `cwalk` or `cpause1`. The array at 0x58 of the model header lists the offsets of the animation headers. 1,027 models of the four archives hold 6,213 animations. Each animation header is 136 bytes, and its first 0x50 bytes have the layout of the model's geometry header. The table below lists its fields.
+
+| Offset | Type     | Meaning | Evidence | Confidence |
+| ------ | -------- | ------- | -------- | ---------- |
+| 0x00   | u32[2]   | Class addresses 0x004134F0 and 0x0043ECE0 | Identical in all 6,213 animations. | high |
+| 0x08   | char[32] | Animation name | Names such as `cwalk`, `cpause1` and `opening1`. | high |
+| 0x28   | u32      | Offset of the root node of the animation tree | Every animation tree decodes. | high |
+| 0x2C   | u32      | Probably a node count | Equals the node count of the model tree in 4,295 animations, the name count in 896 and the node count of its own tree in 984. It holds other values in 38. | low |
+| 0x30   | u8[28]   | UNKNOWN, always 0 | 0 in all animations. | low |
+| 0x4C   | u8       | Geometry type: 5 for an animation | 5 in all animations. | high |
+| 0x4D   | u8[3]    | UNKNOWN, probably padding | 0 in 4,692 animations. | low |
+| 0x50   | f32      | Length in seconds | The last key time is at most the length in all 254,634 animated controllers, and equals it in 222,196. | high |
+| 0x54   | f32      | Transition time in seconds | 0.25 in 2,975 animations and 0 in 2,716. The executable names a property `transtime`. | medium |
+| 0x58   | char[32] | Name of the animation root node | Equals the name of the model's root node in 6,173 animations. | medium |
+| 0x78   | u32[3]   | Array descriptor of the events, 36 bytes each | See below. | high |
+| 0x84   | u32      | UNKNOWN, always 0 | 0 in all animations. | low |
+
+An event is an f32 time followed by a char[32] name, such as `snd_footstep`, `detonate` or `Hit`. 774 animations hold 2,632 events.
+
+The animation tree is built from the same 80-byte nodes as the model tree. Every animation node has only flag 0x01, a position of 0 and the rotation (1, 0, 0, 0), and no class header. Its controllers animate the node of the model tree with the same node number. The controller types are interpreted by the class of that model node, so an animation node of an emitter holds emitter controllers.
+
+A position key of an animation is an offset from the rest position of the node, not a position. For the 74,497 position tracks of nodes whose rest position is at least 0.05 from the origin, the first key lies closer to the origin than to the rest position in 72,058 cases. For example, the first key of `BTHips` in the bantha walk `cwalk` is (0, 0, 0), while the node rests at (0, -1.1, 1.6). An orientation key replaces the rest rotation. The scale is a single factor, and 348 scale keys are 0, which probably hides a part.
+
+Most models with a supermodel hold no animations of their own and probably use those of their supermodel. For example, the player body `pfbam` has no animations, and its supermodel `S_Female03` has 64. The converter writes only the animations that a model holds itself.
+
+## Conversion of animations
+
+Each MDL animation becomes a glTF animation of the same name, in stored order. An animation node that has no node of the same number and name in the model tree is skipped. This affects the 146 door walkmesh nodes described in "Node". The table below lists how the controllers become glTF data. The times are the stored key times in all cases.
+
+| Controller | glTF data |
+| ---------- | --------- |
+| Position | A `translation` channel whose values are the rest position plus the stored offsets. A Bezier position with more than one key becomes a `CUBICSPLINE` channel. Its incoming tangent is -3 times the incoming offset divided by the interval to the previous key, and its outgoing tangent 3 times the outgoing offset divided by the interval to the next key. Other positions are `LINEAR`. |
+| Orientation | A `LINEAR` `rotation` channel of the stored or unpacked quaternions, divided by their length. |
+| Scale | A `LINEAR` `scale` channel with the stored factor on all three axes. |
+| Others | An entry of `extras.tracks` of the animation, with the glTF node, the controller name, `LINEAR` or `BEZIER`, the width of a key in floats, and the accessors of the times and of the stored values. glTF has no channel for such properties. |
+
+The extras of each glTF animation also hold `length`, `transition`, `root` and `events`. Three models, `v_mngas`, `m41ad_c01_char04` and `m41ad_c01_char18`, contain two animation nodes for the same model node. Their 28 later tracks are dropped, and the first is kept. Which one the game uses is UNKNOWN. glTF requires at least one channel, so the 903 animations in 514 models that have no position, orientation or scale controller get one constant `translation` channel on the model's root node, which holds the rest position at time 0. Their `extras.constant_channel` is true. The conversion writes 248,464 channels and 6,919 other tracks, with 1,265,983 keys.
+
+Frames of the animations of `c_bantha`, `c_drdassassin` and `c_drdprobe` were drawn with a scratch renderer that reads only the glTF file and applies the skins. The poses look plausible: legs step in the walks, the bantha lowers its head when knocked down, and the skinned meshes follow their bones. This is a visual check only. In the death animation `cdie` of `c_drdassassin`, the node `Box01`, which holds the body, moves 474 units away after 0.3 seconds. This is the stored data, and the game probably hides the body this way.
 
 ## Walkmeshes in models.bif
 
@@ -1746,7 +2025,7 @@ All new string numbers, 49,138, 49,142 and 49,143, lie within the 49,265 entries
 
 Both copies pass the model converter. They have the same 7 nodes, 5 meshes, 1,006 vertices and 251 faces, and the same texture names. In the two glTF files, the positions, normals, texture coordinates, face indices and face materials are identical. The adjacent faces differ in the four meshes `plane337` to `plane340`, in 189 bytes. The node `Dummy28` holds the rotation (0.7071055, 0.7071081, 0, 0) in w, x, y, z order in the patch copy and (-0.7071071, -0.7071064, 0, 0) in the `items.bif` copy. A quaternion and its negation describe the same rotation, so the two differ by about 0.000002. All other node positions and rotations are identical.
 
-Most differing bytes lie in unused bytes or in regions that the MDL section does not decode. For example, the model name at 0x08 of the model header is "w_Lghtsbr_008" followed by a NUL byte. In the rest of the 32-byte field, the bytes from 0x18 to 0x27 are not all zero in the `items.bif` copy, whereas the patch copy holds zeros from the NUL byte to the end of the field. In 177 of the 423 differing 4-byte words of the model data, the patch copy holds 0 where the `items.bif` copy holds another value. This suggests that the patch copy was written by a tool that clears unused memory, but the purpose of the other changes is UNKNOWN. The `items.bif` copy is converted to `extracted/data/items/w_lghtsbr_008.gltf`.
+Most differing bytes lie in unused bytes or in regions that the MDL section did not decode when this comparison was made. The comparison was not repeated after the controllers, animations and class headers were decoded. For example, the model name at 0x08 of the model header is "w_Lghtsbr_008" followed by a NUL byte. In the rest of the 32-byte field, the bytes from 0x18 to 0x27 are not all zero in the `items.bif` copy, whereas the patch copy holds zeros from the NUL byte to the end of the field. In 177 of the 423 differing 4-byte words of the model data, the patch copy holds 0 where the `items.bif` copy holds another value. This suggests that the patch copy was written by a tool that clears unused memory, but the purpose of the other changes is UNKNOWN. The `items.bif` copy is converted to `extracted/data/items/w_lghtsbr_008.gltf`.
 
 ## Conversion and verification
 
@@ -1758,7 +2037,7 @@ The `patch` stage of `cmd/verify` checks the output with independent tools. All 
 - Each of the 9 TXI files equals the texture's trailer.
 - Go's encoding/csv reader reads each of the 4 CSV files, and the values build again into the source table byte for byte.
 - jq parses each of the 7 JSON files.
-- The glTF validator reports no errors, assimp loads the glTF file with the face count that its index accessors give, jq reads mesh header extras that equal the source, and the binary buffer holds the source positions, face indices and face fields.
+- The glTF validator reports no errors, assimp loads the glTF file with the face count that its index accessors give, jq reads node extras that equal the source, and the binary buffer holds the source positions, face indices and face fields. The animation and skin reports pass as for the BIF archives.
 
 A test with a deliberately wrong PNG file and a changed TXI file made the pixel check and the TXI check fail, as expected.
 

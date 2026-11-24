@@ -22,7 +22,6 @@ const fileHeaderSize = 12
 const (
 	nodeHeaderSize    = 80
 	nodeFlagMesh      = 0x20
-	nameLength        = 64
 	textureNameLength = 32
 )
 
@@ -101,8 +100,46 @@ var vertexComponents = []struct {
 	{0x80, 0x120, "tangent_space", 36},
 }
 
-// The vertex records of a skinned mesh carry 32 more bytes, which the skin header describes.
-const skinVertexExtra = 32
+// The vertex records of a skinned mesh carry 32 more bytes, which the skin header describes: four f32 bone
+// weights and four f32 local bone indices. The weights of a vertex sum to 1 within weightTolerance.
+const (
+	mdxAlignment    = 16
+	plainTerminator = 1e7
+	skinTerminator  = 1e6
+	skinVertexExtra = 32
+	skinWeightsSize = 16
+	skinSlots       = 4
+	weightTolerance = 1e-3
+)
+
+// The model header is 0xC4 bytes. Its first two words are constant, and its geometry type is 2.
+const (
+	modelHeaderSize = 0xc4
+	modelType       = 2
+	modelNameLength = 32
+)
+
+var modelClassAddresses = [2]int{0x00413670, 0x00405520}
+
+// Fields of the node header after the flags, the node number and the name index.
+const (
+	nodeOwnerField  = 0x08
+	nodeParentField = 0x0c
+	nodeChildArray  = 0x2c
+)
+
+// A stored inverse bind pose agrees with the computed one when the rotations differ by less than
+// bindAngleTolerance radians and the translations by less than bindDistanceTolerance.
+const (
+	bindAngleTolerance    = 0.01
+	bindDistanceTolerance = 1e-3
+)
+
+// The glTF node that carries a skinned mesh is named after the mesh's node with this suffix.
+const skinNodeSuffix = "_skin"
+
+// An inverse bind matrix is a 4x4 matrix of f32.
+const matrixSize = 16
 
 // Deeper node trees are treated as corrupt.
 const maxNodeDepth = 200
@@ -166,6 +203,46 @@ type MdlStats struct {
 
 	// HdrNodes is the node count field of the header, as text: "?" when it lies outside the file.
 	HdrNodes string
+
+	// Animations, AnimationNodes, Keys, Channels and Tracks count the animations, the nodes of their trees,
+	// the keys of the controllers that animate nodes of the model, the glTF channels and the other tracks.
+	// UnmatchedAnimationNodes counts animation nodes whose name is no node of the model tree, and
+	// ConstantChannels the animations that get a constant channel. DuplicateTracks counts the tracks that are
+	// dropped because an earlier animation node animates the same property of the same node.
+	Animations              int
+	AnimationNodes          int
+	Keys                    int
+	Channels                int
+	Tracks                  int
+	UnmatchedAnimationNodes int
+	ConstantChannels        int
+	DuplicateTracks         int
+
+	// ControllersMatching counts the position and orientation controllers of the model tree whose single
+	// key equals the position or rotation in the node header.
+	ControllersMatching int
+	ControllersChecked  int
+
+	// Skins counts the glTF skins and Bones their joints. BindMatching counts the stored inverse bind poses
+	// that agree with the ones computed from the node tree.
+	Skins        int
+	Bones        int
+	BindMatching int
+	BindChecked  int
+	WeightsBad   int
+
+	// AabbMatching counts the AABB trees whose leaves hold every face once and whose boxes enclose what lies
+	// below them.
+	AabbMatching int
+	AabbChecked  int
+
+	// Unclaimed counts the bytes of the model data that no decoded structure covers, and Shared the bytes
+	// that two structures cover. MdxPadding counts the MDX bytes that align the records of a mesh, and
+	// MdxUnclaimed the other MDX bytes outside every vertex record.
+	Unclaimed    int
+	Shared       int
+	MdxPadding   int
+	MdxUnclaimed int
 }
 
 // MdlUvScroll holds the texture animation of a mesh whose scroll flag is set.
@@ -198,13 +275,11 @@ type MdlMesh struct {
 	VertexComponents []string     `json:"vertex_components"`
 }
 
-// MdlNodeExtras holds the extras of a mesh node in the glTF file: the decoded mesh header and, for a
-// rendered mesh with faces, the accessors of the face materials (u32 per face) and of the adjacent faces
-// (u16[3] per face, 0xFFFF for none).
-type MdlNodeExtras struct {
-	Mesh          MdlMesh `json:"mesh"`
-	FaceMaterials *int    `json:"face_materials,omitempty"`
-	FaceAdjacent  *int    `json:"face_adjacent,omitempty"`
+// MdlModel holds the decoded fields of the model header, which become the extras of the glTF scene.
+type MdlModel struct {
+	Classification int     `json:"classification"`
+	Supermodel     string  `json:"supermodel"`
+	AnimationScale float32 `json:"animation_scale"`
 }
 
 type MdlResult struct {
@@ -215,72 +290,168 @@ type MdlResult struct {
 	Errors   []string
 }
 
+// mdlReader reads the model data of an MDL file, or an MDX file. It collects the errors of reads outside the
+// data, and it counts for each byte how many structures claim it, so that bytes that no structure explains,
+// and bytes that two structures share, can be counted.
+type mdlReader struct {
+	data   []byte
+	errors []string
+	claims []uint8
+}
+
+func newMdlReader(data []byte) *mdlReader {
+	return &mdlReader{data: data, claims: make([]uint8, len(data))}
+}
+
+func (r *mdlReader) problem(text string) {
+	r.errors = append(r.errors, text)
+}
+
+func (r *mdlReader) inBounds(offset, count int, what string) bool {
+	if offset < 0 || count < 0 || offset+count > len(r.data) {
+		r.problem(fmt.Sprintf("%s out of bounds (%d+%d>%d)", what, offset, count, len(r.data)))
+		return false
+	}
+	return true
+}
+
+func (r *mdlReader) u32(offset int) (int, bool) {
+	if !r.inBounds(offset, 4, "u32") {
+		return 0, false
+	}
+	return int(binary.LittleEndian.Uint32(r.data[offset:])), true
+}
+
+func (r *mdlReader) u16(offset int) (int, bool) {
+	if !r.inBounds(offset, 2, "u16") {
+		return 0, false
+	}
+	return int(binary.LittleEndian.Uint16(r.data[offset:])), true
+}
+
+func (r *mdlReader) u8(offset int) (int, bool) {
+	if !r.inBounds(offset, 1, "u8") {
+		return 0, false
+	}
+	return int(r.data[offset]), true
+}
+
+func (r *mdlReader) f32(offset, count int) ([]float64, bool) {
+	if !r.inBounds(offset, 4*count, "f32") {
+		return nil, false
+	}
+	values := make([]float64, count)
+	for i := range values {
+		values[i] = float64(math.Float32frombits(binary.LittleEndian.Uint32(r.data[offset+4*i:])))
+	}
+	return values, true
+}
+
+// triple reads an f32[3], or zeros when it lies outside the data.
+func (r *mdlReader) triple(offset int) [3]float32 {
+	values, ok := r.f32(offset, 3)
+	if !ok {
+		return [3]float32{}
+	}
+	return [3]float32{float32(values[0]), float32(values[1]), float32(values[2])}
+}
+
+func (r *mdlReader) single(offset int) float32 {
+	values, ok := r.f32(offset, 1)
+	if !ok {
+		return 0
+	}
+	return float32(values[0])
+}
+
+// text reads a NUL-terminated string from a field of count bytes.
+func (r *mdlReader) text(offset, count int) string {
+	return CString(Slice(r.data, offset, offset+count))
+}
+
+// claim marks count bytes at offset as part of a structure.
+func (r *mdlReader) claim(offset, count int, what string) {
+	if !r.inBounds(offset, count, what) {
+		return
+	}
+	for i := offset; i < offset+count; i++ {
+		r.claims[i] = min(r.claims[i], math.MaxUint8-1) + 1
+	}
+}
+
+// claimString marks a NUL-terminated string at offset, with its NUL byte, and returns it.
+func (r *mdlReader) claimString(offset int, what string) string {
+	if !r.inBounds(offset, 1, what) {
+		return ""
+	}
+	end := offset
+	for end < len(r.data) && r.data[end] != 0 {
+		end++
+	}
+	r.claim(offset, min(end+1, len(r.data))-offset, what)
+	return string(r.data[offset:end])
+}
+
+// array reads the array descriptor at offset: the offset of the array, its count and its capacity. The
+// count must equal the capacity. The array of count elements of elementSize bytes is claimed.
+func (r *mdlReader) array(offset, elementSize int, what string) (int, int) {
+	start, _ := r.u32(offset)
+	count, _ := r.u32(offset + 4)
+	capacity, _ := r.u32(offset + 8)
+	if count != capacity {
+		r.problem(fmt.Sprintf("%s has count %d and capacity %d", what, count, capacity))
+	}
+	if count > 0 {
+		r.claim(start, elementSize*count, what)
+	}
+	return start, count
+}
+
+// unclaimed returns the number of bytes that no structure claims and the number that more than one claims.
+func (r *mdlReader) unclaimed() (int, int) {
+	free, shared := 0, 0
+	for _, claims := range r.claims {
+		if claims == 0 {
+			free++
+		}
+		if claims > 1 {
+			shared++
+		}
+	}
+	return free, shared
+}
+
 // ConvertMdl converts a model to the JSON text of a glTF file, whose binary buffer is stored at binUri, and
 // that buffer. It also returns its statistics, its texture names and its errors. The label names the scene.
 // texturePath gives the image URI of a texture name, relative to the glTF file, or "" when the texture is not
 // known; it may be nil. Every node of the tree becomes a glTF node in depth-first order, with its position
 // and rotation relative to its parent. Meshes whose render byte is 0 get no geometry, because the game does
-// not appear to draw them, but their headers are decoded.
+// not appear to draw them, but their headers are decoded. The model's animations become glTF animations, and
+// its skinned meshes glTF skins.
 func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) string) MdlResult {
-	data := mdl[min(fileHeaderSize, len(mdl)):]
-	length := len(data)
-	var errors []string
+	reader := newMdlReader(mdl[min(fileHeaderSize, len(mdl)):])
+	mdxReader := newMdlReader(mdx)
 	var stats MdlStats
 
-	inBounds := func(offset, count int, what string) bool {
-		if offset < 0 || offset+count > length {
-			errors = append(errors, fmt.Sprintf("%s out of bounds (%d+%d>%d)", what, offset, count, length))
-			return false
-		}
-		return true
-	}
-	u32 := func(offset int) (int, bool) {
-		if !inBounds(offset, 4, "u32") {
-			return 0, false
-		}
-		return int(binary.LittleEndian.Uint32(data[offset:])), true
-	}
-	u16 := func(offset int) (int, bool) {
-		if !inBounds(offset, 2, "u16") {
-			return 0, false
-		}
-		return int(binary.LittleEndian.Uint16(data[offset:])), true
-	}
-	u8 := func(offset int) (int, bool) {
-		if !inBounds(offset, 1, "u8") {
-			return 0, false
-		}
-		return int(data[offset]), true
-	}
-	f32 := func(offset, count int) ([]float64, bool) {
-		if !inBounds(offset, 4*count, "f32") {
-			return nil, false
-		}
-		values := make([]float64, count)
-		for i := range values {
-			values[i] = float64(math.Float32frombits(binary.LittleEndian.Uint32(data[offset+4*i:])))
-		}
-		return values, true
-	}
-	triple := func(offset int) [3]float32 {
-		values, ok := f32(offset, 3)
-		if !ok {
-			return [3]float32{}
-		}
-		return [3]float32{float32(values[0]), float32(values[1]), float32(values[2])}
-	}
-	single := func(offset int) float32 {
-		values, ok := f32(offset, 1)
-		if !ok {
-			return 0
-		}
-		return float32(values[0])
-	}
+	inBounds := reader.inBounds
+	u32 := reader.u32
+	u16 := reader.u16
+	u8 := reader.u8
+	f32 := reader.f32
+	triple := reader.triple
+	single := reader.single
+	readString := reader.text
 	mdxFloat := func(offset int) float64 {
 		return float64(math.Float32frombits(binary.LittleEndian.Uint32(mdx[offset:])))
 	}
-	readString := func(offset, count int) string {
-		return CString(Slice(data, offset, offset+count))
+
+	// The model header. Its first two words are constant, and its geometry type at 0x4C is 2.
+	reader.claim(0, modelHeaderSize, "model header")
+	address0, _ := u32(0)
+	address1, _ := u32(4)
+	geometryType, _ := u8(0x4c)
+	if [2]int{address0, address1} != modelClassAddresses || geometryType != modelType {
+		reader.problem(fmt.Sprintf("model header starts with %#x %#x and has type %d", address0, address1, geometryType))
 	}
 
 	root, _ := u32(0x28)
@@ -289,26 +460,44 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 		stats.HdrNodes = strconv.Itoa(hdrNodes)
 	}
 
-	nameTableOffset, _ := u32(0xb8)
-	nameCount, _ := u32(0xc0)
+	nameTableOffset, nameCount := reader.array(0xb8, 4, "name table")
 	names := make([]string, 0, nameCount)
 	for i := range nameCount {
-		nameOffset, ok := u32(nameTableOffset + 4*i)
-		name := ""
-		if ok {
-			name = readString(nameOffset, nameLength)
-		}
-		names = append(names, name)
+		nameOffset, _ := u32(nameTableOffset + 4*i)
+		names = append(names, reader.claimString(nameOffset, "node name"))
 	}
 
 	doc := newGltf(label)
+	classification, _ := u8(0x50)
+	doc.Scenes[0].Extras = MdlModel{
+		Classification: classification,
+		Supermodel:     readString(0x88, modelNameLength),
+		AnimationScale: single(0x84),
+	}
 	materials := map[string]int{}
 	textures := map[string]bool{}
 	seen := map[int]bool{}
 
-	mesh := func(header int, name string, flags int) (extras *MdlNodeExtras, meshIndex *int) {
+	// targets maps each node number to the nodes of the model tree with that number, and namedNodes each name
+	// table index to the first glTF node with that name. locals and parents hold the transform
+	// of each glTF node relative to its parent, and the parent's index. glTF node 0 turns Z-up into Y-up and is
+	// the identity in model space.
+	targets := map[int][]mdlTarget{}
+	namedNodes := map[int]int{}
+	locals := []mdlTransform{identityTransform}
+	parents := []int{-1}
+	type pendingSkin struct {
+		node   int
+		mesh   int
+		skin   mdlSkin
+		name   string
+		extras *MdlNodeExtras
+	}
+	var skins []pendingSkin
+
+	mesh := func(header int, name string, flags int, node int, extras *MdlNodeExtras) *int {
 		problem := func(text string) {
-			errors = append(errors, text+" in "+name)
+			reader.problem(text + " in " + name)
 		}
 
 		kind := "trimesh"
@@ -324,23 +513,19 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 			kind = "lightsaber"
 		}
 
+		reader.claim(header, meshHeaderSize, "mesh header")
 		address0, _ := u32(header)
 		address1, _ := u32(header + 4)
 		if [2]int{address0, address1} != meshClassAddresses[class] {
 			problem(fmt.Sprintf("class addresses %#x %#x for a %s mesh", address0, address1, kind))
 		}
 
-		// Each array descriptor is an offset, a count and a capacity. The count equals the capacity.
-		for _, array := range []int{meshFaceArray, meshIndexCounts, meshIndexOffsets, meshCounters} {
-			count, _ := u32(array + header + 4)
-			capacity, _ := u32(array + header + 8)
-			if count != capacity {
-				problem(fmt.Sprintf("array at %#x has count %d and capacity %d", array, count, capacity))
-			}
-		}
+		// Each array descriptor is an offset, a count and a capacity, and the count equals the capacity.
+		faceOffset, faceCount := reader.array(header+meshFaceArray, faceSize, "faces")
+		indexCounts, indexLists := reader.array(header+meshIndexCounts, indexArrayEntrySize, "index counts")
+		indexOffsets, _ := reader.array(header+meshIndexOffsets, indexArrayEntrySize, "index offsets")
+		reader.array(header+meshCounters, indexArrayEntrySize, "counters")
 
-		faceOffset, _ := u32(header + meshFaceArray)
-		faceCount, _ := u32(header + meshFaceArray + 4)
 		texture := readString(header+meshTexture, textureNameLength)
 		stride, _ := u32(header + meshVertexStride)
 		vertexFlags, _ := u32(header + meshVertexFlags)
@@ -349,7 +534,7 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 		mdxOffset, _ := u32(header + meshMdxOffset)
 		vertexOffset, ok := u32(header + meshVertexOffset)
 		if !ok {
-			return nil, nil
+			return nil
 		}
 		render, _ := u8(header + meshRender)
 		lightmapped, _ := u8(header + meshLightmapped)
@@ -426,12 +611,13 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 				JitterSpeed: single(header + meshUvScroll + 12),
 			}
 		}
-		extras = &MdlNodeExtras{Mesh: decoded}
+		extras.Mesh = &decoded
 
 		if !inBounds(faceOffset, faceSize*faceCount, "faces "+name) ||
 			!inBounds(vertexOffset, vertexSize*vertexCount, "verts "+name) {
-			return
+			return nil
 		}
+		reader.claim(vertexOffset, vertexSize*vertexCount, "vertices")
 
 		verts := make([]vec3, 0, vertexCount)
 		for i := range vertexCount {
@@ -476,6 +662,7 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 			adjacent [3]int
 		}
 		faces := make([]face, 0, faceCount)
+		faceCorners := make([][3]int, 0, faceCount)
 		for i := range faceCount {
 			entry := faceOffset + faceSize*i
 			var current face
@@ -490,7 +677,7 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 			}
 			if !valid {
 				problem(fmt.Sprintf("face index >= %d", vertexCount))
-				return
+				return nil
 			}
 
 			current.normal, _ = f32(entry, 3)
@@ -498,19 +685,18 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 			current.distance = distance[0]
 			current.material, _ = u32(entry + faceMaterialOffset)
 			faces = append(faces, current)
+			faceCorners = append(faceCorners, current.corners)
 		}
 
 		// The index list repeats the vertex indices of the faces, three per face. The 79 meshes without an
 		// index list are lightsaber meshes and meshes without vertices.
-		indexLists, _ := u32(header + meshIndexCounts + 4)
 		if indexLists == 1 {
-			countOffset, _ := u32(header + meshIndexCounts)
-			listPointer, _ := u32(header + meshIndexOffsets)
-			indexCount, _ := u32(countOffset)
-			listOffset, _ := u32(listPointer)
+			indexCount, _ := u32(indexCounts)
+			listOffset, _ := u32(indexOffsets)
 			if indexCount != cornersPerFace*faceCount {
 				problem(fmt.Sprintf("index count %d for %d faces", indexCount, faceCount))
 			} else if inBounds(listOffset, faceIndexSize*indexCount, "index list "+name) {
+				reader.claim(listOffset, faceIndexSize*indexCount, "index list")
 				for i, current := range faces {
 					for corner := range cornersPerFace {
 						index, _ := u16(listOffset + faceIndexSize*(cornersPerFace*i+corner))
@@ -521,9 +707,49 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 					}
 				}
 			}
-			// The counter is read only to check that its offset lies inside the file.
-			counterOffset, _ := u32(header + meshCounters)
-			u32(counterOffset)
+		}
+
+		// The header of the mesh subclass follows the mesh header.
+		subclass := header + meshHeaderSize
+		var skin mdlSkin
+		var saberUvs [][2]float64
+		var saberNormals []vec3
+		switch kind {
+		case "skin":
+			skin = readSkin(reader, subclass, name)
+			if skin.weightOffset != recordSize-skinVertexExtra || skin.indexOffset != skin.weightOffset+skinWeightsSize {
+				problem(fmt.Sprintf("bone weights at %d and bone indices at %d in a %d-byte record", skin.weightOffset, skin.indexOffset, recordSize))
+			}
+		case "dangly":
+			var constraints []float32
+			extras.Dangly, constraints = readDangly(reader, subclass, verts, name)
+			if len(constraints) > 0 {
+				accessor := gltfFloats(doc, constraints, 1, false, gltfNoTarget)
+				extras.Dangly.Constraints = &accessor
+			}
+		case "aabb":
+			tree, consistent := readAabb(reader, subclass, verts, faceCorners, name)
+			stats.AabbChecked++
+			if consistent {
+				stats.AabbMatching++
+			}
+			if len(tree) > 0 {
+				var boxes []float32
+				var links []byte
+				for _, node := range tree {
+					boxes = append(boxes, node.low[:]...)
+					boxes = append(boxes, node.high[:]...)
+					for _, value := range []int{node.left, node.right, node.face, node.plane} {
+						links = binary.LittleEndian.AppendUint32(links, uint32(value))
+					}
+				}
+				extras.Aabb = &MdlAabb{
+					Boxes: gltfFloats(doc, boxes, 3, false, gltfNoTarget),
+					Nodes: gltfAccessorAt(doc, gltfView(doc, links, gltfNoTarget), 0, GltfUnsignedInt, len(tree), "VEC4"),
+				}
+			}
+		case "lightsaber":
+			saberUvs, saberNormals = readLightsaber(reader, subclass, verts, name)
 		}
 
 		// The surface area is the sum of the face areas in plain and AABB meshes, and 0 in skinned, dangly and
@@ -601,21 +827,39 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 			problem("mdx range")
 			hasMdx = false
 		}
+		if hasMdx {
+			mdxReader.claim(mdxOffset, stride*vertexCount, "vertex records")
+
+			// One terminator record follows the records of each mesh. Its position holds 1,000,000 three
+			// times in skinned meshes and 10,000,000 three times in the others.
+			terminator := mdxOffset + stride*vertexCount
+			marker := float64(plainTerminator)
+			if kind == "skin" {
+				marker = skinTerminator
+			}
+			if terminator+stride > len(mdx) || mdxFloat(terminator) != marker || mdxFloat(terminator+4) != marker ||
+				mdxFloat(terminator+8) != marker {
+				problem("no terminator record")
+			} else {
+				mdxReader.claim(terminator, stride, "terminator record")
+			}
+		}
 		if render == 0 {
 			stats.Hidden++
-			return extras, nil
+			return nil
 		}
 
 		stats.Meshes++
 		stats.Verts += vertexCount
 		stats.Faces += faceCount
 		if faceCount == 0 {
-			return extras, nil
+			return nil
 		}
 
 		// The positions come from the MDL and must match their MDX copies. The normals and texture
-		// coordinates come from the MDX. glTF puts v = 0 at the top of an image and the game at the bottom
-		// (see "Pixel data layout" in README.md), so v becomes 1 - v.
+		// coordinates come from the MDX, or for a lightsaber mesh from the arrays of its header. glTF puts
+		// v = 0 at the top of an image and the game at the bottom (see "Pixel data layout" in README.md), so
+		// v becomes 1 - v.
 		positionOffset, hasPosition := componentOffsets["position"]
 		normalOffset, normalPresent := componentOffsets["normal"]
 		hasNormal := normalPresent && hasMdx
@@ -669,19 +913,78 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 		if normalPresent && hasMdx && !hasNormal {
 			stats.NormalsOmitted++
 		}
+		if saberUvs != nil {
+			hasNormal = true
+			for i, uv := range saberUvs {
+				normal := saberNormals[i]
+				hasNormal = hasNormal && math.Abs(length(normal)-1) < unitTolerance
+				normals = append(normals, float32(normal[0]), float32(normal[1]), float32(normal[2]))
+				uvSetsWritten["uv1"] = append(uvSetsWritten["uv1"], float32(uv[0]), float32(1-uv[1]))
+			}
+		}
 
-		attributes := map[string]int{"POSITION": gltfFloats(doc, positions, 3, true)}
+		attributes := map[string]int{"POSITION": gltfFloats(doc, positions, 3, true, gltfArrayBuffer)}
 		if hasNormal {
-			attributes["NORMAL"] = gltfFloats(doc, normals, 3, false)
+			attributes["NORMAL"] = gltfFloats(doc, normals, 3, false, gltfArrayBuffer)
 		}
 		// glTF numbers texture coordinate sets from 0 without gaps, so a mesh with only the second set
 		// writes it as TEXCOORD_0.
 		uvSet := 0
 		for _, uv := range []string{"uv1", "uv2"} {
 			if values, present := uvSetsWritten[uv]; present {
-				attributes[fmt.Sprintf("TEXCOORD_%d", uvSet)] = gltfFloats(doc, values, 2, false)
+				attributes[fmt.Sprintf("TEXCOORD_%d", uvSet)] = gltfFloats(doc, values, 2, false, gltfArrayBuffer)
 				uvSet++
 			}
+		}
+
+		// The 32 extra bytes of a skinned vertex record hold four f32 bone weights and four f32 local bone
+		// indices. An unused slot has weight 0 and index -1, and becomes joint 0. The stored weights sum to 1
+		// only within about 1e-6, and glTF requires a closer sum, so they are divided by their sum and the
+		// largest becomes 1 minus the others.
+		skinned := kind == "skin" && hasMdx && len(skin.bones) > 0
+		if skinned {
+			var joints []byte
+			weights := make([]float32, 0, skinSlots*vertexCount)
+			for i := range vertexCount {
+				record := mdxOffset + stride*i
+				var slots [skinSlots]float64
+				sum := 0.0
+				largest := 0
+				for slot := range skinSlots {
+					weight := mdxFloat(record + skin.weightOffset + 4*slot)
+					bone := mdxFloat(record + skin.indexOffset + 4*slot)
+					joint := 0
+					switch {
+					case weight == 0 && bone == -1:
+					case weight != 0 && bone == math.Trunc(bone) && bone >= 0 && int(bone) < len(skin.bones):
+						joint = int(bone)
+					default:
+						stats.WeightsBad++
+					}
+					slots[slot] = weight
+					sum += weight
+					if weight > slots[largest] {
+						largest = slot
+					}
+					joints = binary.LittleEndian.AppendUint16(joints, uint16(joint))
+				}
+				if math.Abs(sum-1) > weightTolerance {
+					stats.WeightsBad++
+				}
+
+				var normalized [skinSlots]float32
+				others := 0.0
+				for slot, weight := range slots {
+					if slot != largest {
+						normalized[slot] = float32(weight / sum)
+						others += float64(normalized[slot])
+					}
+				}
+				normalized[largest] = float32(1 - others)
+				weights = append(weights, normalized[:]...)
+			}
+			attributes["JOINTS_0"] = gltfAccessorAt(doc, gltfView(doc, joints, gltfArrayBuffer), 0, GltfUnsignedShort, vertexCount, "VEC4")
+			attributes["WEIGHTS_0"] = gltfFloats(doc, weights, skinSlots, false, gltfArrayBuffer)
 		}
 
 		indices := make([]int, 0, cornersPerFace*faceCount)
@@ -718,38 +1021,51 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 			textures[material] = true
 		}
 
-		materialAccessor := gltfAccessorAt(doc, gltfView(doc, faceMaterials, 0), 0, GltfUnsignedInt, faceCount, "SCALAR")
-		adjacentAccessor := gltfAccessorAt(doc, gltfView(doc, faceAdjacent, 0), 0, GltfUnsignedShort, faceCount, "VEC3")
+		materialAccessor := gltfAccessorAt(doc, gltfView(doc, faceMaterials, gltfNoTarget), 0, GltfUnsignedInt, faceCount, "SCALAR")
+		adjacentAccessor := gltfAccessorAt(doc, gltfView(doc, faceAdjacent, gltfNoTarget), 0, GltfUnsignedShort, faceCount, "VEC3")
 		extras.FaceMaterials = &materialAccessor
 		extras.FaceAdjacent = &adjacentAccessor
 
 		doc.Meshes = append(doc.Meshes, gltfMesh{Name: name, Primitives: []gltfPrimitive{primitive}})
 		index := len(doc.Meshes) - 1
-		return extras, &index
+		if skinned {
+			skins = append(skins, pendingSkin{node: node, mesh: index, skin: skin, name: name, extras: extras})
+		}
+		return &index
 	}
 
-	var node func(offset int, depth int) int
-	node = func(offset int, depth int) int {
+	// Each node points at the model header (offset 0) and at its parent node. The position and orientation
+	// controllers of a node repeat its header values, and its other controllers hold static values.
+	var node func(offset, parentOffset, parentNode, depth int) int
+	node = func(offset, parentOffset, parentNode, depth int) int {
 		if seen[offset] {
-			errors = append(errors, fmt.Sprintf("node loop at %d", offset))
+			reader.problem(fmt.Sprintf("node loop at %d", offset))
 			return -1
 		}
 		if depth > maxNodeDepth {
-			errors = append(errors, "depth")
+			reader.problem("depth")
 			return -1
 		}
 
 		seen[offset] = true
 		stats.Nodes++
+		reader.claim(offset, nodeHeaderSize, "node")
 
 		flags, _ := u16(offset)
+		number, _ := u16(offset + 2)
 		nameIndex, _ := u16(offset + 4)
+		owner, _ := u32(offset + nodeOwnerField)
+		parent, _ := u32(offset + nodeParentField)
 		pos, posOk := f32(offset+0x10, 3)
 		rotation, rotationOk := f32(offset+0x1c, 4)
-		childOffset, _ := u32(offset + 0x2c)
-		childCount, _ := u32(offset + 0x30)
 		if !posOk || !rotationOk {
 			return -1
+		}
+		if owner != 0 || parent != parentOffset {
+			reader.problem(fmt.Sprintf("node at %d names the model at %d and the parent at %d", offset, owner, parent))
+		}
+		if flags&^nodeFlagsKnown != 0 {
+			reader.problem(fmt.Sprintf("unknown node flags %#x", flags))
 		}
 
 		// The game stores the rotation as w, x, y, z and glTF as x, y, z, w.
@@ -763,19 +1079,65 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 			Translation: &[3]float32{float32(pos[0]), float32(pos[1]), float32(pos[2])},
 			Rotation:    &[4]float32{float32(rotation[1]), float32(rotation[2]), float32(rotation[3]), float32(rotation[0])},
 		})
-
-		if flags&nodeFlagMesh != 0 {
-			extras, meshIndex := mesh(offset+nodeHeaderSize, name, flags)
-			if extras != nil {
-				doc.Nodes[index].Extras = extras
-			}
-			doc.Nodes[index].Mesh = meshIndex
+		translation := vec3{pos[0], pos[1], pos[2]}
+		locals = append(locals, mdlTransform{rotation: [4]float64{rotation[1], rotation[2], rotation[3], rotation[0]}, translation: translation})
+		parents = append(parents, parentNode)
+		targets[number] = append(targets[number], mdlTarget{node: index, flags: flags, name: name, translation: translation})
+		if _, known := namedNodes[nameIndex]; !known {
+			namedNodes[nameIndex] = index
 		}
 
+		extras := &MdlNodeExtras{}
+		for _, controller := range readControllers(reader, offset, name) {
+			if len(controller.rows) != 1 {
+				reader.problem(fmt.Sprintf("controller %d of %s has %d keys", controller.kind, name, len(controller.rows)))
+				continue
+			}
+
+			var values []float32
+			for _, value := range controller.rows[0] {
+				values = append(values, float32(value))
+			}
+			switch controller.kind {
+			case controllerPosition:
+				stats.ControllersChecked++
+				if slices.Equal(values, doc.Nodes[index].Translation[:]) {
+					stats.ControllersMatching++
+				}
+			case controllerOrientation:
+				// The header rotation and the controller differ by rounding in some nodes.
+				stats.ControllersChecked++
+				stored := mdlTransform{rotation: [4]float64(controller.rows[0])}
+				if angle, _ := transformDistance(stored, locals[index]); angle < bindAngleTolerance {
+					stats.ControllersMatching++
+				}
+			default:
+				extras.Controllers = append(extras.Controllers, MdlStatic{Name: controllerName(flags, controller.kind), Values: values})
+			}
+		}
+
+		classHeader := offset + nodeHeaderSize
+		if flags&nodeFlagLight != 0 {
+			extras.Light = readLight(reader, classHeader)
+		}
+		if flags&nodeFlagEmitter != 0 {
+			extras.Emitter = readEmitter(reader, classHeader)
+		}
+		if flags&nodeFlagReference != 0 {
+			extras.Reference = readReference(reader, classHeader)
+		}
+		if flags&nodeFlagMesh != 0 {
+			doc.Nodes[index].Mesh = mesh(classHeader, name, flags, index, extras)
+		}
+		if extras.Controllers != nil || extras.Light != nil || extras.Emitter != nil || extras.Reference != nil || extras.Mesh != nil {
+			doc.Nodes[index].Extras = extras
+		}
+
+		childOffset, childCount := reader.array(offset+nodeChildArray, 4, "children")
 		var children []int
 		for i := range childCount {
 			if child, ok := u32(childOffset + 4*i); ok {
-				if childIndex := node(child, depth+1); childIndex >= 0 {
+				if childIndex := node(child, offset, index, depth+1); childIndex >= 0 {
 					children = append(children, childIndex)
 				}
 			}
@@ -784,9 +1146,87 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 		return index
 	}
 
-	if rootIndex := node(root, 0); rootIndex >= 0 {
+	rootIndex := node(root, 0, 0, 0)
+	if rootIndex >= 0 {
 		doc.Nodes[0].Children = []int{rootIndex}
 	}
+
+	// The transform of each node in model space. A parent precedes its children.
+	globals := make([]mdlTransform, len(locals))
+	for i, local := range locals {
+		globals[i] = local
+		if parents[i] >= 0 {
+			globals[i] = transformCompose(globals[parents[i]], local)
+		}
+	}
+
+	// glTF ignores the transform of the node of a skinned mesh and recommends that it be a root node, so each
+	// skinned mesh moves to a new root node. Its joints are the nodes of its local bones. The inverse bind
+	// matrix of a joint maps the space of the mesh's node into the space of the joint in the rest pose, so
+	// the mesh appears where its node is. The stored inverse bind poses are compared with these.
+	for _, pending := range skins {
+		var joints []int
+		var matrices []float32
+		meshGlobal := globals[pending.node]
+		for _, entry := range pending.skin.bones {
+			joint, known := namedNodes[entry]
+			if !known {
+				reader.problem(fmt.Sprintf("bone %d of %s is no node", entry, pending.name))
+				break
+			}
+			bind := transformCompose(transformInverse(globals[joint]), meshGlobal)
+			stored := mdlTransform{rotation: pending.skin.rotations[entry], translation: pending.skin.translations[entry]}
+			angle, distance := transformDistance(bind, stored)
+			stats.BindChecked++
+			if angle < bindAngleTolerance && distance < bindDistanceTolerance {
+				stats.BindMatching++
+			}
+			joints = append(joints, joint)
+			matrices = append(matrices, transformMatrix(bind)...)
+		}
+		if len(joints) != len(pending.skin.bones) {
+			continue
+		}
+
+		doc.Skins = append(doc.Skins, gltfSkin{
+			Name:                pending.name,
+			InverseBindMatrices: gltfFloats(doc, matrices, matrixSize, false, gltfNoTarget),
+			Joints:              joints,
+		})
+		skinIndex := len(doc.Skins) - 1
+		meshIndex := pending.mesh
+		doc.Nodes = append(doc.Nodes, GltfNode{Name: pending.name + skinNodeSuffix, Mesh: &meshIndex, Skin: &skinIndex})
+		skinned := len(doc.Nodes) - 1
+		doc.Scenes[0].Nodes = append(doc.Scenes[0].Nodes, skinned)
+		doc.Nodes[pending.node].Mesh = nil
+		pending.extras.Skin = &MdlSkinExtras{Node: skinned}
+		stats.Skins++
+		stats.Bones += len(joints)
+	}
+
+	if rootIndex >= 0 {
+		readAnimations(reader, doc, &stats, targets, names, mdlTarget{node: rootIndex, translation: locals[rootIndex].translation})
+	}
+
+	stats.Unclaimed, stats.Shared = reader.unclaimed()
+	// Between the records of two meshes lie as many bytes as the end offset of the first, modulo 16. These
+	// padding bytes are counted apart from the other bytes that no record covers.
+	start := -1
+	for i := range len(mdx) + 1 {
+		free := i < len(mdx) && mdxReader.claims[i] == 0
+		if free && start < 0 {
+			start = i
+		}
+		if !free && start >= 0 {
+			if i < len(mdx) && i-start == start%mdxAlignment {
+				stats.MdxPadding += i - start
+			} else {
+				stats.MdxUnclaimed += i - start
+			}
+			start = -1
+		}
+	}
+	errors := append(reader.errors, mdxReader.errors...)
 	text, err := gltfEncode(doc, binUri)
 	if err != nil {
 		errors = append(errors, err.Error())
@@ -811,10 +1251,15 @@ func ReportMdl(label string, result MdlResult) string {
 	stats := result.Stats
 	return fmt.Sprintf("%s nodes=%d meshes=%d hidden=%d verts=%d faces=%d mdl/mdx_mismatch=%d hdrnodes=%s "+
 		"normals_ok=%d/%d planes_ok=%d/%d adjacent_ok=%d/%d adjacent_outside=%d radius_ok=%d/%d area_ok=%d/%d "+
-		"normals_replaced=%d normals_omitted=%d %s",
+		"normals_replaced=%d normals_omitted=%d controllers_ok=%d/%d animations=%d animation_nodes=%d keys=%d "+
+		"channels=%d tracks=%d unmatched_animation_nodes=%d constant_channels=%d duplicate_tracks=%d skins=%d bones=%d bind_ok=%d/%d "+
+		"weights_bad=%d aabb_ok=%d/%d unclaimed=%d shared=%d mdx_padding=%d mdx_unclaimed=%d %s",
 		label, stats.Nodes, stats.Meshes, stats.Hidden, stats.Verts, stats.Faces, stats.Mismatch, stats.HdrNodes,
 		stats.NormalsMatching, stats.NormalsChecked, stats.PlanesMatching, stats.PlanesChecked,
 		stats.AdjacentMatching, stats.AdjacentChecked, stats.AdjacentOutside, stats.RadiusMatching,
 		stats.RadiusChecked, stats.AreaMatching, stats.AreaChecked, stats.NormalsReplaced, stats.NormalsOmitted,
+		stats.ControllersMatching, stats.ControllersChecked, stats.Animations, stats.AnimationNodes, stats.Keys,
+		stats.Channels, stats.Tracks, stats.UnmatchedAnimationNodes, stats.ConstantChannels, stats.DuplicateTracks, stats.Skins, stats.Bones,
+		stats.BindMatching, stats.BindChecked, stats.WeightsBad, stats.AabbMatching, stats.AabbChecked, stats.Unclaimed, stats.Shared, stats.MdxPadding, stats.MdxUnclaimed,
 		Verdict(result.Errors[:min(5, len(result.Errors))]...))
 }

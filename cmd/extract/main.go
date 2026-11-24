@@ -73,7 +73,8 @@ type modelCounts struct {
 
 // writeModel converts one MDL resource and its MDX data to <resref>.gltf and <resref>.bin in out. The glTF
 // file refers to each texture by the path of its PNG file relative to out. It returns its report line and the
-// names of the files it wrote. A model without rendered geometry is counted and not written.
+// names of the files it wrote. A model without rendered geometry and without animations is counted and not
+// written.
 func writeModel(out, label, resref string, mdl, mdx []byte, texturePath map[string]string,
 	counts *modelCounts) (string, []string) {
 	imageUri := func(texture string) string {
@@ -96,7 +97,7 @@ func writeModel(out, label, resref string, mdl, mdx []byte, texturePath map[stri
 	if len(model.Errors) > 0 {
 		return kotor.ReportMdl(label, model), nil
 	}
-	if model.Stats.Meshes == 0 {
+	if model.Stats.Meshes == 0 && model.Stats.Animations == 0 {
 		counts.skipped++
 		return kotor.ReportMdl(label, model), nil
 	}
@@ -119,17 +120,18 @@ func noteModels(summary *kotor.Summary, stage string, counts *modelCounts) {
 	}
 	slices.Sort(missingNames)
 	*summary = append(*summary,
-		fmt.Sprintf("%s: models without rendered geometry skipped: %d", stage, counts.skipped),
+		fmt.Sprintf("%s: models without rendered geometry and animations skipped: %d", stage, counts.skipped),
 		fmt.Sprintf("%s: non-rendered meshes omitted: %d", stage, counts.hidden),
 		fmt.Sprintf("%s: zero normals replaced: %d", stage, counts.normalsReplaced),
 		fmt.Sprintf("%s: meshes written without normals, because a normal is not unit length: %d", stage, counts.normalsOmitted),
 		fmt.Sprintf("%s: model textures not found: %d (%s)", stage, len(missingNames), strings.Join(missingNames, " ")))
 }
 
-// Models: data/<archive>.bif -> extracted/data/<archive>/*.gltf + *.bin (passing, with geometry), one folder
-// per archive in kotor.ModelBifs. The glTF node extras hold the decoded mesh headers and the face fields. The
-// walkmeshes of an archive become <resref>.<wok|dwk|pwk>.gltf + .bin in the same folder. Only models.bif holds
-// walkmeshes.
+// Models: data/<archive>.bif -> extracted/data/<archive>/*.gltf + *.bin (passing, with geometry or animations),
+// one folder per archive in kotor.ModelBifs. The glTF node extras hold the decoded node headers, mesh headers,
+// static controller values and face fields, and the model's animations and skins are glTF animations and
+// skins. The walkmeshes of an archive become <resref>.<wok|dwk|pwk>.gltf + .bin in the same folder. Only
+// models.bif holds walkmeshes.
 func convertModels(summary *kotor.Summary) {
 	fmt.Println("models...")
 	texturePath := texturePaths()

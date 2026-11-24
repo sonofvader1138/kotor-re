@@ -22,6 +22,10 @@ const (
 	gltfElementArrayBuffer = 34963
 )
 
+// gltfNoTarget leaves the target of a buffer view unset, as for animation, skin and face data, which no mesh
+// primitive reads as vertex data.
+const gltfNoTarget = 0
+
 // The game uses +Z as up and glTF uses +Y. A rotation of -90 degrees about X, as the quaternion
 // (x, y, z, w), turns the one into the other.
 var gltfZUpToYUp = [4]float32{-math.Sqrt2 / 2, 0, 0, math.Sqrt2 / 2}
@@ -35,8 +39,38 @@ type gltfAsset struct {
 }
 
 type gltfScene struct {
-	Name  string `json:"name,omitempty"`
-	Nodes []int  `json:"nodes"`
+	Name   string `json:"name,omitempty"`
+	Nodes  []int  `json:"nodes"`
+	Extras any    `json:"extras,omitempty"`
+}
+
+type gltfTarget struct {
+	Node int    `json:"node"`
+	Path string `json:"path"`
+}
+
+type gltfChannel struct {
+	Sampler int        `json:"sampler"`
+	Target  gltfTarget `json:"target"`
+}
+
+type gltfSampler struct {
+	Input         int    `json:"input"`
+	Interpolation string `json:"interpolation"`
+	Output        int    `json:"output"`
+}
+
+type gltfAnimation struct {
+	Name     string        `json:"name,omitempty"`
+	Channels []gltfChannel `json:"channels"`
+	Samplers []gltfSampler `json:"samplers"`
+	Extras   any           `json:"extras,omitempty"`
+}
+
+type gltfSkin struct {
+	Name                string `json:"name,omitempty"`
+	InverseBindMatrices int    `json:"inverseBindMatrices"`
+	Joints              []int  `json:"joints"`
 }
 
 type GltfNode struct {
@@ -45,6 +79,7 @@ type GltfNode struct {
 	Translation *[3]float32 `json:"translation,omitempty"`
 	Rotation    *[4]float32 `json:"rotation,omitempty"`
 	Mesh        *int        `json:"mesh,omitempty"`
+	Skin        *int        `json:"skin,omitempty"`
 	Extras      any         `json:"extras,omitempty"`
 }
 
@@ -113,6 +148,8 @@ type Gltf struct {
 	Scenes      []gltfScene      `json:"scenes"`
 	Nodes       []GltfNode       `json:"nodes"`
 	Meshes      []gltfMesh       `json:"meshes,omitempty"`
+	Animations  []gltfAnimation  `json:"animations,omitempty"`
+	Skins       []gltfSkin       `json:"skins,omitempty"`
 	Materials   []gltfMaterial   `json:"materials,omitempty"`
 	Textures    []gltfTexture    `json:"textures,omitempty"`
 	Images      []gltfImage      `json:"images,omitempty"`
@@ -158,18 +195,19 @@ func gltfAccessorAt(doc *Gltf, view, byteOffset, componentType, count int, kind 
 	return len(doc.Accessors) - 1
 }
 
-var gltfVectorTypes = map[int]string{1: "SCALAR", 2: "VEC2", 3: "VEC3", 4: "VEC4"}
+var gltfVectorTypes = map[int]string{1: "SCALAR", 2: "VEC2", 3: "VEC3", 4: "VEC4", 16: "MAT4"}
 
-// gltfFloats stores vectors of width floats as a vertex attribute and returns the accessor index. glTF
-// requires the bounds of positions, so bounded accessors get their minimum and maximum.
-func gltfFloats(doc *Gltf, values []float32, width int, bounded bool) int {
+// gltfFloats stores vectors of width floats in a buffer view with the given target and returns the accessor
+// index. glTF requires the bounds of positions and of animation times, so bounded accessors get their minimum
+// and maximum.
+func gltfFloats(doc *Gltf, values []float32, width int, bounded bool, target int) int {
 	data := make([]byte, 0, 4*len(values))
 	for _, value := range values {
 		data = binary.LittleEndian.AppendUint32(data, math.Float32bits(value))
 	}
 
 	count := len(values) / width
-	accessor := gltfAccessorAt(doc, gltfView(doc, data, gltfArrayBuffer), 0, GltfFloat, count, gltfVectorTypes[width])
+	accessor := gltfAccessorAt(doc, gltfView(doc, data, target), 0, GltfFloat, count, gltfVectorTypes[width])
 	if bounded && count > 0 {
 		low := slices.Clone(values[:width])
 		high := slices.Clone(values[:width])

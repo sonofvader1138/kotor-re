@@ -394,7 +394,7 @@ func BwmGltf(bwm *Bwm, label, binUri string, materials []BwmMaterial, extras any
 	for _, vertex := range bwm.Vertices {
 		positions = append(positions, float32(vertex[0]), float32(vertex[1]), float32(vertex[2]))
 	}
-	position := gltfFloats(doc, positions, 3, true)
+	position := gltfFloats(doc, positions, 3, true, gltfArrayBuffer)
 
 	indices := make([]int, 0, edgesPerFace*len(bwm.Faces))
 	for _, face := range bwm.Faces {

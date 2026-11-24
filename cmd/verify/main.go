@@ -4,12 +4,16 @@
 // most that many external programs run at once. Each report lists its lines in job order.
 //
 // models: each model and walkmesh glTF file is checked in four ways. assimp must load it with at least one
-// mesh and with the face count that its index accessors give (see assimpGltf). The Khronos glTF validator,
-// when installed, must report no errors. jq must read the mesh header fields of the node extras, which must
-// equal the source model (see checkModelExtras), or the walkmesh values of the node extras, which must build
-// again into the source's header values, edge table and perimeter table (see checkWalkmeshExtras). The
-// binary buffer, located through the accessors that jq reads, must hold the source's vertex positions, face
-// indices and face fields (see checkModelBin and checkWalkmeshBin).
+// mesh or animation, with the face count that its index accessors give, and with its counts of animations,
+// animated nodes and bones (see assimpGltf). The Khronos glTF validator, when installed, must report no
+// errors. jq must read the mesh header fields and the light, emitter, reference, dangly, AABB and static
+// controller values of the node extras, which must equal the source model (see checkModelExtras and
+// checkNodeExtras), or the walkmesh values of the node extras, which must build again into the source's header
+// values, edge table and perimeter table (see checkWalkmeshExtras). The binary buffer, located through the
+// accessors that jq reads, must hold the source's vertex positions, face indices and face fields (see
+// checkModelBin and checkWalkmeshBin). Each model glTF file is also checked in two more ways: its animations
+// must equal the controllers of the source's animation trees (see checkAnimations), and its skins the bone
+// maps, bone indices and bone weights of the source (see checkSkins).
 // textures: ImageMagick's decoding of each PNG must equal the decoded TPC texture, and pngcheck must accept it.
 // tga: ImageMagick's decoding of each PNG must equal its decoding of the source TGA, and pngcheck must
 // accept the PNG. Each TXI must equal the source bytes. Each room visibility list, read with jq, must build
@@ -203,8 +207,11 @@ func imageChecks(summary *kotor.Summary, name, dir string, jobs []job) {
 }
 
 var (
-	meshesPattern = regexp.MustCompile(`(?m)^Meshes:\s+(\d+)`)
-	facesPattern  = regexp.MustCompile(`(?m)^Faces:\s+(\d+)`)
+	meshesPattern     = regexp.MustCompile(`(?m)^Meshes:\s+(\d+)`)
+	facesPattern      = regexp.MustCompile(`(?m)^Faces:\s+(\d+)`)
+	animationsPattern = regexp.MustCompile(`(?m)^Animations:\s+(\d+)`)
+	channelsPattern   = regexp.MustCompile(`(?m)^Animation Channels:\s+(\d+)`)
+	bonesPattern      = regexp.MustCompile(`(?m)^Bones:\s+(\d+)`)
 
 	assimpErrorPattern = regexp.MustCompile(`(?m)^ERROR: (.*)$`)
 )
@@ -237,14 +244,37 @@ func assimpGltf(path, label string) []string {
 		return line(label + " FAIL: assimp: " + message)
 	}
 
+	// assimp merges the channels of one node in one animation, so its channel count is the number of
+	// animated nodes summed over the animations.
+	var animations, nodes, bones int
+	counted = kotor.Exec("jq", []string{"-r", `(.animations // [] | length), ([.animations[]? | [.channels[].target.node] | unique | length] | add // 0), ([.skins[]?.joints | length] | add // 0)`, path}, nil)
+	if _, err := fmt.Sscan(string(counted.Stdout), &animations, &nodes, &bones); counted.Status != 0 || err != nil {
+		return line(label + " FAIL: jq: " + kotor.FirstLine(counted.Stderr))
+	}
+
 	var errs []string
-	if count, _ := strconv.Atoi(string(meshes[1])); count == 0 {
-		errs = append(errs, "no meshes")
+	if count, _ := strconv.Atoi(string(meshes[1])); count == 0 && animations == 0 {
+		errs = append(errs, "no meshes and no animations")
 	}
 	if count, _ := strconv.Atoi(string(loaded[1])); count != faces {
 		errs = append(errs, fmt.Sprintf("assimp loaded %s faces, accessors give %d", loaded[1], faces))
 	}
-	return line(fmt.Sprintf("%s meshes=%s faces=%s %s", label, meshes[1], loaded[1], kotor.Verdict(errs...)))
+	for _, check := range []struct {
+		pattern *regexp.Regexp
+		what    string
+		want    int
+	}{{animationsPattern, "animations", animations}, {channelsPattern, "animation channels", nodes}, {bonesPattern, "bones", bones}} {
+		found := check.pattern.FindSubmatch(result.Stdout)
+		if found == nil {
+			errs = append(errs, "assimp printed no "+check.what)
+			continue
+		}
+		if count, _ := strconv.Atoi(string(found[1])); count != check.want {
+			errs = append(errs, fmt.Sprintf("assimp loaded %d %s, glTF has %d", count, check.what, check.want))
+		}
+	}
+	return line(fmt.Sprintf("%s meshes=%s faces=%s animations=%d bones=%d %s", label, meshes[1], loaded[1], animations,
+		bones, kotor.Verdict(errs...)))
 }
 
 // validateGltf runs the Khronos glTF validator on one glTF file, which also loads its buffer and images, and
@@ -280,10 +310,17 @@ func models(summary *kotor.Summary) {
 	modelJobs := map[string][]job{}
 	walkmeshJobs := map[string][]job{}
 	for _, name := range kotor.ModelBifs {
-		for _, resource := range kotor.BifResources("data/"+name+".bif", key) {
+		resources := kotor.BifResources("data/"+name+".bif", key)
+		vertexData := map[string][]byte{}
+		for _, resource := range resources {
+			if resource.Ext == "mdx" {
+				vertexData[resource.Resref] = resource.Data
+			}
+		}
+		for _, resource := range resources {
 			if resource.Ext == "mdl" {
 				file := filepath.Join(name, resource.Resref)
-				addModelChecks(modelJobs, file, filepath.Join(data, file), resource.Data)
+				addModelChecks(modelJobs, file, filepath.Join(data, file), resource.Data, vertexData[resource.Resref])
 				continue
 			}
 			if resource.Ext != "wok" && resource.Ext != "dwk" && resource.Ext != "pwk" {
@@ -552,11 +589,10 @@ const modelProgram = `.nodes[] | .extras.mesh // empty | .name, .kind, .render, 
 // of the source MDL. Floats are compared bit for bit after rounding to f32, and names up to their first NUL byte.
 // The mesh kind is compared with the one that the node flags give.
 func checkModelExtras(path string, mdl []byte) string {
-	result := kotor.Exec("jq", []string{"-r", modelProgram, path}, nil)
-	if result.Status != 0 {
-		return "jq: " + kotor.FirstLine(result.Stderr)
+	fields, problem := jqLines(modelProgram, path)
+	if problem != "" {
+		return problem
 	}
-	fields := strings.Split(strings.TrimSuffix(string(result.Stdout), "\n"), "\n")
 
 	meshes, data := modelMeshes(mdl)
 	field := 0
@@ -654,9 +690,11 @@ func checkModelExtras(path string, mdl []byte) string {
 }
 
 // modelBinProgram prints the URI of the binary buffer and, for each node with a mesh, its name and the
-// locations of its positions, its indices, its face materials and its adjacent faces.
-const modelBinProgram = gltfLocation + ` . as $d | .buffers[0].uri, (.nodes[] | select(.mesh != null) |
-	.name, ($d.meshes[.mesh].primitives[0] as $p
+// locations of its positions, its indices, its face materials and its adjacent faces. A skinned mesh lies on
+// the node that extras.skin names.
+const modelBinProgram = gltfLocation + ` . as $d | .buffers[0].uri, (.nodes[] | select(.extras.mesh) |
+	(.mesh // (if .extras.skin then $d.nodes[.extras.skin.node].mesh else null end)) as $m | select($m != null) |
+	.name, ($d.meshes[$m].primitives[0] as $p
 		| $p.attributes.POSITION, $p.indices, .extras.face_materials, .extras.face_adjacent | location($d)))`
 
 // checkModelBin compares the binary buffer of a model glTF file with the source MDL. path is the converted
@@ -758,13 +796,19 @@ func checkModelBin(path string, mdl []byte) string {
 // addModelChecks adds the checks of one converted model to jobs, when the model was written: the glTF checks
 // of addGltfChecks, the mesh header extras and the binary buffer. path is the converted file without
 // extensions, and label is the same path relative to the report folder.
-func addModelChecks(jobs map[string][]job, label, path string, mdl []byte) {
+func addModelChecks(jobs map[string][]job, label, path string, mdl, mdx []byte) {
 	if !exists(path + ".gltf") {
 		return
 	}
 	addGltfChecks(jobs, label+".gltf", path+".gltf")
 	jobs["jq"] = append(jobs["jq"], func() []string {
-		return line(label + ".gltf " + kotor.Verdict(checkModelExtras(path+".gltf", mdl)))
+		return line(label + ".gltf " + kotor.Verdict(checkModelExtras(path+".gltf", mdl), checkNodeExtras(path, mdl)))
+	})
+	jobs["animation"] = append(jobs["animation"], func() []string {
+		return line(label + ".gltf " + kotor.Verdict(checkAnimations(path, mdl)))
+	})
+	jobs["skin"] = append(jobs["skin"], func() []string {
+		return line(label + ".gltf " + kotor.Verdict(checkSkins(path, mdl, mdx)))
 	})
 	jobs["gltf"] = append(jobs["gltf"], func() []string {
 		return line(label + ".bin " + kotor.Verdict(checkModelBin(path, mdl)))
@@ -1182,7 +1226,7 @@ func modules(summary *kotor.Summary) {
 var checkTools = []struct{ kind, program string }{
 	{"assimp", "assimp"}, {"validator", "gltf_validator"}, {"gltf", "jq"}, {"ffprobe", "ffprobe"}, {"csv", ""},
 	{"ncs", ""}, {"jq", "jq"}, {"iconv", "iconv"}, {"copy", ""}, {"imagemagick", "convert"},
-	{"pngcheck", "pngcheck"}, {"globals", "jq"},
+	{"pngcheck", "pngcheck"}, {"globals", "jq"}, {"animation", "jq"}, {"skin", "jq"},
 }
 
 // addResourceChecks adds the check of one converted resource to jobs, keyed by the kind of check. path is
@@ -1215,7 +1259,7 @@ func addResourceChecks(jobs map[string][]job, label, path, ext string, source []
 
 	switch ext {
 	case "mdl":
-		addModelChecks(jobs, label, path, source)
+		addModelChecks(jobs, label, path, source, nil)
 
 	case "mdx":
 
