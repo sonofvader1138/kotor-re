@@ -3,7 +3,7 @@
 // Movies require ffmpeg. All stages run at the same time. Each stage writes its own outputs and reports
 // and keeps its own summary lines, which are printed in stage order at the end.
 //
-// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [lips] [modules] [rims] [bifs] [tlk]   (default: all)
+// usage: go run ./cmd/convert [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [patch] [lips] [modules] [rims] [bifs] [tlk]   (default: all)
 package main
 
 import (
@@ -46,15 +46,15 @@ func prune(dir string, keep map[string]bool, exts []string) {
 	}
 }
 
-// texturePaths maps each texture resref to its PNG file in the texture packs, relative to a folder two
-// levels below assets. The first pack in priority order wins, so the packs are read in reverse.
+// texturePaths maps each texture resref to its PNG file in the texture packs, relative to assets. The first
+// pack in priority order wins, so the packs are read in reverse.
 func texturePaths() map[string]string {
 	paths := map[string]string{}
 	for _, pack := range slices.Backward(kotor.MaterialPacks) {
 
 		for _, entry := range packErf(pack) {
 			if entry.Ext == "tpc" {
-				paths[entry.Resref] = "../../TexturePacks/" + pack + "/" + entry.Resref + ".png"
+				paths[entry.Resref] = filepath.Join("TexturePacks", pack, entry.Resref+".png")
 			}
 		}
 	}
@@ -68,9 +68,9 @@ type modelCounts struct {
 	missing map[string]bool
 }
 
-// writeModel converts one MDL resource and its MDX data to <resref>.obj and <resref>.mtl in out. It
-// returns its report line and the names of the files it wrote. A model without rendered geometry is
-// counted and not written.
+// writeModel converts one MDL resource and its MDX data to <resref>.obj and <resref>.mtl in out. The MTL
+// file refers to each texture by its path relative to out. It returns its report line and the names of the
+// files it wrote. A model without rendered geometry is counted and not written.
 func writeModel(out, label, resref string, mdl, mdx []byte, texturePath map[string]string,
 	counts *modelCounts) (string, []string) {
 	model := kotor.ConvertMdl(mdl, mdx, resref+".mdl", resref+".mtl")
@@ -87,7 +87,11 @@ func writeModel(out, label, resref string, mdl, mdx []byte, texturePath map[stri
 	for _, texture := range model.Textures {
 		mtl = append(mtl, "", "newmtl "+texture, "Kd 1.000000 1.000000 1.000000")
 		if path, ok := texturePath[texture]; ok {
-			mtl = append(mtl, "map_Kd "+path)
+			relative, err := filepath.Rel(out, filepath.Join(kotor.Assets, path))
+			if err != nil {
+				kotor.Fatal(err.Error())
+			}
+			mtl = append(mtl, "map_Kd "+filepath.ToSlash(relative))
 		} else {
 			mtl = append(mtl, "# texture not found in the texture packs")
 			counts.missing[texture] = true
@@ -159,21 +163,11 @@ func convertTextures(summary *kotor.Summary) {
 				continue
 			}
 
-			data := entry.Data()
-			texture := kotor.ParseTpc(data)
-			image := kotor.DecodeTpc(data, texture)
-			report = append(report, kotor.ReportTpc(entry.Resref, texture))
-			if image == nil {
-				continue
-			}
-
-			kotor.WriteFile(filepath.Join(out, entry.Resref+".png"), kotor.EncodePng(image.Width, image.Height, image.Rgba, 4))
-			written[entry.Resref+".png"] = true
-
-			txi := string(texture.Txi)
-			if strings.TrimSpace(strings.ReplaceAll(txi, "\x00", "")) != "" {
-				kotor.WriteFile(filepath.Join(out, entry.Resref+".txi"), []byte(strings.TrimRight(txi, "\x00")))
-				written[entry.Resref+".txi"] = true
+			resource := kotor.Resource{Resref: entry.Resref, Type: entry.Type, Ext: entry.Ext, Data: entry.Data()}
+			line, files := writeResource(out, entry.Resref, resource, nil, nil)
+			report = append(report, line)
+			for _, file := range files {
+				written[file] = true
 			}
 		}
 
@@ -370,67 +364,71 @@ func convertMovies(summary *kotor.Summary) {
 	summary.Tally("movies", report)
 }
 
-// GUI: resource type 2047 in data/gui.bif -> assets/data/gui/*.json, and in patch.erf -> assets/patch/*.json.
-// Five patch.erf resources replace gui.bif resources of the same name.
+// GUI: resource type 2047 in data/gui.bif -> assets/data/gui/*.json, converted by writeResource. The GUI
+// layouts of patch.erf are converted by the patch stage.
 func convertGui(summary *kotor.Summary) {
 	fmt.Println("gui...")
-	type source struct {
-		dir       string
-		resources []kotor.Resource
-	}
-
-	var bifGuis, patchGuis []kotor.Resource
-	for _, resource := range kotor.BifResources("data/gui.bif", kotor.ReadKey()) {
-		if resource.Type == kotor.TypeGui {
-			bifGuis = append(bifGuis, resource)
-		}
-	}
-	for _, entry := range kotor.ReadErf(filepath.Join(kotor.Game, "patch.erf")) {
-		if entry.Type == kotor.TypeGui {
-			patchGuis = append(patchGuis, kotor.Resource{Resref: entry.Resref, Data: entry.Data()})
-		}
-	}
+	out := filepath.Join(kotor.Assets, "data", "gui")
+	kotor.MakeDir(out)
 
 	var report []string
-	for _, src := range []source{{"data/gui", bifGuis}, {"patch", patchGuis}} {
-		out := filepath.Join(kotor.Assets, src.dir)
-		kotor.MakeDir(out)
-
-		written := map[string]bool{}
-		for _, resource := range src.resources {
-			gff, problem := kotor.ReadGff(resource.Data)
-			if problem == "" {
-				for region, count := range gff.Counts.UnusedBytes {
-					if count > 0 {
-						problem = fmt.Sprintf("%d unused bytes in %s region", count, region)
-					}
-				}
-			}
-			if problem != "" {
-				report = append(report, src.dir+"/"+resource.Resref+" FAIL: "+problem)
-				continue
-			}
-			if gff.FileType != "GUI " || gff.Version != "V3.2" {
-				report = append(report, src.dir+"/"+resource.Resref+" FAIL: unexpected "+gff.FileType+gff.Version)
-				continue
-			}
-
-			// GUI files have no localized strings, so they need no string table.
-			text, err := json.MarshalIndent(gffJson(gff.Root, nil, nil), "", "\t")
-			if err != nil {
-				report = append(report, src.dir+"/"+resource.Resref+" FAIL: "+err.Error())
-				continue
-			}
-
-			kotor.WriteFile(filepath.Join(out, resource.Resref+".json"), append(text, '\n'))
-			written[resource.Resref+".json"] = true
-			report = append(report, src.dir+"/"+resource.Resref+" PASS")
+	written := map[string]bool{}
+	for _, resource := range kotor.BifResources("data/gui.bif", kotor.ReadKey()) {
+		if resource.Type != kotor.TypeGui {
+			continue
 		}
 
-		prune(out, written, []string{".json"})
+		line, files := writeResource(out, "data/gui/"+resource.Resref, resource, nil, nil)
+		report = append(report, line)
+		for _, file := range files {
+			written[file] = true
+		}
 	}
 
+	prune(out, written, []string{".json"})
 	summary.Tally("gui", report)
+}
+
+// Patch: patch.erf -> assets/patch/, converted by writeResource: GUI layouts, textures, 2DA tables and one
+// model. The MDX resource is the vertex data of the model of the same name and is not converted on its own.
+func convertPatch(summary *kotor.Summary) {
+	fmt.Println("patch...")
+	out := filepath.Join(kotor.Assets, "patch")
+	kotor.MakeDir(out)
+
+	entries := kotor.ReadErf(filepath.Join(kotor.Game, "patch.erf"))
+	mdx := map[string][]byte{}
+	for _, entry := range entries {
+		if entry.Ext == "mdx" {
+			mdx[entry.Resref] = entry.Data()
+		}
+	}
+
+	inputs := &resourceInputs{texturePath: texturePaths(), counts: &modelCounts{missing: map[string]bool{}}}
+	var report []string
+	written := map[string]bool{}
+	for _, entry := range entries {
+		label := entry.Resref + "." + entry.Ext
+		if entry.Ext == "mdx" {
+			problem := ""
+			if !slices.ContainsFunc(entries, func(other kotor.ErfEntry) bool { return other.Resref == entry.Resref && other.Ext == "mdl" }) {
+				problem = "no model of the same name"
+			}
+			report = append(report, label+" vertex data of the model "+kotor.Verdict(problem))
+			continue
+		}
+
+		resource := kotor.Resource{Resref: entry.Resref, Type: entry.Type, Ext: entry.Ext, Data: entry.Data()}
+		line, files := writeResource(out, label, resource, mdx[entry.Resref], inputs)
+		report = append(report, line)
+		for _, file := range files {
+			written[file] = true
+		}
+	}
+
+	prune(out, written, []string{".json", ".png", ".txi", ".csv", ".obj", ".mtl"})
+	summary.Tally("patch", report)
+	noteModels(summary, "patch", inputs.counts)
 }
 
 // Lips: lips/<module>.mod -> assets/lips/<module>/<resref>.csv, with one "time_s,shape" line per keyframe.
@@ -594,6 +592,9 @@ func newResourceInputs() *resourceInputs {
 //   - A script source becomes <resref>.nss, its text decoded as Windows-1252 and written as UTF-8. The line
 //     breaks are kept.
 //   - A TXI file is copied to <resref>.txi.
+//   - A texture becomes <resref>.png, its top mipmap level as 8-bit RGBA, and <resref>.txi, its TXI
+//     trailer without trailing NUL bytes, when the trailer holds text.
+//   - A GUI layout becomes <resref>.json in the form of gffJson. It must use every byte of its regions.
 //   - A letter table becomes <resref>.ltr.json (see ltrJson).
 //   - Every other type is a GFF file and becomes <resref>.<ext>.json (see gffFile).
 func writeResource(dir, label string, resource kotor.Resource, mdx []byte, inputs *resourceInputs) (string, []string) {
@@ -657,6 +658,53 @@ func writeResource(dir, label string, resource kotor.Resource, mdx []byte, input
 	case "txi":
 		line = fmt.Sprintf("%s bytes=%d PASS", label, len(resource.Data))
 		output = resource.Data
+
+	case "tpc":
+		texture := kotor.ParseTpc(resource.Data)
+		image := kotor.DecodeTpc(resource.Data, texture)
+		line = kotor.ReportTpc(label, texture)
+		if image == nil {
+			return line, nil
+		}
+
+		files := []string{resource.Resref + ".png"}
+		kotor.WriteFile(filepath.Join(dir, files[0]), kotor.EncodePng(image.Width, image.Height, image.Rgba, 4))
+
+		txi := string(texture.Txi)
+		if strings.TrimSpace(strings.ReplaceAll(txi, "\x00", "")) != "" {
+			files = append(files, resource.Resref+".txi")
+			kotor.WriteFile(filepath.Join(dir, files[1]), []byte(strings.TrimRight(txi, "\x00")))
+		}
+		return line, files
+
+	case "gui":
+		file = resource.Resref + ".json"
+		gff, problem := kotor.ReadGff(resource.Data)
+		if problem == "" && (gff.FileType != "GUI " || gff.Version != "V3.2") {
+			problem = "unexpected " + gff.FileType + gff.Version
+		}
+		if problem == "" {
+			for region, count := range gff.Counts.UnusedBytes {
+				if count > 0 {
+					problem = fmt.Sprintf("%d unused bytes in %s region", count, region)
+				}
+			}
+		}
+
+		// GUI files have no localized strings, so they need no string table.
+		var text []byte
+		if problem == "" {
+			var err error
+			text, err = json.MarshalIndent(gffJson(gff.Root, nil, nil), "", "\t")
+			if err != nil {
+				problem = err.Error()
+			}
+		}
+
+		line = label + " " + kotor.Verdict(problem)
+		if problem == "" {
+			output = append(text, '\n')
+		}
 
 	case "ltr":
 		ltr := kotor.ParseLtr(resource.Data)
@@ -836,6 +884,7 @@ var stages = []kotor.Stage{
 	{Name: "sounds", Run: func(summary *kotor.Summary) { convertAudio(summary, "sounds", "streamsounds") }},
 	{Name: "waves", Run: func(summary *kotor.Summary) { convertAudio(summary, "waves", "streamwaves") }},
 	{Name: "gui", Run: convertGui},
+	{Name: "patch", Run: convertPatch},
 	{Name: "lips", Run: convertLips},
 	{Name: "modules", Run: convertModules},
 	{Name: "rims", Run: convertRims},

@@ -97,7 +97,7 @@ In the "V3.2" row, the four characters before the version differ by type and are
 
 ## ERF archive
 
-An ERF archive is a self-contained archive: unlike a BIF archive, it stores the name of each resource itself. The four texture packs in `TexturePacks/` are ERF archives. The reader is `ReadErf` in `kotor/kotor.go`. `patch.erf` is also an ERF archive, and `ReadErf` reads its tables without error. It holds 97 resources: 84 TPC textures, 7 GUI layouts, 4 resources of type 2017, and the MDL and MDX resources of one model. Only its GUI resources have been examined. The 123 files in `lips/` are ERF archives with the signature "MOD V1.0" instead of "ERF V1.0" (see the lip sync section). The files in `modules/` and `rims/` are not ERF archives (see the RIM section below).
+An ERF archive is a self-contained archive: unlike a BIF archive, it stores the name of each resource itself. The four texture packs in `TexturePacks/` are ERF archives. The reader is `ReadErf` in `kotor/kotor.go`. `patch.erf` is also an ERF archive, and `ReadErf` reads its tables without error. It holds 97 resources: 84 TPC textures, 7 GUI layouts, 4 2DA tables (type 2017), and the MDL and MDX resources of one model. The section "Patch archive: patch.erf" describes them. The 123 files in `lips/` are ERF archives with the signature "MOD V1.0" instead of "ERF V1.0" (see the lip sync section). The files in `modules/` and `rims/` are not ERF archives (see the RIM section below).
 
 An ERF archive begins with a 160-byte header. The evidence below covers 128 archives: the 4 texture packs, `patch.erf` and the 123 MOD archives in `lips/`.
 
@@ -783,7 +783,7 @@ The parser passes on the only sample: `temp/reports/tlk.txt` reports 49,265 entr
 
 Each 3D model is stored as two resources with the same resref. The MDL resource (type 2002) holds the model's structure: a tree of nodes, some of which carry meshes. The MDX resource (type 3008) holds the vertex data for those meshes. The converter is `cmd/mdl2obj`. It writes Wavefront OBJ files.
 
-The models examined here are in `data/models.bif`, which contains 2,445 MDL resources and 2,445 MDX resources, including area room models such as `m01aa_01a`. Of the converted models, 1,329 have names of that form. The BIF archives hold 387 more models, which have not been examined or converted: 305 in `items.bif`, 63 in `player.bif` and 19 in `party.bif`. The archives in `rims/` hold another 239 MDL and 252 MDX resources. All of them are copies of models in the BIF archives, and their conversion is described in the section "Global resources: rims/\*.rim". `patch.erf` holds one model, `w_lghtsbr_008`, which has not been examined. The MOD archives in `lips/` hold only LIP resources, and the texture packs hold no models.
+The models examined here are in `data/models.bif`, which contains 2,445 MDL resources and 2,445 MDX resources, including area room models such as `m01aa_01a`. Of the converted models, 1,329 have names of that form. The BIF archives hold 387 more models, which have not been examined or converted: 305 in `items.bif`, 63 in `player.bif` and 19 in `party.bif`. The archives in `rims/` hold another 239 MDL and 252 MDX resources. All of them are copies of models in the BIF archives, and their conversion is described in the section "Global resources: rims/\*.rim". `patch.erf` holds one model, `w_lghtsbr_008`, a changed copy of a model in `items.bif` (see "Patch archive: patch.erf"). The MOD archives in `lips/` hold only LIP resources, and the texture packs hold no models.
 
 All 2,445 models pass the converter's checks. Every read stays inside the file, every face index refers to an existing vertex, and the vertex positions stored in the MDL match those stored in the MDX for all 11,248,282 vertices. Of these models, 368 contain no meshes.
 
@@ -909,7 +909,7 @@ The archive also contains resources of types 2016 (1,202), 2052 (156) and 2053 (
 
 A TPC file (resource type 3007) is a texture. It holds pixel data for one image, or for several sub-images, each with its own mipmap chain. A mipmap chain is a series of copies of an image, each half the width and height of the previous one. The file ends with an optional TXI trailer. TXI (texture information) is plain ASCII text that sets rendering options. The converter is `cmd/tpc2png`. It writes the top mipmap level as an 8-bit RGBA PNG.
 
-All 11,452 TPC files in the four texture packs parse completely. In each file, the header, the pixel data and an ASCII trailer together account for every byte. The converted PNG files are verified with two independent tools. ImageMagick decodes each PNG to exactly the pixels of the decoded TPC texture, and pngcheck accepts each file. This holds for all 3,294 textures of each of tpa, tpb and tpc and for all 1,570 textures of gui.
+All 11,452 TPC files in the four texture packs parse completely. In each file, the header, the pixel data and an ASCII trailer together account for every byte. The converted PNG files are verified with two independent tools. ImageMagick decodes each PNG to exactly the pixels of the decoded TPC texture, and pngcheck accepts each file. This holds for all 3,294 textures of each of tpa, tpb and tpc and for all 1,570 textures of gui. The 84 textures in `patch.erf` also parse completely and pass the same checks (see "Patch archive: patch.erf").
 
 ## TPC header
 
@@ -1061,7 +1061,7 @@ The lightmap archives also hold 112 resources of type 3001, one per area, named 
 
 # User interface layouts: GUI
 
-A GUI file (resource type 2047) describes one screen or panel of the user interface. It lists the screen's controls, such as buttons, labels and list boxes, with their position, size, textures, font and text. The game contains 91 GUI resources. 84 are in `data/gui.bif`, which holds nothing else, and 7 are in `patch.erf`. No other archive holds one: `chitin.key` lists type 2047 only for `gui.bif`, the 246 RIM files hold none, and the signature "GUI V3.2" occurs in no other file. The reader is `ReadGff` in `kotor/gff.go`, and the converter is the `gui` stage of `cmd/convert`. It writes one JSON file per resource, to `assets/data/gui/` for `gui.bif` and to `assets/patch/` for `patch.erf`.
+A GUI file (resource type 2047) describes one screen or panel of the user interface. It lists the screen's controls, such as buttons, labels and list boxes, with their position, size, textures, font and text. The game contains 91 GUI resources. 84 are in `data/gui.bif`, which holds nothing else, and 7 are in `patch.erf`. No other archive holds one: `chitin.key` lists type 2047 only for `gui.bif`, the 246 RIM files hold none, and the signature "GUI V3.2" occurs in no other file. The reader is `ReadGff` in `kotor/gff.go`. The `gui` stage of `cmd/convert` writes one JSON file per resource of `gui.bif` to `assets/data/gui/`, and the `patch` stage writes those of `patch.erf` to `assets/patch/`.
 
 ## Resources in patch.erf
 
@@ -1167,6 +1167,79 @@ BORDER, HILIGHT, SELECTED and HILIGHTSELECTED describe a frame and its fill. Eac
 Resrefs name textures and fonts. All 2,016 FONT values name a known resource. Of the CORNER, EDGE, FILL and IMAGE values that are not empty, all name a texture in the texture packs or a resource in `chitin.key`, except nine FILL names, for example `po_mzaalbar` and `georgem`. None of the nine occurs in a RIM archive either.
 
 The meanings of FILLSTYLE (0, 1 or 2), DIMENSION, INNEROFFSET, PULSING, DRAWSTYLE and FLIPSTYLE are UNKNOWN. ALIGNMENT takes only the values 9, 10, 12, 17, 18, 20 and 34. These values fit a bit field in which 1, 2 and 4 select the horizontal position and 8, 16 and 32 select the vertical position. This is a hypothesis that has not been tested. The meaning of COLOR (-1, -1, -1) is UNKNOWN. It may mean that no color is set.
+
+# Patch archive: patch.erf
+
+`patch.erf` is an ERF archive (see "ERF archive") in the game folder. It holds 97 resources that replace or add to resources stored elsewhere. Its header holds the build date day 47 of 2004, which is later than that of any other archive, so it is probably an update made after the game's release. Whether the game prefers these copies to the copies of the same name in other archives has not been observed. The `patch` stage of `cmd/convert` converts every resource to `assets/patch/`, and the `patch` stage of `cmd/verify` checks the output.
+
+The table below lists the contents by resource type.
+
+| Type                   | Resources | Relation to other archives                                 | Output                                      |
+| ---------------------- | --------- | ---------------------------------------------------------- | ------------------------------------------- |
+| GUI layout (2047)      | 7         | 5 have the name of a `gui.bif` layout, and 2 are new.      | `<resref>.json`                             |
+| TPC texture (3007)     | 84        | 75 have the name of a texture pack texture, and 9 are new. | `<resref>.png`, and `<resref>.txi` for 9    |
+| 2DA table (2017)       | 4         | All 4 have the name of a `2da.bif` table.                  | `<resref>.2da.csv`                          |
+| MDL model (2002)       | 1         | Has the name of an `items.bif` model.                      | `w_lghtsbr_008.obj` and `w_lghtsbr_008.mtl` |
+| MDX vertex data (3008) | 1         | Byte-for-byte identical to the `items.bif` copy.           | Used for the model, not written on its own  |
+
+The GUI layouts are described in "Resources in patch.erf" in the GUI section. Every resource of the other types has a different content from its namesake, except the MDX resource. The differences are described below.
+
+## Textures
+
+All 84 textures parse completely with the TPC parser: the header, the pixel data and the TXI trailer account for every byte. They form three groups.
+
+**Female head textures.** 75 textures are named `pfha01` to `pfhc05`, three series of five, each with the variants suffixed d, d1, d2 and d3. The name probably means "player female head". `rims/chargen.rim` holds 15 head models with the same base names, whose materials use these textures. `patch.erf` replaces all 75 `pfh` textures and none of the 76 male `pmh` textures.
+
+Each patch copy is 256x256 DXT1 with 9 mipmap levels, the same format as the `swpc_tex_tpa` copy, and is 43,832 bytes long. Each `swpc_tex_tpa` copy is 9 bytes longer because it ends with the TXI trailer "clamp 3" and CRLF. The patch copies have no trailer. The reason for removing it is UNKNOWN.
+
+In 60 of the 75 textures, the patch copy is otherwise byte-for-byte identical to the `swpc_tex_tpa` copy. The other 15 are `pfhc02`, `pfhc03` and `pfhc04` with their four variants each. In these, the top mipmap level differs only in the last column of 4x4 blocks, that is, in the rightmost 4 pixels of the image. The column differs in all 64 block rows of `pfhc02` and `pfhc03` and in 48 block rows of `pfhc04`, all in the top 212 image rows. Every lower mipmap level also differs in some bytes, which fits mipmaps that were generated again from the edited image. In the `swpc_tex_tpa` copies, this column holds stray colors that do not match the neighboring skin. In the patch copies, it holds smooth skin tones. The edit is probably a fix for a visible seam on the head model, but this has not been checked in the game.
+
+The patch copies are full size, whereas the `swpc_tex_tpb` and `swpc_tex_tpc` copies are 128x128 and 64x64. If the game prefers the patch copies, these heads would therefore appear at full resolution at every texture quality setting. This is a deduction that has not been tested.
+
+**Backgrounds for 1280x1024.** Seven textures are named `1280x1024` followed by `back`, `comp0`, `comp1`, `load`, `map`, `pazaak` or `store`. Each is 1024x1024 DXT1 with one mipmap level and the TXI trailer "mipmap 0", a space and CRLF. `swpc_tex_gui.erf` holds the same seven suffixes with the prefixes `800x600`, `1024x768`, `1280x960` and `1600x1200`, but not with `1280x1024`. Those 28 textures are DXT5. Why the patch uses DXT1 is UNKNOWN.
+
+The executable `swkotor.exe` holds the strings "800x600", "1600x1200", "1280x1024", "1280x960" and "1024x768" at file offsets 0x33DF7C to 0x33DFA8. The strings "comp", "map", "pazaak", "store" and "back" follow at 0x33E0B8 to 0x33E0D0. This suggests that the game builds a background name from the screen resolution and a suffix. The patch thus adds the backgrounds for a resolution that the executable names but the texture packs lack. The two new GUI layouts, `mipc212x10` and `tooltip12x10`, belong to the same resolution: their root EXTENT is 1280x1024, and their control tags equal, in order, those of `mipc212x9` and `tooltip12x9` in `gui.bif`.
+
+**Arrow buttons.** `cyclearrow1` and `cyclearrow2` are 64x64 DXT5 textures with one mipmap level, the value 0.2429 in the header float at 0x04, and the TXI trailer "mipmap 0". Both show an arrow that points left, blue in `cyclearrow1` and yellow in `cyclearrow2`. They are the BORDER FILL and HILIGHT FILL of the buttons BTN_CHARLEFT and BTN_CHARRIGHT, which the patch adds to the layouts `abilities`, `character`, `equip` and `inventory`. Both buttons use the same left-pointing images, and no field of these controls marks a mirrored image. How the right-hand button shows an arrow that points right is UNKNOWN.
+
+## Tables
+
+All four tables use the binary form "2DA V2.b" with tab separators and parse with `ParseTwoDa`. Each was compared cell by cell with its `2da.bif` copy, by row label and column label. The table below summarizes the differences.
+
+| Table             | Rows: `2da.bif`, patch | Differences                                                                                                                                                                                                                                                                                      |
+| ----------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bindablekeys`    | 85, 103                | The column `bindable` changes from 0 to 1 for the four arrow keys and from 1 to 0 for KEYBOARD_LEFTALT, KEYBOARD_RIGHTALT and KEYBOARD_PRINTSCREEN. Eighteen rows are added, `key85` to `key102`, for keys such as KEYBOARD_F13, KEYBOARD_MINUS and KEYBOARD_SLASH. Their `keynamestrref` is 0.  |
+| `keymap`          | 79, 80                 | A column `eventtype` is added. One row is added, `action265`, named WALKMODIFY, whose strings 49,142 and 49,143 in `dialog.tlk` read "Run / Walk" and describe a key that makes the character walk instead of run. In `AlternateActions` and `AlternateActions2`, `icpcgui` changes from 0 to 1. |
+| `skills`          | 8, 8                   | The `description` of row 3, Awareness, changes from string 250 to string 49,138. The new text omits the sentence "Running imparts a -5 penalty to any checks of the skill." and the clause saying results are best while moving slowly.                                                          |
+| `weapondischarge` | 64, 64                 | In row 363, `shots` and `hits` change from 1 to 2, `switchmask` changes from empty to "01", and `shot2` changes from empty to 900.                                                                                                                                                               |
+
+The new column `eventtype` of `keymap` holds 0 in 65 rows and 1 in the new row `action265`. It is empty in the 14 rows `action280a` to `action286b`, which name direction pairs such as ActionUp and CameraRotateLeft. Its meaning is UNKNOWN.
+
+In `weapondischarge`, the cells `shot1` to `shot12` appear to hold one value per shot. In 59 of the 61 patched rows that have a `shots` value, exactly that many shot cells are filled, and in 15 of the 17 rows with a `switchmask`, its length equals `shots`. The values range from 0 to 1,367 and may be times in milliseconds. The patch makes row 363 equal in shape to row 233, which has the same `shots`, `hits` and `switchmask`. The meaning of the row labels and the columns is otherwise UNKNOWN.
+
+All new string numbers, 49,138, 49,142 and 49,143, lie within the 49,265 entries of `dialog.tlk`, so the string table already contains the patched text.
+
+## Model
+
+`w_lghtsbr_008` is probably a lightsaber, as its name and its texture names `w_lghtsbr_001` and `w_lsabreturq01` suggest. The MDL resource is 52,323 bytes long in both `patch.erf` and `items.bif`, and the two copies differ in 826 bytes. The MDX resource is identical in both.
+
+Both copies pass the model converter. They have the same 7 nodes, 5 meshes, 1,006 vertices and 251 faces, and the same texture names. In the two OBJ files, every face, normal and texture coordinate is identical. Vertex positions differ by at most 0.000004. The vertex data is identical, so these small differences must come from the node transforms that the converter applies.
+
+Most differing bytes lie in unused bytes or in regions that the MDL section does not decode. For example, the model name at 0x08 of the model header is "w_Lghtsbr_008" followed by a NUL byte. In the rest of the 32-byte field, the bytes from 0x18 to 0x27 are not all zero in the `items.bif` copy, whereas the patch copy holds zeros from the NUL byte to the end of the field. In 177 of the 423 differing 4-byte words of the model data, the patch copy holds 0 where the `items.bif` copy holds another value. This suggests that the patch copy was written by a tool that clears unused memory, but the purpose of the other changes is UNKNOWN. The `items.bif` copy is not converted, because the models of `items.bif` are not converted.
+
+## Conversion and verification
+
+The `patch` stage of `cmd/convert` passes every resource to the converter that the BIF and RIM stages use. Textures become 8-bit RGBA PNG files, as in the texture packs, and a TXI file is written when the trailer holds text. Tables become CSV files, layouts become JSON files, and the model becomes an OBJ file with an MTL file. The MTL file refers to the PNG files in `assets/TexturePacks/swpc_tex_tpa/` by relative paths, and both textures exist there. All 97 resources pass: 84 textures, 7 layouts, 4 tables, the model, and the MDX resource, whose report line only confirms that a model of the same name exists.
+
+The `patch` stage of `cmd/verify` checks the output with independent tools. All checks pass:
+
+- ImageMagick decodes each of the 84 PNG files to exactly the pixels of the decoded TPC texture, and pngcheck accepts each of them.
+- Each of the 9 TXI files equals the texture's trailer.
+- Go's encoding/csv reader reads each of the 4 CSV files, and the values build again into the source table byte for byte.
+- jq parses each of the 7 JSON files.
+- assimp loads the OBJ file with the same face count as the file.
+
+A test with a deliberately wrong PNG file and a changed TXI file made the pixel check and the TXI check fail, as expected.
 
 # Music: streammusic/\*.wav
 
