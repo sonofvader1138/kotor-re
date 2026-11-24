@@ -67,6 +67,10 @@ var extensions = map[uint32]string{
 
 	// The room visibility lists are named after the extension that swkotor.exe appends to an area name.
 	3001: "vis",
+
+	// The room layouts are named after the extension ".lyt", which swkotor.exe stores beside the keywords
+	// "roomcount" and "trackcount".
+	3000: "lyt",
 }
 
 // Ext returns the file extension of a resource type, or the type code in decimal when the type is unknown.
@@ -92,8 +96,9 @@ type TgaGroup struct {
 }
 
 // ResourceBifs lists the BIF archives whose resources are converted one by one, without models: tables,
-// sounds, scripts, templates and the journal. Each archive becomes the folder assets/data/<name>.
-var ResourceBifs = []string{"2da", "sounds", "scripts", "templates", "_newbif"}
+// sounds, scripts, templates, the journal and the room layouts. Each archive becomes the folder
+// assets/data/<name>.
+var ResourceBifs = []string{"2da", "sounds", "scripts", "templates", "_newbif", "layouts"}
 
 var TgaGroups = []TgaGroup{
 	{"lightmaps", regexp.MustCompile(`^data/lightmaps\d*\.bif$`)},

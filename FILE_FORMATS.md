@@ -93,7 +93,7 @@ Many of the other types begin with a signature of four characters followed by a 
 | SSF V1.1  | 2060 (106)                                                                                                                                                                                                     |
 | LTR V1.0  | 2036 (3)                                                                                                                                                                                                       |
 
-In the "V3.2" row, the four characters before the version differ by type and are given beside each type number. Every resource of these types carries its signature. Types 4, 2009, 2017 and 3000 carry no such signature. Type 4 is a RIFF WAVE sound, type 2009 is NWScript source text and type 2017 is a binary 2DA table; these are described in the sections on global resources and on the BIF archives. The format of type 3000 is UNKNOWN.
+In the "V3.2" row, the four characters before the version differ by type and are given beside each type number. Every resource of these types carries its signature. Types 4, 2009, 2017 and 3000 carry no such signature. Type 4 is a RIFF WAVE sound, type 2009 is NWScript source text and type 2017 is a binary 2DA table; these are described in the sections on global resources and on the BIF archives. Type 3000 is a room layout, described in the section "Room layouts: LYT".
 
 ## ERF archive
 
@@ -308,7 +308,7 @@ The area's geometry and layout are in BIF archives under the area name. The reso
 
 | Type | Archive               | Content                                                                                                                         |
 | ---- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| 3000 | `data/layouts.bif`    | Text beginning with "#MAXLAYOUT ASCII". It lists the rooms with three coordinates each, for example `M02aa_03a 75.0 150.0 0.0`. |
+| 3000 | `data/layouts.bif`    | Room layout (LYT), described in the section "Room layouts: LYT".                                                               |
 | 3001 | `data/lightmaps*.bif` | Room visibility list (VIS), described in the section "Room visibility lists: VIS".                                             |
 | 2016 | `data/models.bif`     | Binary data beginning with "BWM V1.0", one per room model. This is probably the walkable surface.                               |
 
@@ -1059,6 +1059,82 @@ How a mesh selects its lightmap and which texture coordinates it uses are not do
 
 The lightmap archives also hold 112 room visibility lists of type 3001. They are described in the next section.
 
+# Room layouts: LYT
+
+A LYT file is the room layout of one area. It places the room models of the area, the track and obstacle models of the minigames, and the door hooks, the places where doors stand. It matters because the room models are stored without their position: the layout is what assembles them into an area. Each of the 124 files is one resource of type 3000 in `data/layouts.bif`, named after its area, such as `m01aa`. The parser is `ParseLyt` in `kotor/lyt.go`.
+
+The resource type is named LYT after the string ".lyt" in `swkotor.exe`. It stands next to the strings "trackcount", "roomcount" and "%s %f%f%f". Near them are "beginlayout", "donelayout", "%\*s%d", "%[^\r\n]" and "%s%s%d%f%f%f%f%f%f%f". These are scan formats of the C function `sscanf`, and they match the line forms below: a room or track line has a name and three floats, a count line has a keyword and an integer, and a door hook line has two names, an integer and seven floats. The strings "obstaclecount" and "doorhookcount" do not occur in the executable, so how the game finds those two sections is UNKNOWN.
+
+## Text layout
+
+A LYT file is ASCII text with CRLF line breaks, between 171 and 5,129 bytes long. The first line, "#MAXLAYOUT ASCII", and the misspelled keyword "filedependancy" suggest that the files were exported from 3ds Max. All 124 files have the lines below in the same order. The table gives each line form, its canonical indentation and its fields.
+
+| Line                | Indent   | Form                                                        | Evidence                                                                                 | Confidence |
+| ------------------- | -------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------- |
+| Signature           | none     | `#MAXLAYOUT ASCII`                                          | First line of all 124 files.                                                             | high       |
+| File dependency     | none     | `filedependancy` and the name of a 3ds Max scene            | Second line of all files. The name ends in ".max" in all files.                          | high       |
+| Begin               | none     | `beginlayout`                                               | Third line of all files. The string is in `swkotor.exe`.                                 | high       |
+| Room count          | 3 spaces | `roomcount` and a decimal count                             | All files. Followed by exactly that many room lines.                                     | high       |
+| Room                | 6 spaces | Model name and the position x, y and z as floats            | 1,401 lines. Matches the scan format "%s %f%f%f".                                        | high       |
+| Track count         | 3 spaces | `trackcount` and a decimal count                            | All files. Followed by exactly that many track lines.                                    | high       |
+| Track               | 6 spaces | Model name and position, as in a room line                  | 173 lines in 12 files.                                                                   | high       |
+| Obstacle count      | 3 spaces | `obstaclecount` and a decimal count                         | All files. Followed by exactly that many obstacle lines.                                 | high       |
+| Obstacle            | 6 spaces | Model name and position, as in a room line                  | 95 lines in 11 files.                                                                    | high       |
+| Door hook count     | 3 spaces | `doorhookcount` and a decimal count                         | All files. Followed by exactly that many door hook lines.                                | high       |
+| Door hook           | 6 spaces | Room name, door name, an integer, position and orientation  | 897 lines in 103 files. Matches the scan format "%s%s%d%f%f%f%f%f%f%f".                  | high       |
+| Done                | none     | `donelayout`                                                | Last line of all files. The string is in `swkotor.exe`.                                  | high       |
+
+Fields are separated by single spaces. Every count equals the number of entry lines that follow it, in all 496 sections of the 124 files. Numbers are written with at most six significant digits and always with a decimal point, such as "0.0" and "-1.31576", or in exponent form with three exponent digits, such as "1.26441e-007". This is the form of the C format "%g" in Microsoft's runtime library, with ".0" added to whole numbers. The game reads them as 32-bit floats.
+
+The fields of a door hook line are given in the table below, in line order.
+
+| Field       | Type     | Meaning                                                   | Evidence                                                                                                                       | Confidence |
+| ----------- | -------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| Room        | name     | Room model that holds the door                            | Outside the `stunt_` areas, all 838 hooks name a room of the same layout.                                                       | high       |
+| Door        | name     | Name of a node in the room model, such as `Door_02`       | Of the 893 hooks whose room has a model, 889 name a node of that model. All names are "Door_" or "door_" and a number.          | high       |
+| Unknown     | integer  | UNKNOWN                                                   | The value is 0 in all 897 lines.                                                                                                | low        |
+| x, y, z     | 3 floats | Position of the door in area coordinates                  | Module door instances stand at these positions (see below).                                                                    | high       |
+| w, x, y, z  | 4 floats | Orientation of the door as a unit quaternion, w first     | All 897 quaternions have length 1. In 885 the second and third value are 0, which leaves a rotation about the vertical axis.    | high       |
+
+The positions are in the coordinates of the area, with z pointing up. Room models are built around their own origin, while the rooms stand far from the origin of the area. In half of the 1,162 room models with geometry, no vertex lies farther than 24.7 units from the model origin along x or y. The median room line places its room 155.6 units from the area origin horizontally. The room line therefore gives the translation that moves the room into the area. No line holds a rotation of a room, a track or an obstacle. Of the 1,401 room lines, 505 have a z other than 0.
+
+## Comparison with the module door instances
+
+The door hooks agree with the door instances of the modules. The GIT files of the modules (see "Modules") list each door with its position "X", "Y", "Z" and its "Bearing", a rotation about the vertical axis in radians. For each of the 716 doors of the GIT files whose area has a layout, the nearest door hook of that layout was found.
+
+- 673 doors stand within 0.01 units of a door hook, 38 within 0.5 units, and 5 farther away.
+- For 664 of the 673 close pairs, the bearing equals the rotation 2·atan2(z, w) of the quaternion, read with w first. For the other 9, it differs by half a turn.
+
+This confirms both the position fields and the order of the quaternion. Whether the game uses the door hooks or the GIT positions to place doors is UNKNOWN.
+
+## Model names
+
+Every room, track and obstacle name, apart from the placeholder below, names a model in `data/models.bif`, ignoring case. This holds for all 1,267 such rooms, all 173 tracks and all 95 obstacles. Names are written in mixed case, such as `M01aa_08c`. Track models are named like `m03mg_MGT02` and obstacle models like `m03mg_MGO01`. They belong to the areas `m03mg`, `m17mg`, `m26mg` and `m45mg`, which are probably the swoop races, and to `m12ab` to `m12ah` and `mgf_ebonhawk`. The track `MGF_turretcam` of `mgf_ebonhawk` suggests that the latter are the turret minigame. In the seven areas `m12ab` to `m12ah`, all 49 track lines place their track at the origin of the area.
+
+The 13 `stunt_` areas are copies of other areas used for cutscenes. Their file dependency names the original scene, such as `M01aa.max` for `stunt_endbridge`, while the other 111 files name their own area. In 11 of them, 134 room lines have the name `****` in place of a room. They keep the position of the original room, which suggests that the room is left out. Their door hooks still name the original rooms: 59 hooks name a room that the layout does not list.
+
+## Irregularities
+
+The parser accepts the following irregularities. It reports them, and it fails on any other deviation from the line forms above.
+
+- In the six areas `m12ac` to `m12ah`, the single room line is indented by a tab. The scan formats skip any white space, so this has no effect.
+- In `m12aa`, the 9 bytes "M12aa_01m" follow the line break of the closing line, without a line break of their own. They name a room of the same layout. The game probably stops reading at the closing line.
+
+## Conversion and verification
+
+The converter writes each file to `assets/data/layouts/<area>.lyt.json`. The JSON object has these members:
+
+- "filedependancy", the scene name as written;
+- "rooms", "tracks" and "obstacles", with one object per line in file order, each with "model" and "position", an array of x, y and z;
+- "doorhooks", with one object per line, each with "room", "door", "unknown", "position" and "orientation", an array of w, x, y and z;
+- "trailer", the text after the closing line, which is empty except in `m12aa`.
+
+The counts are the lengths of the arrays. Indentation is not kept. Numbers are written with the fewest digits that read back as the same 64-bit float as the text.
+
+The parser passes for all 124 files: it consumes every byte, finds only printable ASCII, tabs and CRLF line breaks, and finds every count equal to the number of entries.
+
+The verifier reads each JSON file with jq and builds the lines of the layout again, with the counts taken from the array lengths. It compares them with the source lines field by field: names as text and numbers by value, because jq writes numbers in its own form. White space is not compared. The trailer must equal the bytes after the closing line. All 124 files match. Two tests were reported as failures: one position changed in `m01aa.lyt.json`, and the trailer of `m12aa.lyt.json` removed.
+
 # Room visibility lists: VIS
 
 A VIS file lists, for each room of an area, the other rooms that can be seen from it. The game probably uses it to decide which room models to draw. Each of the 112 files is one resource of type 3001 in `data/lightmaps*.bif`, named after its area, such as `m01aa`. The archives hold between 3 (`lightmaps12.bif`) and 31 (`lightmaps13.bif`) of them. The parser is `ParseVis` in `kotor/vis.go`.
@@ -1086,7 +1162,7 @@ Each file holds between 1 and 54 rooms, and each room lists between 0 and 44 vis
 
 ## Relation to room layouts
 
-The room names agree with the room layouts (LYT, type 3000) of `data/layouts.bif`, which list each area's rooms with their positions. This is the main evidence that the file is about rooms. The comparison below ignores case.
+The room names agree with the room layouts (LYT, type 3000) of `data/layouts.bif`, described in the previous section, which list each area's rooms with their positions. This is the main evidence that the file is about rooms. The comparison below ignores case.
 
 - 111 of the 112 areas have a layout of the same name. Only `m47ac` has none. Thirteen layouts, such as `m09zz` and `m12ac`, have no VIS file.
 - In these 111 areas, 1,190 of the 1,248 room lines name a room of the layout. The other 58 are in 14 areas, such as `m02ae`, `m25aa` and `m40ab`, and are probably rooms that were renamed or removed after the file was made. In `m41az`, six room lines name rooms of `m41ad` instead.

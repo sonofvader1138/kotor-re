@@ -670,6 +670,7 @@ var checkTools = []struct{ kind, program string }{
 //   - A script listing must assemble to the source script.
 //   - The string numbers of an SSF JSON file, read with jq, must build again into the source sound set.
 //   - A letter table JSON file, read with jq, must build again into the source letter table.
+//   - A room layout JSON file, read with jq, must build again into the source layout (see checkLytJson).
 //   - A script source, converted back to Windows-1252 by iconv, must equal the source bytes.
 //   - A TXI file must equal the source bytes.
 //   - A texture PNG, decoded by ImageMagick, must equal the decoded TPC texture, and pngcheck must accept it.
@@ -722,6 +723,9 @@ func addResourceChecks(jobs map[string][]job, label, path, ext string, source []
 
 	case "ltr":
 		add("jq", ".ltr.json", func(path string) string { return checkLtrJson(path, source) })
+
+	case "lyt":
+		add("jq", ".lyt.json", func(path string) string { return checkLytJson(path, source) })
 
 	case "nss":
 		add("iconv", ".nss", func(path string) string {
@@ -996,6 +1000,65 @@ func checkVisJson(path string, source []byte) string {
 
 	if built != canonical.String() {
 		return fmt.Sprintf("built %d bytes differ from the %d canonical source bytes", len(built), canonical.Len())
+	}
+	return ""
+}
+
+// lytProgram prints the lines of a room layout from its JSON: the header, each section's count line and
+// entries, and the closing line, followed by the trailer as a JSON string.
+const lytProgram = `"#MAXLAYOUT ASCII", "filedependancy " + .filedependancy, "beginlayout",
+	((["rooms", "roomcount"], ["tracks", "trackcount"], ["obstacles", "obstaclecount"]) as [$key, $keyword]
+		| "   \($keyword) \(.[$key] | length)",
+		(.[$key][] | "      " + ([.model] + (.position | map(tostring)) | join(" ")))),
+	"   doorhookcount \(.doorhooks | length)",
+	(.doorhooks[] | "      " + ([.room, .door, (.unknown | tostring)] + (.position + .orientation | map(tostring)) | join(" "))),
+	"donelayout", (.trailer | tojson)`
+
+// checkLytJson builds the lines of a room layout from the JSON that jq reads and compares them with the
+// lines of the source up to its closing line, field by field: names as text and numbers by value, because
+// jq writes numbers in its own form, such as 1.26441e-07 for 1.26441e-007. White space is not compared,
+// because the game reads the fields with scan formats that skip it. The text after the closing line must
+// equal the trailer.
+func checkLytJson(path string, source []byte) string {
+	result := kotor.Exec("jq", []string{"-r", lytProgram, path}, nil)
+	if result.Status != 0 {
+		return "jq: " + kotor.FirstLine(result.Stderr)
+	}
+	built := strings.Split(strings.TrimSuffix(string(result.Stdout), "\n"), "\n")
+
+	var trailer string
+	if err := json.Unmarshal([]byte(built[len(built)-1]), &trailer); err != nil {
+		return "bad trailer: " + err.Error()
+	}
+	built = built[:len(built)-1]
+
+	const closing = "\r\ndonelayout"
+	text := string(source)
+	end := strings.Index(text, closing)
+	if end < 0 {
+		return "source has no closing line"
+	}
+
+	rest := strings.TrimPrefix(text[end+len(closing):], "\r\n")
+	if rest != trailer {
+		return fmt.Sprintf("trailer %q differs from the source %q", trailer, rest)
+	}
+
+	lines := append(strings.Split(text[:end], "\r\n"), "donelayout")
+	if len(lines) != len(built) {
+		return fmt.Sprintf("built %d lines, the source has %d", len(built), len(lines))
+	}
+	for i := range lines {
+		want, got := strings.Fields(lines[i]), strings.Fields(built[i])
+		same := len(want) == len(got)
+		for j := 0; same && j < len(want); j++ {
+			wantValue, wantErr := strconv.ParseFloat(want[j], 64)
+			gotValue, gotErr := strconv.ParseFloat(got[j], 64)
+			same = want[j] == got[j] || (wantErr == nil && gotErr == nil && wantValue == gotValue)
+		}
+		if !same {
+			return fmt.Sprintf("line %d: built %q, the source has %q", i+1, built[i], lines[i])
+		}
 	}
 	return ""
 }

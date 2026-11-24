@@ -606,6 +606,7 @@ func newResourceInputs() *resourceInputs {
 //   - A GUI layout becomes <resref>.json in the form of gffJson. It must use every byte of its regions.
 //   - A letter table becomes <resref>.ltr.json (see ltrJson).
 //   - A room visibility list becomes <resref>.vis.json (see visJson). It needs no inputs.
+//   - A room layout becomes <resref>.lyt.json (see lytJson). It needs no inputs.
 //   - Every other type is a GFF file and becomes <resref>.<ext>.json (see gffFile).
 func writeResource(dir, label string, resource kotor.Resource, mdx []byte, inputs *resourceInputs) (string, []string) {
 	var line string
@@ -722,6 +723,19 @@ func writeResource(dir, label string, resource kotor.Resource, mdx []byte, input
 		file += ".json"
 		if len(vis.Errors) == 0 {
 			text, err := json.MarshalIndent(visJson(vis), "", "\t")
+			if err != nil {
+				line = label + " FAIL: " + err.Error()
+			} else {
+				output = append(text, '\n')
+			}
+		}
+
+	case "lyt":
+		lyt := kotor.ParseLyt(resource.Data)
+		line = kotor.ReportLyt(label, lyt)
+		file += ".json"
+		if len(lyt.Errors) == 0 {
+			text, err := json.MarshalIndent(lytJson(lyt), "", "\t")
 			if err != nil {
 				line = label + " FAIL: " + err.Error()
 			} else {

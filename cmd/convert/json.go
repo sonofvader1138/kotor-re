@@ -250,3 +250,49 @@ func visJson(vis *kotor.Vis) *orderedObject {
 	object.set("rooms", rooms)
 	return object
 }
+
+// lytJson turns a room layout into an object with "filedependancy", the name of the 3ds Max scene, spelled as
+// in the file; "rooms", "tracks" and "obstacles", one object per entry with "model" and "position" (x, y, z);
+// "doorhooks", one object per door hook with "room", "door", "unknown" (the integer after the door name),
+// "position" and "orientation" (a quaternion as w, x, y, z); and "trailer", the text after the closing line.
+// The counts are the lengths of the arrays. Indentation and a missing final line break are not kept.
+func lytJson(lyt *kotor.Lyt) *orderedObject {
+	numbers := func(values []float64) []any {
+		list := make([]any, len(values))
+		for i, value := range values {
+			list[i] = number(value, 64)
+		}
+		return list
+	}
+
+	placements := func(entries []kotor.LytPlacement) []any {
+		list := make([]any, len(entries))
+		for i, entry := range entries {
+			object := &orderedObject{}
+			object.set("model", entry.Model)
+			object.set("position", numbers(entry.Position[:]))
+			list[i] = object
+		}
+		return list
+	}
+
+	hooks := make([]any, len(lyt.DoorHooks))
+	for i, hook := range lyt.DoorHooks {
+		object := &orderedObject{}
+		object.set("room", hook.Room)
+		object.set("door", hook.Door)
+		object.set("unknown", hook.Unknown)
+		object.set("position", numbers(hook.Position[:]))
+		object.set("orientation", numbers(hook.Orientation[:]))
+		hooks[i] = object
+	}
+
+	object := &orderedObject{}
+	object.set("filedependancy", lyt.Dependency)
+	object.set("rooms", placements(lyt.Rooms))
+	object.set("tracks", placements(lyt.Tracks))
+	object.set("obstacles", placements(lyt.Obstacles))
+	object.set("doorhooks", hooks)
+	object.set("trailer", lyt.Trailer)
+	return object
+}
