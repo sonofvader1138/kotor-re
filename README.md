@@ -437,7 +437,7 @@ Every GFF file is converted to JSON by `gffJson` in `cmd/convert/json.go`. Each 
 | 14, 15        | An object, or an array of objects.                                                                                                                                                                     |
 | 16, 17        | An array of four or three numbers in file order.                                                                                                                                                       |
 
-The following example shows the area name in `assets/modules/tar_m02aa/m02aa.are.json`.
+The following example shows the area name in `extracted/modules/tar_m02aa/m02aa.are.json`.
 
 ```
 	"Name": {
@@ -454,7 +454,7 @@ The only string byte above 0x7F in the GUI files is 0xB1 in six strings, which i
 
 A module is one playable location of the game, such as one district of a planet. The folder `modules/` holds 117 modules in 234 RIM archives, 70 MB in total. Each module consists of two archives: `<module>.rim`, called the main archive here, and `<module>_s.rim`, called the support archive here. The main archive describes the area and the objects placed in it. The support archive holds the templates, dialogs and scripts that those objects use. The area's 3D geometry is not in the module; it is in the BIF archives (see "Links to other files" below).
 
-The reader is `ReadRim` in `kotor/kotor.go`. Every resource except the scripts is read with `ReadGff` in `kotor/gff.go`, and the scripts are read with `ParseNcs` in `kotor/ncs.go`. The `modules` stage of `cmd/convert` converts every resource to `assets/modules/` and writes one report line per resource to `temp/reports/modules.txt` (see "Conversion and verification" below). All 234 archives pass: each RIM table parses, all 9,712 GFF resources parse with the signature that matches their resource type and version "V3.2", and all 10,863 scripts decode completely.
+The reader is `ReadRim` in `kotor/kotor.go`. Every resource except the scripts is read with `ReadGff` in `kotor/gff.go`, and the scripts are read with `ParseNcs` in `kotor/ncs.go`. The `modules` stage of `cmd/convert` converts every resource to `extracted/modules/` and writes one report line per resource to `temp/reports/modules.txt` (see "Conversion and verification" below). All 234 archives pass: each RIM table parses, all 9,712 GFF resources parse with the signature that matches their resource type and version "V3.2", and all 10,863 scripts decode completely.
 
 ## Archive pairs
 
@@ -642,13 +642,13 @@ The module scripts call 401 of the 772 routines. The most frequent calls are Get
 
 ## Conversion and verification
 
-The `modules` stage of `cmd/convert` converts every resource of the 234 archives. Its output keeps the layout of the game files: one folder `assets/modules/<archive>/` per archive, named after the archive without `.rim`, so a module has a main folder such as `tar_m02aa` and a support folder such as `tar_m02aa_s`. The report is `temp/reports/modules.txt`, with one line per resource. All 20,575 resources pass.
+The `modules` stage of `cmd/convert` converts every resource of the 234 archives. Its output keeps the layout of the game files: one folder `extracted/modules/<archive>/` per archive, named after the archive without `.rim`, so a module has a main folder such as `tar_m02aa` and a support folder such as `tar_m02aa_s`. The report is `temp/reports/modules.txt`, with one line per resource. All 20,575 resources pass.
 
 A GFF resource becomes `<resref>.<ext>.json` in the JSON form described under "Generic file format: GFF", for example `m02aa.are.json`. The extension stays in the name because the ARE and GIT files of an area share a resref. The report lines of the 29 module files with unreferenced bytes give the number of those bytes.
 
 The localized strings resolve completely. The module files hold 77,261 localized strings. Of these, 34,261 have no string number, and the other 43,000 name 33,882 distinct entries of `dialog.tlk`. Every one of these entries exists and has text. The largest string number is 49,137, below the 49,265 entries of the table.
 
-A compiled script becomes `<resref>.ncs.txt`, a disassembly listing. No standard format exists for NWScript bytecode, so a text listing is the most widely readable form. The following example shows `assets/modules/tar_m02aa_s/k_act_carthjoin.ncs.txt`.
+A compiled script becomes `<resref>.ncs.txt`, a disassembly listing. No standard format exists for NWScript bytecode, so a text listing is the most widely readable form. The following example shows `extracted/modules/tar_m02aa_s/k_act_carthjoin.ncs.txt`.
 
 ```
 ; warning: ACTION AddPartyMember at 0x29 passes 1 arguments
@@ -772,7 +772,7 @@ The four IMA ADPCM files are `cb_sh_blast1`, `cb_sh_hvybl1`, `cb_sh_medbl1` and 
 
 ## Conversion and verification
 
-The `rims` stage of `cmd/convert` writes one folder `assets/rims/<archive>/` per archive without "dx" and writes the report `temp/reports/rims.txt`. The report has one line per archive and one line per resource, except the MDX resources, which are read together with their models. All 1,696 lines pass: the 12 archive tables, 239 models, 375 sounds, 306 tables, 210 sound sets, 62 item templates and 492 scripts. The resources become the files below.
+The `rims` stage of `cmd/convert` writes one folder `extracted/rims/<archive>/` per archive without "dx" and writes the report `temp/reports/rims.txt`. The report has one line per archive and one line per resource, except the MDX resources, which are read together with their models. All 1,696 lines pass: the 12 archive tables, 239 models, 375 sounds, 306 tables, 210 sound sets, 62 item templates and 492 scripts. The resources become the files below.
 
 | Resource     | Output                         | Form                                                                                                                           |
 | ------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
@@ -783,7 +783,7 @@ The `rims` stage of `cmd/convert` writes one folder `assets/rims/<archive>/` per
 | UTI          | `<resref>.uti.json`            | The JSON form described under "Generic file format: GFF".                                                                      |
 | NCS          | `<resref>.ncs.txt`             | The disassembly listing of the module files.                                                                                   |
 
-The models refer to textures by the same relative path as the models of `data/models.bif`, and every texture they name is found in the texture packs. The CSV files do not record the separator byte of the source table. The following example shows `assets/rims/global/aiscripts.2da.csv`.
+The models refer to textures by the same relative path as the models of `data/models.bif`, and every texture they name is found in the texture packs. The CSV files do not record the separator byte of the source table. The following example shows `extracted/rims/global/aiscripts.2da.csv`.
 
 ```
 ,label,name_strref,description_strref,aistate
@@ -800,11 +800,11 @@ Five BIF archives hold rule tables, sound effects, scripts, object templates and
 
 | Archive         | Resources | Contents                                                     | Output                    |
 | --------------- | --------- | ------------------------------------------------------------ | ------------------------- |
-| `2da.bif`       | 209       | 209 2DA tables                                               | `assets/data/2da/`        |
-| `sounds.bif`    | 1,928     | 1,928 WAV sounds                                             | `assets/data/sounds/`     |
-| `scripts.bif`   | 3,558     | 1,784 compiled scripts (NCS) and 1,774 script sources (NSS)  | `assets/data/scripts/`    |
-| `templates.bif` | 1,387     | 1,277 GFF files of 12 types, 106 SSF sound sets, 3 LTR, 1 TXI | `assets/data/templates/` |
-| `_newbif.bif`   | 1         | 1 journal (JRL), `global`                                    | `assets/data/_newbif/`    |
+| `2da.bif`       | 209       | 209 2DA tables                                               | `extracted/data/2da/`        |
+| `sounds.bif`    | 1,928     | 1,928 WAV sounds                                             | `extracted/data/sounds/`     |
+| `scripts.bif`   | 3,558     | 1,784 compiled scripts (NCS) and 1,774 script sources (NSS)  | `extracted/data/scripts/`    |
+| `templates.bif` | 1,387     | 1,277 GFF files of 12 types, 106 SSF sound sets, 3 LTR, 1 TXI | `extracted/data/templates/` |
+| `_newbif.bif`   | 1         | 1 journal (JRL), `global`                                    | `extracted/data/_newbif/`    |
 
 ## 2DA tables
 
@@ -881,7 +881,7 @@ The order of the sets and of the letters follows from three checks, which hold i
 
 ## Conversion and verification
 
-The `bifs` stage of `cmd/convert` writes one folder `assets/data/<archive>/` per archive and the report `temp/reports/bifs.txt`. All 7,207 lines pass: 7,083 for the five archives and 124 for `layouts.bif`. The resources become the files below. The 2DA, SSF, NCS and GFF resources use the same forms as in `rims/` and the modules.
+The `bifs` stage of `cmd/convert` writes one folder `extracted/data/<archive>/` per archive and the report `temp/reports/bifs.txt`. All 7,207 lines pass: 7,083 for the five archives and 124 for `layouts.bif`. The resources become the files below. The 2DA, SSF, NCS and GFF resources use the same forms as in `rims/` and the modules.
 
 | Resource | Output                    | Form                                                                                                                                       |
 | -------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -894,7 +894,7 @@ The `bifs` stage of `cmd/convert` writes one folder `assets/data/<archive>/` per
 | TXI      | `<resref>.txi`            | Copied unchanged.                                                                                                                         |
 | GFF      | `<resref>.<ext>.json`     | The JSON form described under "Generic file format: GFF", for all 13 GFF file types including the journal.                               |
 
-The JSON form of an LTR file is an object with "letters", the 28 letters in table order; "single", the single-letter set; "double", an object keyed by the preceding letter; and "triple", an object keyed by the preceding pair. Each set is an object with "start", "middle" and "end", each an array of the 28 stored values in file order. The values are the stored cumulative probabilities, written with the shortest decimal that reads back as the same f32. The example below shows the start of `assets/data/templates/humanf.ltr.json`.
+The JSON form of an LTR file is an object with "letters", the 28 letters in table order; "single", the single-letter set; "double", an object keyed by the preceding letter; and "triple", an object keyed by the preceding pair. Each set is an object with "start", "middle" and "end", each an array of the 28 stored values in file order. The values are the stored cumulative probabilities, written with the shortest decimal that reads back as the same f32. The example below shows the start of `extracted/data/templates/humanf.ltr.json`.
 
 ```json
 {
@@ -973,11 +973,11 @@ The sound resref names a WAV file without its extension, compared without regard
 
 Another 647 entries name a sound that exists both in `data/sounds.bif` and in `streamsounds/`, such as `p_bastila_bat1`. They are counted in the first row.
 
-Most names without a file are player replies. Voiced lines start with `n`, for example `nglobeband01000_`. A player reply starts with `_` in the same position, for example `_m35aabast06535_`, and has no sound file because the player character is not voiced. The evidence comes from the 1,135 dialog (DLG) files in `assets/modules`. Their NPC lines (EntryList) name 17,343 distinct entries whose sound starts with `n` and 1 whose sound starts with `_`. Their player replies (ReplyList) name 7,439 distinct entries whose sound starts with `_` and none whose sound starts with `n`. Of the 10,065 entries whose sound starts with `_`, only one has a file. The remaining 2,464 names without a file mostly start with `n` (2,351), and include `move2` and `droid2`. Why these files are missing is UNKNOWN.
+Most names without a file are player replies. Voiced lines start with `n`, for example `nglobeband01000_`. A player reply starts with `_` in the same position, for example `_m35aabast06535_`, and has no sound file because the player character is not voiced. The evidence comes from the 1,135 dialog (DLG) files in `extracted/modules`. Their NPC lines (EntryList) name 17,343 distinct entries whose sound starts with `n` and 1 whose sound starts with `_`. Their player replies (ReplyList) name 7,439 distinct entries whose sound starts with `_` and none whose sound starts with `n`. Of the 10,065 entries whose sound starts with `_`, only one has a file. The remaining 2,464 names without a file mostly start with `n` (2,351), and include `move2` and `droid2`. Why these files are missing is UNKNOWN.
 
 ## Conversion and verification
 
-The `tlk` stage of `cmd/convert` writes `assets/dialog.tlk.json`. It is an object with "language", the u32 at header offset 0x08, and "entries", one object per entry in file order. Each entry has "strref", its number; "flags"; "sound"; and "text". The sound and the text are empty strings when the entry has none. The form leaves out the three unknown fields and the text offsets, so `ReadTlk` rejects a file in which an unknown field is not 0 or an entry without text has an offset other than 0. The example below shows the start of the file.
+The `tlk` stage of `cmd/convert` writes `extracted/dialog.tlk.json`. It is an object with "language", the u32 at header offset 0x08, and "entries", one object per entry in file order. Each entry has "strref", its number; "flags"; "sound"; and "text". The sound and the text are empty strings when the entry has none. The form leaves out the three unknown fields and the text offsets, so `ReadTlk` rejects a file in which an unknown field is not 0 or an entry without text has an offset other than 0. The example below shows the start of the file.
 
 ```json
 {
@@ -1250,7 +1250,7 @@ The perimeter table is a list of u32 values. Each value is the end of one perime
 
 ## Conversion and verification
 
-The models stage of `cmd/convert` writes each walkmesh that has faces to `assets/data/models/<resref>.<ext>.obj`, for example `m01aa_01a.wok.obj`. Faces keep their order. A "usemtl" line names the face material, such as `07_Nonwalk`, whenever it changes. All walkmesh OBJ files share the material library `walkmesh.mtl`, which gives each row of `surfacemat.2da` its own color: bright for walkable materials and dark for the others. The 1,258 files are 980 area, 156 door and 122 placeable walkmeshes.
+The models stage of `cmd/convert` writes each walkmesh that has faces to `extracted/data/models/<resref>.<ext>.obj`, for example `m01aa_01a.wok.obj`. Faces keep their order. A "usemtl" line names the face material, such as `07_Nonwalk`, whenever it changes. All walkmesh OBJ files share the material library `walkmesh.mtl`, which gives each row of `surfacemat.2da` its own color: bright for walkable materials and dark for the others. The 1,258 files are 980 area, 156 door and 122 placeable walkmeshes.
 
 An OBJ file cannot hold the other data, so each walkmesh also gets `<resref>.<ext>.json`. It holds the type, the position, the use points, and the perimeters, with each edge's face, edge number within the face and transition. The AABB tree and the adjacency table can be rebuilt from the faces and are not written.
 
@@ -1339,11 +1339,11 @@ Most reduced textures are cut from the tpa mipmap chain. A texture reduced by a 
 
 The other 35 reduced textures in each pack are plain textures with a single mipmap level in tpa, so no lower level exists to copy. Their reduced pixels were computed in some other way, and the resampling filter is UNKNOWN. Examples are biowarelogo, plc_water01b and lta_tech01b.
 
-The reduced packs are converted the same way as tpa, to `assets/TexturePacks/swpc_tex_tpb/` and `assets/TexturePacks/swpc_tex_tpc/`. Model materials still refer to the tpa and gui PNG files.
+The reduced packs are converted the same way as tpa, to `extracted/TexturePacks/swpc_tex_tpb/` and `extracted/TexturePacks/swpc_tex_tpc/`. Model materials still refer to the tpa and gui PNG files.
 
 ## Conversion to model materials
 
-Each converted model has an MTL (material library) file beside its OBJ file. The MTL file defines one material per texture name, and each material points at the PNG in `assets/TexturePacks/swpc_tex_tpa/`, or in `swpc_tex_gui/` if the name is only found there. Texture names are compared without regard to case. Of the 1,401 distinct texture names that rendered meshes refer to, 1,364 are found. The converter lists the remaining 37 in its summary and marks them in the MTL files. Eight of the 37 are resources of other types in the BIF archives. Five, `m17mg_01c_a0001l` to `m17mg_01c_a0001p`, are TGA images in `lightmaps6.bif`, which are converted to `assets/data/lightmaps/` but are not linked from the MTL files. Two, `load_sw` and `n_repsold`, are model names. One, `h_f_lo01headtest`, exists only as a TXI file in `textures.bif`. The other 29 names occur in no archive. Of all 37, only `n_repsold` also occurs in a RIM archive.
+Each converted model has an MTL (material library) file beside its OBJ file. The MTL file defines one material per texture name, and each material points at the PNG in `extracted/TexturePacks/swpc_tex_tpa/`, or in `swpc_tex_gui/` if the name is only found there. Texture names are compared without regard to case. Of the 1,401 distinct texture names that rendered meshes refer to, 1,364 are found. The converter lists the remaining 37 in its summary and marks them in the MTL files. Eight of the 37 are resources of other types in the BIF archives. Five, `m17mg_01c_a0001l` to `m17mg_01c_a0001p`, are TGA images in `lightmaps6.bif`, which are converted to `extracted/data/lightmaps/` but are not linked from the MTL files. Two, `load_sw` and `n_repsold`, are model names. One, `h_f_lo01headtest`, exists only as a TXI file in `textures.bif`. The other 29 names occur in no archive. Of all 37, only `n_repsold` also occurs in a RIM archive.
 
 The PNG files keep their alpha channel, but the MTL files do not declare it as transparency. In KotOR the alpha channel of some textures appears to hold other data, such as an environment map mask, rather than transparency. This has not been verified.
 
@@ -1355,9 +1355,9 @@ The images are in three groups. The table below lists each group, its archives a
 
 | Archives                                               | Images | Layout                            | Output                   |
 | ------------------------------------------------------ | ------ | --------------------------------- | ------------------------ |
-| `lightmaps.bif`, `lightmaps2.bif` to `lightmaps13.bif` | 5,586  | 32-bit BGRA, sizes 2x2 to 512x512 | `assets/data/lightmaps/` |
-| `textures.bif`                                         | 14     | 8-bit grayscale, 256x256          | `assets/data/textures/`  |
-| `legacy.bif`                                           | 1      | 24-bit BGR, 256x256 (`chrome1`)   | `assets/data/legacy/`    |
+| `lightmaps.bif`, `lightmaps2.bif` to `lightmaps13.bif` | 5,586  | 32-bit BGRA, sizes 2x2 to 512x512 | `extracted/data/lightmaps/` |
+| `textures.bif`                                         | 14     | 8-bit grayscale, 256x256          | `extracted/data/textures/`  |
+| `legacy.bif`                                           | 1      | 24-bit BGR, 256x256 (`chrome1`)   | `extracted/data/legacy/`    |
 
 All 5,601 images pass the parser's check: the header, the optional image ID, the pixels and the optional trailer account for every byte of the file. No resource name occurs twice within a group, so each output directory is flat.
 
@@ -1473,7 +1473,7 @@ The parser accepts the following irregularities. It reports them, and it fails o
 
 ## Conversion and verification
 
-The `bifs` stage of `cmd/convert` writes each file to `assets/data/layouts/<area>.lyt.json`. The JSON object has these members:
+The `bifs` stage of `cmd/convert` writes each file to `extracted/data/layouts/<area>.lyt.json`. The JSON object has these members:
 
 - "filedependancy", the scene name as written;
 - "rooms", "tracks" and "obstacles", with one object per line in file order, each with "model" and "position", an array of x, y and z;
@@ -1526,7 +1526,7 @@ The visible rooms are not simply the rooms nearby. Using the layout positions, t
 
 ## Conversion and verification
 
-The `tga` stage of `cmd/convert` writes each file to `assets/data/lightmaps/<area>.vis.json`, beside the lightmaps. The JSON object has "rooms", an array with one object per room line in file order. Each room has "room", the name as written; "count", the count as written, or null when the line has none; and "visible", the names of the visible-room lines in file order. Extra spaces and a missing final line break are not kept.
+The `tga` stage of `cmd/convert` writes each file to `extracted/data/lightmaps/<area>.vis.json`, beside the lightmaps. The JSON object has "rooms", an array with one object per room line in file order. Each room has "room", the name as written; "count", the count as written, or null when the line has none; and "visible", the names of the visible-room lines in file order. Extra spaces and a missing final line break are not kept.
 
 The parser passes for all 112 files: it consumes every byte, finds only printable ASCII and CRLF line breaks, and finds no line of another form. Its report lists the irregularities of each file.
 
@@ -1534,7 +1534,7 @@ The `tga` stage of `cmd/verify` reads each JSON file with jq, reports in `temp/r
 
 # User interface layouts: GUI
 
-A GUI file (resource type 2047) describes one screen or panel of the user interface. It lists the screen's controls, such as buttons, labels and list boxes, with their position, size, textures, font and text. The game contains 91 GUI resources. 84 are in `data/gui.bif`, which holds nothing else, and 7 are in `patch.erf`. No other archive holds one: `chitin.key` lists type 2047 only for `gui.bif`, the 246 RIM files hold none, and the signature "GUI V3.2" occurs in no other file. The reader is `ReadGff` in `kotor/gff.go`. The `gui` stage of `cmd/convert` writes one JSON file per resource of `gui.bif` to `assets/data/gui/`, and the `patch` stage writes those of `patch.erf` to `assets/patch/`.
+A GUI file (resource type 2047) describes one screen or panel of the user interface. It lists the screen's controls, such as buttons, labels and list boxes, with their position, size, textures, font and text. The game contains 91 GUI resources. 84 are in `data/gui.bif`, which holds nothing else, and 7 are in `patch.erf`. No other archive holds one: `chitin.key` lists type 2047 only for `gui.bif`, the 246 RIM files hold none, and the signature "GUI V3.2" occurs in no other file. The reader is `ReadGff` in `kotor/gff.go`. The `gui` stage of `cmd/convert` writes one JSON file per resource of `gui.bif` to `extracted/data/gui/`, and the `patch` stage writes those of `patch.erf` to `extracted/patch/`.
 
 A GUI file is a GFF file of file type "GUI " (see "Generic file format: GFF"). All 91 files parse under the strict rules of the reader. In addition, every byte of their three data regions is referenced, and every label is used. In the 84 `gui.bif` files, every struct has between 4 and 14 fields, and nine field types occur: 0, 4, 5, 8, 10, 11, 14, 15 and 17. The only list (type 15) is CONTROLS, the only u32 (type 4) is STRREF, and the only vector (type 17) is COLOR.
 
@@ -1578,7 +1578,7 @@ The meanings of FILLSTYLE (0, 1 or 2), DIMENSION, INNEROFFSET, PULSING, DRAWSTYL
 
 # Patch archive: patch.erf
 
-`patch.erf` is an ERF archive (see "ERF archive") in the game folder. It holds 97 resources that replace or add to resources stored elsewhere. Its header holds the build date day 47 of 2004, which is later than that of any other archive of the installation, so it is probably an update made after the game's release. Only the archives of the saved game, which the game writes when it saves, are later. Whether the game prefers these copies to the copies of the same name in other archives has not been observed. The `patch` stage of `cmd/convert` converts every resource to `assets/patch/`, and the `patch` stage of `cmd/verify` checks the output.
+`patch.erf` is an ERF archive (see "ERF archive") in the game folder. It holds 97 resources that replace or add to resources stored elsewhere. Its header holds the build date day 47 of 2004, which is later than that of any other archive of the installation, so it is probably an update made after the game's release. Only the archives of the saved game, which the game writes when it saves, are later. Whether the game prefers these copies to the copies of the same name in other archives has not been observed. The `patch` stage of `cmd/convert` converts every resource to `extracted/patch/`, and the `patch` stage of `cmd/verify` checks the output.
 
 The table below lists the contents by resource type.
 
@@ -1637,7 +1637,7 @@ Most differing bytes lie in unused bytes or in regions that the MDL section does
 
 ## Conversion and verification
 
-The `patch` stage of `cmd/convert` passes every resource to the converter that the BIF and RIM stages use. Textures become 8-bit RGBA PNG files, as in the texture packs, and a TXI file is written when the trailer holds text. Tables become CSV files, layouts become JSON files, and the model becomes an OBJ file with an MTL file. The MTL file refers to the PNG files in `assets/TexturePacks/swpc_tex_tpa/` by relative paths, and both textures exist there. All 97 resources pass: 84 textures, 7 layouts, 4 tables, the model, and the MDX resource, whose report line only confirms that a model of the same name exists.
+The `patch` stage of `cmd/convert` passes every resource to the converter that the BIF and RIM stages use. Textures become 8-bit RGBA PNG files, as in the texture packs, and a TXI file is written when the trailer holds text. Tables become CSV files, layouts become JSON files, and the model becomes an OBJ file with an MTL file. The MTL file refers to the PNG files in `extracted/TexturePacks/swpc_tex_tpa/` by relative paths, and both textures exist there. All 97 resources pass: 84 textures, 7 layouts, 4 tables, the model, and the MDX resource, whose report line only confirms that a model of the same name exists.
 
 The `patch` stage of `cmd/verify` checks the output with independent tools. All checks pass:
 
@@ -1683,11 +1683,11 @@ The decoder was checked as follows. Each block header stores the sample the enco
 
 ## Conversion and verification
 
-The `music` stage of `cmd/convert` writes the 68 Layout A files to `assets/streammusic/` as MP3 files, with the fake header removed. It writes the 51 Layout B files as WAV files with 16-bit PCM audio, with the stub removed and ADPCM decoded. ffprobe opens all 119 outputs without error. It reports all 51 WAV outputs as 16-bit stereo PCM, 50 at 44,100 Hz and one at 22,050 Hz.
+The `music` stage of `cmd/convert` writes the 68 Layout A files to `extracted/streammusic/` as MP3 files, with the fake header removed. It writes the 51 Layout B files as WAV files with 16-bit PCM audio, with the stub removed and ADPCM decoded. ffprobe opens all 119 outputs without error. It reports all 51 WAV outputs as 16-bit stereo PCM, 50 at 44,100 Hz and one at 22,050 Hz.
 
 # Sound effects and voices: streamsounds/\*.wav
 
-The folder `streamsounds/` holds 970 files with the extension `.wav`. They are combat voice lines, creature sounds, ambient loops and a few music stingers that the game streams from disk instead of loading from the BIF archives. Every file uses Layout B from the music section: the same 470-byte MP3 stub, followed by a complete WAV file at offset 0x1D6 (470). No file uses Layout A, and none uses ADPCM. The converter `cmd/convert` (stage `sounds`) strips the stub and writes the embedded WAV unchanged to `assets/streamsounds/`.
+The folder `streamsounds/` holds 970 files with the extension `.wav`. They are combat voice lines, creature sounds, ambient loops and a few music stingers that the game streams from disk instead of loading from the BIF archives. Every file uses Layout B from the music section: the same 470-byte MP3 stub, followed by a complete WAV file at offset 0x1D6 (470). No file uses Layout A, and none uses ADPCM. The converter `cmd/convert` (stage `sounds`) strips the stub and writes the embedded WAV unchanged to `extracted/streamsounds/`.
 
 ## Embedded WAV
 
@@ -1743,7 +1743,7 @@ All 970 files pass the parser: the chunk walk of each embedded WAV ends exactly 
 
 # Voice-over: streamwaves/\*\*/\*.wav
 
-The folder `streamwaves/` holds the spoken dialog of the game: 13,799 files with the extension `.wav`, 552 MB in total. Every file uses Layout A from the music section: a 58-byte fake WAV header followed by an MP3 stream. No file uses Layout B. The converter `cmd/convert` (stage `waves`) strips the header and writes the MP3 stream unchanged to `assets/streamwaves/`, keeping the folder structure.
+The folder `streamwaves/` holds the spoken dialog of the game: 13,799 files with the extension `.wav`, 552 MB in total. Every file uses Layout A from the music section: a 58-byte fake WAV header followed by an MP3 stream. No file uses Layout B. The converter `cmd/convert` (stage `waves`) strips the header and writes the MP3 stream unchanged to `extracted/streamwaves/`, keeping the folder structure.
 
 ## Fake header
 
@@ -1862,9 +1862,9 @@ The name of every LIP resource equals the name of a voice file in `streamwaves/`
 
 ## Conversion and verification
 
-No standard file format exists for lip sync keyframes, so each LIP resource is converted to a CSV (comma-separated values) file. The reader is `ParseLip` in `kotor/lip.go`, and the converter is the `lips` stage of `cmd/convert`. It writes `assets/lips/<archive>/<resref>.csv`, with one folder per archive, named after the archive without `.mod`. The 14 empty archives produce no folder, so 109 folders are written. A name that occurs in several archives is written once per archive.
+No standard file format exists for lip sync keyframes, so each LIP resource is converted to a CSV (comma-separated values) file. The reader is `ParseLip` in `kotor/lip.go`, and the converter is the `lips` stage of `cmd/convert`. It writes `extracted/lips/<archive>/<resref>.csv`, with one folder per archive, named after the archive without `.mod`. The 14 empty archives produce no folder, so 109 folders are written. A name that occurs in several archives is written once per archive.
 
-The following example shows the first lines of `assets/lips/danm14ad_loc/nm14adc86901000_.csv`.
+The following example shows the first lines of `extracted/lips/danm14ad_loc/nm14adc86901000_.csv`.
 
 ```
 time_s,shape
@@ -1935,7 +1935,7 @@ The decoded sizes of a track's packets add up to the length of the movie. Dividi
 
 ## Conversion and verification
 
-The `movies` stage of `cmd/convert` uses ffmpeg to convert each movie to an MP4 file in `assets/movies/`, with H.264 video and AAC audio. The video uses a constant quality setting (CRF 12), because at CRF 18 frames in 12 movies fell below 40 dB PSNR (peak signal-to-noise ratio, a measure of how closely the output matches the source).
+The `movies` stage of `cmd/convert` uses ffmpeg to convert each movie to an MP4 file in `extracted/movies/`, with H.264 video and AAC audio. The video uses a constant quality setting (CRF 12), because at CRF 18 frames in 12 movies fell below 40 dB PSNR (peak signal-to-noise ratio, a measure of how closely the output matches the source).
 
 `cmd/verify` checks all 61 outputs with ffprobe and ffmpeg. For each movie, ffprobe must report the frame size, the frame count, the sample rate, the channel count and the audio duration of the Bink file, with the duration within 0.1 seconds. Every output frame must also reach at least 40 dB PSNR against the decoded Bink frame. All 61 outputs pass. The lowest PSNR of any frame is 41.8 dB.
 
@@ -2066,7 +2066,7 @@ The layout of `ValLocation` is UNKNOWN. A location in NWScript holds an area, a 
 
 ## Conversion and verification
 
-The `saves` stage of `cmd/convert` converts every saved game folder in `saves/` to `assets/saves/<save>/`. It writes the following files.
+The `saves` stage of `cmd/convert` converts every saved game folder in `saves/` to `extracted/saves/<save>/`. It writes the following files.
 
 - Each GFF file becomes `<name>.res.json` in the JSON form described under "Generic file format: GFF". 64-bit integers are written exactly.
 - `GLOBALVARS.res` also becomes `GLOBALVARS.variables.json`, which pairs each variable name with its value: `booleans` (JSON booleans), `numbers` (integers), `strings`, `locations` (the names only) and `location_data` (`ValLocation` as hexadecimal, because its layout is unknown).

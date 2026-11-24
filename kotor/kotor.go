@@ -29,9 +29,9 @@ var Root = func() string {
 }()
 
 var (
-	Game    = filepath.Join(Root, "swkotor")
-	Assets  = filepath.Join(Root, "assets")
-	Reports = filepath.Join(Root, "temp", "reports")
+	Game      = filepath.Join(Root, "swkotor")
+	Extracted = filepath.Join(Root, "extracted")
+	Reports   = filepath.Join(Root, "temp", "reports")
 )
 
 // Resource type codes used in KEY, BIF and ERF tables.
@@ -110,7 +110,7 @@ type TgaGroup struct {
 
 // ResourceBifs lists the BIF archives whose resources are converted one by one, without models: tables,
 // sounds, scripts, templates, the journal and the room layouts. Each archive becomes the folder
-// assets/data/<name>.
+// extracted/data/<name>.
 var ResourceBifs = []string{"2da", "sounds", "scripts", "templates", "_newbif", "layouts"}
 
 var TgaGroups = []TgaGroup{

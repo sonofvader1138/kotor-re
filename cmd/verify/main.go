@@ -1,4 +1,4 @@
-// Command verify checks the converted assets in ~/re/assets with independent tools and writes one report
+// Command verify checks the converted assets in ~/re/extracted with independent tools and writes one report
 // per check to ~/re/temp/reports. Run the convert command first. A stage whose tool is missing is reported
 // as UNVERIFIED. All stages run at the same time, and their checks share jobSlots job slots, so that at
 // most that many external programs run at once. Each report lists its lines in job order.
@@ -238,7 +238,7 @@ func assimpObj(dir, file string) []string {
 	return line(fmt.Sprintf("%s meshes=%s faces=%s %s", file, meshes[1], loaded[1], kotor.Verdict(errs...)))
 }
 
-// Models: assets/data/models/*.obj
+// Models: extracted/data/models/*.obj
 func models(summary *kotor.Summary) {
 	if !kotor.Has("assimp") {
 		summary.Note("assimp missing: models UNVERIFIED")
@@ -246,7 +246,7 @@ func models(summary *kotor.Summary) {
 	}
 
 	log("models...")
-	dir := filepath.Join(kotor.Assets, "data", "models")
+	dir := filepath.Join(kotor.Extracted, "data", "models")
 	var jobs []job
 	for _, file := range kotor.ListFiles(dir, ".obj", false) {
 		jobs = append(jobs, func() []string { return assimpObj(dir, file) })
@@ -355,12 +355,12 @@ func checkWalkmeshJson(path string, source []byte) string {
 	return ""
 }
 
-// Textures: assets/TexturePacks/<pack>/*.png against the TPC textures in TexturePacks/<pack>.erf.
+// Textures: extracted/TexturePacks/<pack>/*.png against the TPC textures in TexturePacks/<pack>.erf.
 // Each job decodes its TPC texture when it starts, so only one texture per job slot is held in memory.
 func textures(summary *kotor.Summary) {
 	for _, pack := range kotor.TexturePacks {
 		log("textures " + pack + "...")
-		dir := filepath.Join(kotor.Assets, "TexturePacks", pack)
+		dir := filepath.Join(kotor.Extracted, "TexturePacks", pack)
 		entries := kotor.ReadErf(filepath.Join(kotor.Game, "TexturePacks", pack+".erf"))
 
 		var jobs []job
@@ -384,12 +384,12 @@ func textures(summary *kotor.Summary) {
 	}
 }
 
-// TGA images: assets/data/<group>/*.png and *.txi against the BIF archives they came from
+// TGA images: extracted/data/<group>/*.png and *.txi against the BIF archives they came from
 func tgaImages(summary *kotor.Summary) {
 	key := kotor.ReadKey()
 	for _, group := range kotor.TgaGroups {
 		log("tga " + group.Name + "...")
-		dir := filepath.Join(kotor.Assets, "data", group.Name)
+		dir := filepath.Join(kotor.Extracted, "data", group.Name)
 
 		var txiJobs, visJobs, jobs []job
 		seen := map[string]bool{}
@@ -459,7 +459,7 @@ func tgaImages(summary *kotor.Summary) {
 	}
 }
 
-// Stream audio: assets/streammusic, assets/streamsounds and assets/streamwaves
+// Stream audio: extracted/streammusic, extracted/streamsounds and extracted/streamwaves
 func streamAudio(summary *kotor.Summary, stage, folder string) {
 	if !ffprobe {
 		summary.Note("ffprobe missing: " + stage + " UNVERIFIED")
@@ -467,7 +467,7 @@ func streamAudio(summary *kotor.Summary, stage, folder string) {
 	}
 
 	log(stage + "...")
-	dir := filepath.Join(kotor.Assets, folder)
+	dir := filepath.Join(kotor.Extracted, folder)
 	audioFiles := append(kotor.ListFiles(dir, ".mp3", true), kotor.ListFiles(dir, ".wav", true)...)
 	slices.Sort(audioFiles)
 
@@ -484,7 +484,7 @@ func streamAudio(summary *kotor.Summary, stage, folder string) {
 	summary.Tally("ffprobe_"+stage, pool(jobs))
 }
 
-// Movies: assets/movies/*.mp4 against movies/*.bik. The probe and the PSNR comparison of one movie run
+// Movies: extracted/movies/*.mp4 against movies/*.bik. The probe and the PSNR comparison of one movie run
 // at the same time.
 const minPsnr = 40
 
@@ -537,7 +537,7 @@ func movies(summary *kotor.Summary) {
 
 	log("movies...")
 	src := filepath.Join(kotor.Game, "movies")
-	dir := filepath.Join(kotor.Assets, "movies")
+	dir := filepath.Join(kotor.Extracted, "movies")
 	var jobs []job
 	for _, file := range kotor.ListFiles(src, ".bik", false) {
 		jobs = append(jobs, func() []string {
@@ -647,7 +647,7 @@ func movies(summary *kotor.Summary) {
 	summary.Tally("ffprobe_movies", pool(jobs))
 }
 
-// GUI: assets/data/gui/*.json. The GUI layouts of patch.erf are checked by the patch stage.
+// GUI: extracted/data/gui/*.json. The GUI layouts of patch.erf are checked by the patch stage.
 func gui(summary *kotor.Summary) {
 	if !kotor.Has("jq") {
 		summary.Note("jq missing: gui UNVERIFIED")
@@ -657,9 +657,9 @@ func gui(summary *kotor.Summary) {
 	log("gui...")
 	var jobs []job
 	dir := "data/gui"
-	for _, file := range kotor.ListFiles(filepath.Join(kotor.Assets, dir), ".json", false) {
+	for _, file := range kotor.ListFiles(filepath.Join(kotor.Extracted, dir), ".json", false) {
 		jobs = append(jobs, func() []string {
-			result := kotor.Exec("jq", []string{"empty", filepath.Join(kotor.Assets, dir, file)}, nil)
+			result := kotor.Exec("jq", []string{"empty", filepath.Join(kotor.Extracted, dir, file)}, nil)
 			if result.Status == 0 {
 				return line(dir + "/" + file + " PASS")
 			}
@@ -669,7 +669,7 @@ func gui(summary *kotor.Summary) {
 	summary.Tally("jq_gui", pool(jobs))
 }
 
-// Lips: assets/lips/<module>/*.csv. Go's encoding/csv reader must read each file, and its keyframes, packed
+// Lips: extracted/lips/<module>/*.csv. Go's encoding/csv reader must read each file, and its keyframes, packed
 // again as f32 and u8, must equal the keyframe bytes of the source LIP resource. This reader shares no
 // code with the converter's writer, but it is not an external tool.
 func lips(summary *kotor.Summary) {
@@ -680,7 +680,7 @@ func lips(summary *kotor.Summary) {
 		module := strings.TrimSuffix(archive, filepath.Ext(archive))
 		for _, entry := range kotor.ReadErf(filepath.Join(src, archive)) {
 			label := filepath.Join("lips", module, entry.Resref+".csv")
-			report = append(report, label+" "+kotor.Verdict(checkLipCsv(filepath.Join(kotor.Assets, label), entry.Data())))
+			report = append(report, label+" "+kotor.Verdict(checkLipCsv(filepath.Join(kotor.Extracted, label), entry.Data())))
 		}
 	}
 	summary.Tally("csv_lips", report)
@@ -720,7 +720,7 @@ func checkLipCsv(path string, source []byte) string {
 	return ""
 }
 
-// Modules: assets/modules/<archive>/*.json must parse with jq, and every <resref>.ncs.txt listing must
+// Modules: extracted/modules/<archive>/*.json must parse with jq, and every <resref>.ncs.txt listing must
 // assemble to the bytes of the script in the source archive.
 func modules(summary *kotor.Summary) {
 	log("modules...")
@@ -738,13 +738,13 @@ func modules(summary *kotor.Summary) {
 		for _, entry := range rim.Entries {
 			if entry.Ext == "ncs" {
 				label := filepath.Join("modules", name, entry.Resref+".ncs.txt")
-				report = append(report, label+" "+kotor.Verdict(checkNcsListing(filepath.Join(kotor.Assets, label), entry.Data)))
+				report = append(report, label+" "+kotor.Verdict(checkNcsListing(filepath.Join(kotor.Extracted, label), entry.Data)))
 				continue
 			}
 
 			label := filepath.Join("modules", name, entry.Resref+"."+entry.Ext+".json")
 			jsonJobs = append(jsonJobs, func() []string {
-				result := kotor.Exec("jq", []string{"empty", filepath.Join(kotor.Assets, label)}, nil)
+				result := kotor.Exec("jq", []string{"empty", filepath.Join(kotor.Extracted, label)}, nil)
 				if result.Status == 0 {
 					return line(label + " PASS")
 				}
@@ -997,12 +997,12 @@ func runResourceChecks(summary *kotor.Summary, stage string, jobs map[string][]j
 	}
 }
 
-// Rims: assets/rims/<archive>/ against rims/<archive>.rim. Each OBJ file must load with assimp, and every
+// Rims: extracted/rims/<archive>/ against rims/<archive>.rim. Each OBJ file must load with assimp, and every
 // other resource is checked as addResourceChecks describes.
 func rims(summary *kotor.Summary) {
 	log("rims...")
 	src := filepath.Join(kotor.Game, "rims")
-	out := filepath.Join(kotor.Assets, "rims")
+	out := filepath.Join(kotor.Extracted, "rims")
 	jobs := map[string][]job{}
 	var archiveReport []string
 	for _, archive := range kotor.ListFiles(src, ".rim", false) {
@@ -1030,11 +1030,11 @@ func rims(summary *kotor.Summary) {
 	runResourceChecks(summary, "rims", jobs)
 }
 
-// Patch: assets/patch/ against patch.erf. The OBJ file must load with assimp, and every other resource is
+// Patch: extracted/patch/ against patch.erf. The OBJ file must load with assimp, and every other resource is
 // checked as addResourceChecks describes.
 func patch(summary *kotor.Summary) {
 	log("patch...")
-	dir := filepath.Join(kotor.Assets, "patch")
+	dir := filepath.Join(kotor.Extracted, "patch")
 	jobs := map[string][]job{}
 	for _, file := range kotor.ListFiles(dir, ".obj", false) {
 		jobs["assimp"] = append(jobs["assimp"], func() []string { return assimpObj(dir, file) })
@@ -1045,7 +1045,7 @@ func patch(summary *kotor.Summary) {
 	runResourceChecks(summary, "patch", jobs)
 }
 
-// Bifs: assets/data/<archive>/ against data/<archive>.bif for each archive in kotor.ResourceBifs. Each
+// Bifs: extracted/data/<archive>/ against data/<archive>.bif for each archive in kotor.ResourceBifs. Each
 // resource is checked as addResourceChecks describes.
 func bifs(summary *kotor.Summary) {
 	log("bifs...")
@@ -1054,7 +1054,7 @@ func bifs(summary *kotor.Summary) {
 	for _, name := range kotor.ResourceBifs {
 		for _, resource := range kotor.BifResources("data/"+name+".bif", key) {
 			label := filepath.Join(name, resource.Resref)
-			addResourceChecks(jobs, label, filepath.Join(kotor.Assets, "data", label), resource.Ext, resource.Data)
+			addResourceChecks(jobs, label, filepath.Join(kotor.Extracted, "data", label), resource.Ext, resource.Data)
 		}
 	}
 	runResourceChecks(summary, "bifs", jobs)
@@ -1410,7 +1410,7 @@ func checkNcsListing(path string, source []byte) string {
 // flags, and the sound and text in base64, so that line feeds in the text cannot split a line.
 const tlkLine = `.language, (.entries[] | "\(.strref) \(.flags) \(.sound | @base64) \(.text | @base64)")`
 
-// Tlk: assets/dialog.tlk.json against dialog.tlk.
+// Tlk: extracted/dialog.tlk.json against dialog.tlk.
 func tlk(summary *kotor.Summary) {
 	if !kotor.Has("jq") {
 		summary.Note("jq missing: tlk UNVERIFIED")
@@ -1419,7 +1419,7 @@ func tlk(summary *kotor.Summary) {
 
 	log("tlk...")
 	source := kotor.ReadFile(filepath.Join(kotor.Game, "dialog.tlk"))
-	problem := checkTlkJson(filepath.Join(kotor.Assets, "dialog.tlk.json"), source)
+	problem := checkTlkJson(filepath.Join(kotor.Extracted, "dialog.tlk.json"), source)
 	summary.Tally("jq_tlk", line("dialog.tlk.json "+kotor.Verdict(problem)))
 }
 
@@ -1495,14 +1495,14 @@ func checkTlkJson(path string, source []byte) string {
 	return ""
 }
 
-// Saves: assets/saves/<save>/ against saves/<save>/. Each GFF file and each resource of the archives is
+// Saves: extracted/saves/<save>/ against saves/<save>/. Each GFF file and each resource of the archives is
 // checked as addResourceChecks describes. The screenshot PNG must equal ImageMagick's decoding of the
 // source TGA and pass pngcheck. The decoded variables of GLOBALVARS.res must build again into the source
 // fields (see checkGlobalsJson).
 func saves(summary *kotor.Summary) {
 	log("saves...")
 	src := filepath.Join(kotor.Game, "saves")
-	out := filepath.Join(kotor.Assets, "saves")
+	out := filepath.Join(kotor.Extracted, "saves")
 	jobs := map[string][]job{}
 
 	// checkArchive adds the checks of the resources of an ERF archive whose folder is dir, relative to out.
