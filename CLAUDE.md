@@ -25,6 +25,7 @@ The following tools are installed:
 - gltf_validator (Khronos glTF validator)
 - xz-utils
 - extract-xiso
+- steamless
 
 ## Rules
 

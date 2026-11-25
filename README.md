@@ -2,7 +2,7 @@
 
 This document describes the game's file formats as determined from the files of the PC build in `dump/pc`. Each field lists the evidence for it and a confidence level. Fields that have not been verified are marked UNKNOWN.
 
-Some fields were also settled from the code of the Xbox executable `dump/xbox/default.xbe`. The code of the PC executable is encrypted, but the Xbox code is not, and both builds run the same engine on the same formats. Evidence of this kind is marked "Xbox code" and gives the address of the routine in the Xbox image, so that it can be checked again. Where a statement rests only on the Xbox code, the text says so. Where the PC files could test it, the result is given as well. The section "Xbox executable: default.xbe" describes the executable and the tool that prepares it for disassembly.
+Some fields were also settled from the code of the two executables, `dump/pc/swkotor.exe` and `dump/xbox/default.xbe`. Both builds run the same engine on the same formats. The code of the PC executable is encrypted by a Steam copy protection wrapper, which Steamless removes. Evidence of this kind is marked "PC code" or "Xbox code" and gives the address of the routine, so that it can be checked again. PC code is the stronger evidence for the PC files, because it is the program that reads them. Where a statement rests only on the Xbox code, the text says so. Where the PC files could test it, the result is given as well. The sections "PC executable: swkotor.exe" and "Xbox executable: default.xbe" describe the executables and the tools that prepare them for disassembly.
 
 All integers and floats are little-endian. Offsets are in hexadecimal and count from the start of the structure they belong to, unless a section states otherwise.
 
@@ -131,6 +131,12 @@ All integers and floats are little-endian. Offsets are in hexadecimal and count 
   - [Save summary: savenfo.res](#save-summary-savenfores)
   - [Screenshot: Screen.tga](#screenshot-screentga)
   - [Conversion and verification](#conversion-and-verification-11)
+- [PC executable: swkotor.exe](#pc-executable-swkotorexe)
+  - [Stub header](#stub-header)
+  - [Payload](#payload)
+  - [SteamDRMP.dll and the code section](#steamdrmpdll-and-the-code-section)
+  - [Disassembly and verification](#disassembly-and-verification)
+  - [Resource type table](#resource-type-table)
 - [Xbox executable: default.xbe](#xbox-executable-defaultxbe)
   - [XBE header](#xbe-header)
   - [Sections](#sections)
@@ -157,7 +163,7 @@ The KEY file begins with a 64-byte header.
 | 0x1C   | u32     | Build day of the year (309)            | The ERF texture packs hold the same value (see the ERF header). The engine does not read it (Xbox code). | medium     |
 | 0x20   | u8[32]  | Reserved                               | All bytes are zero. The engine does not read them (Xbox code).  | medium     |
 
-The engine's KEY loader (Xbox code, 0x14E100) reads only the first 24 bytes of the header. It requires the signature "KEY " and the version "V1  " and uses the two counts and the two table offsets. It sizes the BIF table as the distance between the two table offsets.
+The engine's KEY loader (Xbox code, 0x14E100; PC code, 0x40FC79) reads only the first 24 bytes of the header. It requires the signature "KEY " and the version "V1  " and uses the two counts and the two table offsets. It sizes the BIF table as the distance between the two table offsets.
 
 The BIF table has one 12-byte entry per archive.
 
@@ -166,7 +172,7 @@ The BIF table has one 12-byte entry per archive.
 | 0x00   | u32  | Size of the archive file in bytes               | Matches the size on disk for all 26 archives.               | high       |
 | 0x04   | u32  | Offset of the archive's file name               | The names fill bytes 376 to 847 without gaps.               | high       |
 | 0x08   | u16  | Length of the file name, including the NUL byte | Every name ends in a NUL byte at this length.               | high       |
-| 0x0A   | u16  | UNKNOWN                                         | The value is 1 in all 26 entries, and also in the KEY file of the Xbox build. The KEY loader copies it into the record of the archive (Xbox code, 0x14E333), but no code that reads it again was found. Other descriptions of the format call it a drive mask. | low        |
+| 0x0A   | u16  | UNKNOWN                                         | The value is 1 in all 26 entries, and also in the KEY file of the Xbox build. The KEY loader copies it into the record of the archive (Xbox code, 0x14E333; PC code, 0x40FE15), but no code that reads it again was found. Other descriptions of the format call it a drive mask. | low        |
 
 File names are relative paths that use backslashes, for example `data\models.bif`.
 
@@ -195,7 +201,7 @@ A BIF archive begins with a 20-byte header.
 
 No archive contains fixed resources, so the layout of a fixed resource entry is UNKNOWN. The engine's BIF loader (Xbox code, 0x14BDA0) never reads the count of fixed resources. It checks the signature "BIFF" and the version "V1  ", allocates 16 bytes per variable resource, and reads that many entries from the offset at 0x10. Fixed resources are therefore not supported by this engine.
 
-To read a resource, the engine uses the data offset and the size of the entry (Xbox code, 0x14BEB0). It does not compare the resource ID or the type of the entry with the KEY file.
+The PC loader (PC code, 0x40D945) does the same. To read a resource, the engine uses the data offset and the size of the entry (Xbox code, 0x14BEB0; PC code, 0x40DA20). It does not compare the resource ID or the type of the entry with the KEY file. The PC routine takes the entry index from the low 14 bits of the resource ID that the KEY file gives, not from all 20 index bits, and rejects an index that is not below the count at 0x08. An archive can therefore hold at most 16,384 resources that the engine can read. The largest archive holds 5,615 resources.
 
 The entry table has one 16-byte entry per resource.
 
@@ -254,10 +260,10 @@ An ERF archive begins with a 160-byte header. The evidence below covers 128 arch
 | Offset | Type    | Meaning                                    | Evidence                                                                                                          | Confidence |
 | ------ | ------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | ---------- |
 | 0x00   | char[8] | Signature "ERF V1.0" or "MOD V1.0"         | "ERF V1.0" in the texture packs and `patch.erf`; "MOD V1.0" in the 123 archives of `lips/`.                       | high       |
-| 0x08   | u32     | Number of localized strings                | The value is 0 in all 128 archives, so the string format is UNKNOWN.                                              | low        |
-| 0x0C   | u32     | Size of the localized string table         | The value is 0 in all 128 archives.                                                                               | low        |
+| 0x08   | u32     | Number of localized strings                | The value is 0 in all 128 archives. The PC loader reads this many strings (see below).                            | medium     |
+| 0x0C   | u32     | Size of the localized string table         | The value is 0 in all 128 archives. The PC loader reads this many bytes from the offset at 0x14.                  | medium     |
 | 0x10   | u32     | Number of resources                        | The key and resource tables parse consistently in all 128 archives.                                               | high       |
-| 0x14   | u32     | Offset of the localized string table (160) | The value is 160 in all 128 archives.                                                                             | low        |
+| 0x14   | u32     | Offset of the localized string table (160) | The value is 160 in all 128 archives. The PC loader seeks to it.                                                  | medium     |
 | 0x18   | u32     | Offset of the key table (160)              | The value is 160 in all 128 archives.                                                                             | high       |
 | 0x1C   | u32     | Offset of the resource table               | Equals the key table offset plus 24 times the resource count in all 128 archives.                                 | high       |
 | 0x20   | u32     | Build year minus 1900                      | The value is 103 (2003) in the texture packs and 104 (2004) in `patch.erf`. The KEY file also holds 103.          | medium     |
@@ -265,7 +271,17 @@ An ERF archive begins with a 160-byte header. The evidence below covers 128 arch
 | 0x28   | u32     | UNKNOWN, probably uninitialized            | The value is 0 in the texture packs, 0x45207A6C in `patch.erf`, and takes 56 different values in `lips/`.         | low        |
 | 0x2C   | u8[116] | Padding                                    | All bytes are 0 in all 128 archives.                                                                              | medium     |
 
-The engine's ERF loader (Xbox code, 0x14DC47) reads the 160-byte header in one piece. Depending on what it is asked to open, it requires the signature "ERF ", "MOD " or "HAK ", and in every case the version "V1.0". It then uses only the number of resources at 0x10 and the key table offset at 0x18. It never reads the localized string fields, the build date or the field at 0x28. These fields therefore have no effect on the game, which fits the varying values at 0x28. The format of the localized strings remains UNKNOWN. The loader reads 24 bytes per key entry and keeps the low 20 bits of the resource ID.
+The engine's ERF loader (Xbox code, 0x14DC47) reads the 160-byte header in one piece. Depending on what it is asked to open, it requires the signature "ERF ", "MOD " or "HAK ", and in every case the version "V1.0". It then uses only the number of resources at 0x10 and the key table offset at 0x18. It never reads the localized string fields, the build date or the field at 0x28. The loader reads 24 bytes per key entry and keeps the low 20 bits of the resource ID. The PC build has the same loader (PC code, 0x40F740).
+
+The PC build has a second ERF loader, which opens an archive to read resource data (PC code, 0x40E400). It reads the 160-byte header and checks the signature and the version in the same way. It then reads the localized string table and the resource table, 8 bytes per resource from the offset at 0x1C. The localized string table is read as one block of the size at 0x0C from the offset at 0x14. It holds the number of strings at 0x08, each laid out as the table below shows (PC code, 0x40E4F4). No archive of the game holds such a string, so this layout is not tested by any file.
+
+| Offset | Type         | Meaning                          | Evidence                                                                 | Confidence |
+| ------ | ------------ | -------------------------------- | ------------------------------------------------------------------------ | ---------- |
+| 0x00   | u32          | Language number                  | The loader stores it with the text in a list of the archive.             | medium     |
+| 0x04   | u32          | Length of the text in bytes, n   | The loader copies n bytes and continues 8 + n bytes after the entry start. | medium     |
+| 0x08   | char[n]      | Text, not terminated by a NUL byte | See above.                                                             | medium     |
+
+Neither loader reads the build date or the field at 0x28. These fields therefore have no effect on the game, which fits the varying values at 0x28.
 
 The build date fields agree between the KEY file and the archives built with it, and `patch.erf`, which was presumably built later, holds a later date. The two archives of the saved game hold year 126 (2026) and day 324, which is 20 November 2026 when 1 January is day 1. The save files were copied on 22 November 2026, so the fields are the date when the archive was written. Whether the day count starts at 0 or 1 is UNKNOWN. The field at 0x28 is 0 in both archives of the saved game. Because the game wrote them itself, a value other than 0 probably comes from the tool that built the other archives.
 
@@ -993,7 +1009,7 @@ The engine routine that fetches an entry (Xbox code, 0x143AD0) gives each bit a 
 
 ## How the engine reads the string table
 
-This section rests on the Xbox code. The engine holds up to seven string tables, and each of them can have a masculine and a feminine version (Xbox code, 0x143220). Table 0 is `dialog.tlk`. On the Xbox, tables 1 to 6 are named `live1` to `live6` (format string "LIVE%d:live%d" at 0x22409), which are probably downloadable content. The feminine version of a table has the same name followed by "F", for example `dialogF.tlk`. The PC build contains only `dialog.tlk`.
+This section rests on the Xbox code, and the PC code agrees with it in every point that was checked. The PC header loader (PC code, 0x41D890) reads 20 bytes and checks only "TLK ". The PC fetch routine (PC code, 0x41E1A0) uses an entry size of 40 bytes if the version is "V3.0" and 36 bytes otherwise, takes the low 24 bits of the string number, tries seven tables with a masculine and a feminine slot each, skips entries with flag 0x8000, and tests bits 0, 1 and 2 of the flags as described above. The PC executable also contains the strings "LIVE%d" and "LIVE%d:live%d", so the PC build supports the additional tables too. The engine holds up to seven string tables, and each of them can have a masculine and a feminine version (Xbox code, 0x143220). Table 0 is `dialog.tlk`. On the Xbox, tables 1 to 6 are named `live1` to `live6` (format string "LIVE%d:live%d" at 0x22409), which are probably downloadable content. The feminine version of a table has the same name followed by "F", for example `dialogF.tlk`. The PC build contains only `dialog.tlk`.
 
 The loader reads the 20-byte header and accepts the file if it begins with "TLK " (Xbox code, 0x143170). It does not check the version. The fetch routine does, because the entry size depends on it. An entry is 40 bytes long if the version is "V3.0" and 36 bytes long otherwise, which leaves out the sound length at 0x24 (Xbox code, 0x143B62). Entry n lies at 20 + n × size.
 
@@ -1232,7 +1248,7 @@ The first two words identify the class of the mesh. They take one of three pairs
 | 0x00405740, 0x00405730   | 0x121                           | 2,619  | Dangly mesh             |
 | 0x00405710, 0x00405720   | 0x061                           | 968    | Skinned mesh            |
 
-The table below lists the fields of the mesh header. The names in backquotes are the keywords of the engine's model text parser, which stores each of them at that offset (Xbox code, 0x2C66E0). The parser builds in memory the structure that the binary files hold, starting 0x50 bytes into the node, and its offsets agree with every field that the files could test. In the Xbox build the mesh header is 4 bytes shorter, 0x148 bytes, so the class headers that follow it start 4 bytes earlier there. Up to 0x139 the two layouts agree.
+The table below lists the fields of the mesh header. The names in backquotes are the keywords of the engine's model text parser, which stores each of them at that offset (Xbox code, 0x2C66E0). The parser builds in memory the structure that the binary files hold, starting 0x50 bytes into the node, and its offsets agree with every field that the files could test. In the Xbox build the mesh header is 4 bytes shorter, 0x148 bytes, so the class headers that follow it start 4 bytes earlier there. Up to 0x139 the two layouts agree. The PC parser (PC code, 0x469892 to 0x46A041) stores the keywords at the offsets given there, 0x50 bytes into the node. This was checked for `bmin`, `bmax`, `diffuse`, `ambient`, `transparencyhint`, `vertexindices`, `leftoverfaces`, `vertexindicescount`, `uvdirectiony`, `uvjitter`, `uvjitterspeed`, `lightmapped`, `rotatetexture`, `m_bIsBackgroundGeometry`, `shadow`, `beaming` and `render`. All of them agree.
 
 | Offset | Type     | Meaning | Evidence | Confidence |
 | ------ | -------- | ------- | -------- | ---------- |
@@ -1486,7 +1502,7 @@ A controller with k keys and c columns stores k f32 times and then k rows of c v
 
 The controllers of a model tree hold the node's static values. Each of them has exactly one key, at time 0, in all 801,554 such controllers. The position and orientation controllers repeat the values of the node header, as the node table states. The orientation controllers of the model trees always have four columns, x, y, z and w, which is a different order from the node header's w, x, y, z.
 
-The meaning of a controller type depends on the class of the node. The names and numbers below are confirmed by the engine's model text parser. For each keyword it calls the controller reader with the type number (Xbox code, 0x2C2760 for all nodes, 0x2C66E0 for meshes, 0x2C6130 for lights and 0x2C2A90 for emitters). It accepts each name in three forms: the name alone for a single value, the name followed by `key` for keys and the name followed by `bezierkey` for Bezier keys. The PC executable could not be read for this, because its code section is encrypted by a copy protection wrapper (it has a `.bind` section). The value ranges of the files agree with the names, for example colours from 0 to 1, a `spread` of 6.283 (2π) and `lightningSubDiv` values that are whole numbers. The table below lists the types that occur. The emitter parser also maps `detonate` to type 502, which no file uses.
+The meaning of a controller type depends on the class of the node. The names and numbers below are confirmed by the engine's model text parser. For each keyword it calls the controller reader with the type number (Xbox code, 0x2C2760 for all nodes, 0x2C66E0 for meshes, 0x2C6130 for lights and 0x2C2A90 for emitters). It accepts each name in three forms: the name alone for a single value, the name followed by `key` for keys and the name followed by `bezierkey` for Bezier keys. The PC model text parser accepts the same keywords in the same three forms (PC code, 0x465500 to 0x46A100), but its controller numbers were not compared with the Xbox code. The value ranges of the files agree with the names, for example colours from 0 to 1, a `spread` of 6.283 (2π) and `lightningSubDiv` values that are whole numbers. The table below lists the types that occur. The emitter parser also maps `detonate` to type 502, which no file uses.
 
 | Node class | Types and names |
 | ---------- | --------------- |
@@ -1699,14 +1715,14 @@ A TPC file begins with a 128-byte header.
 | Offset | Type    | Meaning                                                     | Evidence                                                                                                                                                     | Confidence |
 | ------ | ------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
 | 0x00   | u32     | Size of the top mipmap level in bytes, or 0 if uncompressed | Matches the computed size in all plain and cube textures, with the exceptions described below.                                                               | high       |
-| 0x04   | f32     | UNKNOWN, a value from 0 to 1                                | The value is 1.0 in 6,987 of 11,452 files. Every other value occurs in an encoding 4 texture, which has an alpha channel. It may be an alpha test threshold. | low        |
+| 0x04   | f32     | Alpha mean, a value from 0 to 1                             | The engine copies it into the `alphamean` field of the texture, the field that the TXI keyword `alphamean` also sets (PC code, 0x712F11 and 0x422856). The value is 1.0 in 6,987 of 11,452 files. Every other value occurs in an encoding 4 texture, which has an alpha channel. How the renderer uses it was not traced. | high       |
 | 0x08   | u16     | Width in pixels                                             | Decoded images are coherent at this width.                                                                                                                   | high       |
 | 0x0A   | u16     | Height in pixels                                            | Decoded images are coherent at this height.                                                                                                                  | high       |
-| 0x0C   | u8      | Encoding (see below)                                        | Every file decodes, and the data sizes match.                                                                                                                | high       |
+| 0x0C   | u8      | Encoding, a bit field (see below)                           | Every file decodes, and the data sizes match. The engine tests the bits (PC code, 0x712F47).                                                                 | high       |
 | 0x0D   | u8      | Number of mipmap levels                                     | The data sizes match in all plain and cube textures.                                                                                                         | high       |
 | 0x0E   | u8[114] | Padding                                                     | All bytes are 0 in all 11,452 files.                                                                                                                         | high       |
 
-The encoding byte and the size field at 0x00 together select the pixel format. The combinations are listed below.
+The encoding byte and the size field at 0x00 together select the pixel format. The engine reads the encoding as a bit field and tests the bits in order (PC code, 0x713032). Bit 0 means one byte per pixel, bit 1 three bytes per pixel or DXT1, and bit 2 four bytes per pixel or DXT5. A size field of 0 means uncompressed data. The combinations that occur are listed below.
 
 | Encoding | Size at 0x00 | Pixel format                      | Files in tpa |
 | -------- | ------------ | --------------------------------- | ------------ |
@@ -1732,9 +1748,11 @@ The pixel data starts at offset 128. Each sub-image is stored as its full mipmap
 
 In a flipbook texture, numx and numy come from the TXI trailer, which also holds "proceduretype cycle" and a frame rate ("fps"). The header's mipmap count is 1 and does not describe the frames. The size field equals the total size of all frames and their mipmaps. For example, c_holododonna is 512x512 DXT1 with numx 2 and numy 2. Each 256x256 frame with 9 mipmap levels is 43,704 bytes, and the four frames total 174,816 bytes, which equals its size field. The converter places the frames in a grid, frame 0 at the top left, in row order. That order is an assumption. Each frame is a complete texture, so a model that uses a flipbook texture appears with the texture tiled 2x2 or more in the converted output.
 
-The order of the six cube faces is UNKNOWN. The converter stacks them vertically in file order.
+The six cube faces are stored in the order -X, +X, +Y, -Y, +Z, -Z of the OpenGL cube map faces. The routine that uploads a cube texture (PC code, 0x423F90) gives face i the OpenGL target 0x8515 + t[i], where 0x8515 is GL_TEXTURE_CUBE_MAP_POSITIVE_X and t is the table 1, 0, 2, 3, 4, 5 at 0x78DB50. The first two faces are therefore swapped with respect to the OpenGL order +X, -X, +Y, -Y, +Z, -Z. The face height is the texture height divided by 6. The converter stacks the faces vertically in file order.
 
 Each image is stored with its bottom row first. In other words, the first stored row is at texture coordinate v = 0. Two tests support this. When the rows are reversed, the Bastila head model (p_bastilah) renders with its face texture correctly placed; without reversal the eyes and mouth are misplaced. The GUI logo lbl_bwlogo reads upside down unless the rows are reversed. The converter therefore reverses the rows, so the PNG files follow the usual top-row-first convention.
+
+The engine does not compute the pixel data size in the same way as the converter. The TPC reader (PC code, 0x712FF0) sets the pixel data to start at offset 128 and the trailer to start where the pixel data ends, and gives the trailer the rest of the file. For uncompressed data, it adds width × height × bytes per pixel over the mipmap levels, halving the width and height each time. For compressed data, it detects a cube texture when the height divided by the width is 6. It takes the size field at 0x00 as the size of the top level of one face, and adds ((w + 3) / 4) × ((h + 3) / 4) blocks for each further level, rounded down, times the number of faces. This sum equals the converter's size in 11,431 of the 11,536 textures of the four packs and `patch.erf`. In 82 others, which are not square, one side of a lower level becomes 0, so the engine counts no blocks there while the file stores one block per level. In the other 23, the DXT1 textures of 4x4 pixels or smaller described above, the size field holds 16 instead of 8. In these 105 textures the engine's trailer starts inside the pixel data or after the end of the file. The effect of this in the game is UNKNOWN. The converter's rule, at least one block per level and 8 bytes per DXT1 block, is the one that accounts for every byte of every file.
 
 ## TXI trailer
 
@@ -2008,7 +2026,20 @@ BORDER, HILIGHT, SELECTED and HILIGHTSELECTED describe a frame and its fill. Eac
 
 Resrefs name textures and fonts. All 2,016 FONT values name a known resource. Of the CORNER, EDGE, FILL and IMAGE values that are not empty, all name a texture in the texture packs or a resource in `chitin.key`, except nine FILL names, for example `po_mzaalbar` and `georgem`. None of the nine occurs in a RIM archive either.
 
-The meanings of FILLSTYLE (0, 1 or 2), DIMENSION, INNEROFFSET, PULSING, DRAWSTYLE and FLIPSTYLE are UNKNOWN. ALIGNMENT takes only the values 9, 10, 12, 17, 18, 20 and 34. These values fit a bit field in which 1, 2 and 4 select the horizontal position and 8, 16 and 32 select the vertical position. This is a hypothesis that has not been tested. The meaning of COLOR (-1, -1, -1) is UNKNOWN. It may mean that no color is set.
+ALIGNMENT is a bit field that places the text in its box. ALIGNMENT takes only the values 9, 10, 12, 17, 18, 20 and 34. The GUI loader keeps the low 6 bits (PC code, 0x415F20), and the text object stores them in one byte with getters for the bits 0 to 2 and 3 to 5 (PC code, 0x45BB60 and 0x45BB90). The layout routine of the text uses them as the table below shows. For each line, it shifts the start by half the free width if the horizontal value is 2 and by the whole free width if it is 4 (PC code, 0x45AC37). It shifts the text down by half the free height if the vertical value is 16, and moves it so that the text ends at the bottom of the box if it is 32 (PC code, 0x45A8F1). The second case was read less closely than the others. The values 1 and 8 cause no shift.
+
+| Bits    | Value | Meaning                       | Confidence |
+| ------- | ----- | ----------------------------- | ---------- |
+| 0 to 2  | 1     | Left                          | high       |
+| 0 to 2  | 2     | Centred horizontally          | high       |
+| 0 to 2  | 4     | Right                         | high       |
+| 3 to 5  | 8     | Top                           | high       |
+| 3 to 5  | 16    | Centred vertically            | high       |
+| 3 to 5  | 32    | Bottom                        | medium     |
+
+The seven values that occur are therefore top left (9), top centre (10), top right (12), centre left (17), centre (18), centre right (20) and bottom centre (34).
+
+The GUI loader also shows how some of the other fields are stored (PC code, 0x415462 to 0x415585). FILLSTYLE goes into the low 2 bits of a word of the border object, so only the values 0 to 3 are possible. DIMENSION and INNEROFFSET are stored as integers. COLOR defaults to (1, 1, 1) when the field is absent. PULSING is read as a byte, and its bits 0 and 1 are passed on as two separate flags. What FILLSTYLE, DIMENSION, INNEROFFSET, the two PULSING flags, DRAWSTYLE and FLIPSTYLE do on screen was not traced and is UNKNOWN. The meaning of COLOR (-1, -1, -1) is UNKNOWN. It may mean that no color is set.
 
 # Patch archive: patch.erf
 
@@ -2261,7 +2292,7 @@ A LIP resource is a 16-byte header followed by keyframes. The following table li
 
 | Offset | Type    | Meaning                     | Evidence                                                                                                      | Confidence |
 | ------ | ------- | --------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | char[8] | Signature "LIP V1.0"        | True in all 18,206 resources.                                                                                 | high       |
+| 0x00   | char[8] | Signature "LIP V1.0"        | True in all 18,206 resources. The PC loader compares all 8 bytes (PC code, 0x70C60B).                         | high       |
 | 0x08   | f32     | Length in seconds           | Equals the time of the last keyframe in all 18,206 resources, and is within 50 ms of the voice file duration. | high       |
 | 0x0C   | u32     | Keyframe count _n_          | The resource size is exactly 16 + 5 × _n_ in all 18,206 resources.                                            | high       |
 | 0x10   | 5 × _n_ | Keyframes, in order of time | See below.                                                                                                    | high       |
@@ -2288,7 +2319,9 @@ The following table counts how often each mouth shape occurs.
 | 6     | 73,524    | 14    | 16,609    |
 | 7     | 30,595    | 15    | 18,903    |
 
-The sound or mouth pose that each shape stands for is UNKNOWN. Shape 0 is probably the closed or resting mouth, because every resource begins and ends with it. The engine probably blends between neighbouring keyframes, but this is unverified.
+The PC code shows how the engine uses the keyframes (PC code, 0x616320 to 0x61649C). It converts each keyframe into a pair of numbers: the time divided by the length at 0x08, and the value (shape + 1) / 16. If the first time is 0 and the last lies within 0.00001 of 1, it sets the last time to exactly 1. It then passes the pairs and the length to the model of the creature, which builds a curve from them. A shape is therefore a position from 1/16 to 16/16 on a scale of 16 steps, not an index into a table of sounds.
+
+The head models hold an animation named `talk` that fits this scale. In 14 of the 20 models with a `talk` animation, such as `p_bastilah`, `s_female03` and `n_rodian`, each track of `talk` has 16 keyframes at 0, 1/30, 2/30, … 15/30 seconds, and the animation is 0.5 seconds long. Four models have 15 keyframes over 0.4667 seconds, and two have only one. Shape k thus probably selects pose k of the 16 poses of `talk`, and the engine probably blends between neighbouring poses as the curve moves between keyframes. How the model maps the value (shape + 1) / 16 to a time of `talk` was not traced, so the pose of each shape and the sound it stands for remain UNKNOWN. Shape 0 is probably the closed or resting mouth, because every resource begins and ends with it.
 
 ## Link to the voice files
 
@@ -2406,7 +2439,7 @@ All four GFF file types have the version "V3.2". The extension ".res" therefore 
 | `INVENTORY` | 0    | res       | GFF file of file type "INV ": the party's items |
 | `REPUTE`    | 2038 | fac       | Faction table                                   |
 
-Resource types 0 and 2057 occur nowhere else in the game files. Their extensions come from the pool of extension strings in the `.rdata` section of `swkotor.exe`, which is not encrypted. The pool lists the extensions roughly in descending type order. "sav" stands between "utw" (2058) and "jrl" (2056), and "res" stands last, after "bmp", "mve" and "tga" (types 1 to 3). The confidence of both names is medium. No table that pairs each code with its string was found in the file, because the `.text` section is encrypted by the Steam wrapper (every 64 KB block of it compresses to more than its own size).
+Resource types 0 and 2057 occur nowhere else in the game files. Their extensions come from the pool of extension strings in the `.rdata` section of `swkotor.exe`, which is not encrypted. The pool lists the extensions roughly in descending type order. "sav" stands between "utw" (2058) and "jrl" (2056), and "res" stands last, after "bmp", "mve" and "tga" (types 1 to 3). The resource type table of the decrypted PC code confirms both names, because it pairs 0 with "res" and 2057 with "sav" (see "Resource type table" under "PC executable: swkotor.exe").
 
 The resrefs in the outer archive are uppercase, and those in the nested archive are mixed: `m01aa` and `Module`. The converter writes all resrefs in lowercase, as for the other archives.
 
@@ -2464,9 +2497,9 @@ Four numbers are not 0. `K_CURRENT_PLANET` is 5, `END_TRASK_DLG` is 11, and `END
 
 The engine keeps the variables in a catalogue of 1,775 slots (Xbox code, 0x1625C0). The slot of a name is the CRC-32 of the name in upper case, modulo 1,775 (Xbox code, 0x1623D0). The CRC uses the reflected polynomial 0xEDB88320, starts at 0 and is not inverted at the end. When a slot is taken, the next free slot is used. The save routine (Xbox code, 0x163130) walks the slots in order and writes each name and value to the lists of its type. If the names of `globalcat.2da` are inserted in row order with this rule, the slot order reproduces all four lists of the PC save exactly. This holds for the 809 booleans, the 369 numbers, the 5 locations and the 2 strings.
 
-Boolean k of `CatBoolean` is bit 7 - (k mod 8) of byte k / 8, so the high bit of each byte comes first (Xbox code, 0x162650). The engine writes (count / 8) + 1 bytes, rounded down before the addition, so a whole extra byte follows when the count is a multiple of 8. `ReadGlobals` uses this bit order and rejects a set bit beyond the last boolean. Every boolean in this save is false, so the PC files cannot test the order.
+Boolean k of `CatBoolean` is bit 7 - (k mod 8) of byte k / 8, so the high bit of each byte comes first (Xbox code, 0x162650). The engine writes (count / 8) + 1 bytes, rounded down before the addition, so a whole extra byte follows when the count is a multiple of 8. `ReadGlobals` uses this bit order and rejects a set bit beyond the last boolean. Every boolean in this save is false, so the PC files cannot test the order. The PC loader uses the same order (PC code, 0x52A4DA). It reads `ValBoolean` into a buffer of 113 bytes and, for name k of `CatBoolean`, takes bit 7 - (k mod 8) of byte k / 8. It reads `ValNumber` into a buffer of 500 bytes, one byte per name of `CatNumber` (PC code, 0x52A57D and 0x52A6F8).
 
-`ValLocation` always holds 100 slots of 24 bytes (Xbox code, 0x1633A1). Location k of `CatLocation` is slot k, and unused slots hold zeros. The table below describes one slot. It is the engine's location structure, copied as it is (Xbox code, 0x16326B). The script routine `Location` fills it (Xbox code, 0x264530), and `GetFacingFromLocation` reads it (Xbox code, 0x264680).
+`ValLocation` always holds 100 slots of 24 bytes (Xbox code, 0x1633A1). The PC loader reads it into an array of 100 elements of 24 bytes (PC code, 0x52A2A4 and 0x52A734). Location k of `CatLocation` is slot k, and unused slots hold zeros. The table below describes one slot. It is the engine's location structure, copied as it is (Xbox code, 0x16326B). The script routine `Location` fills it (Xbox code, 0x264530), and `GetFacingFromLocation` reads it (Xbox code, 0x264680).
 
 | Offset | Type   | Meaning                                                             | Evidence | Confidence |
 | ------ | ------ | ------------------------------------------------------------------- | -------- | ---------- |
@@ -2522,9 +2555,87 @@ The stage writes 13 report lines to `temp/reports/pc/saves.txt`, and all 13 pass
 
 The `saves` stage of `cmd/verify` checks the outputs with independent tools. jq parses all nine GFF JSON files. ImageMagick's decoding of `Screen.png` equals its decoding of `Screen.tga`, and pngcheck accepts the PNG. The decoded variables, read with jq, are packed again into `ValBoolean` and `ValNumber`, and these bytes, the names and the strings must equal the fields of the source file. All four checks pass. A test in which one number in `GLOBALVARS.variables.json` was changed made the last check fail. This check confirms only that the JSON file holds every bit of the source; it cannot confirm the bit order of `ValBoolean`, because the same order is used to pack the bits again.
 
+# PC executable: swkotor.exe
+
+`dump/pc/swkotor.exe` is the program of the PC build. It is a 32-bit PE (Portable Executable) file with the image base 0x400000 and five sections: `.text` (code), `.rdata` (constants and strings), `.data` (variables), `.rsrc` (Windows resources) and `.bind`. The `.bind` section holds a copy protection wrapper of Steam, which is called SteamStub. The entry point of the file, 0x86D2ED, lies in `.bind`. Steamless, the installed tool that removes this wrapper, identifies it as SteamStub variant 2.1. This section describes the wrapper as its code shows it.
+
+The wrapper encrypts the code section. It keeps the keys in a payload, and a second program, SteamDRMP.dll, decrypts the code with them. Steamless reverses these steps. It writes a copy without the `.bind` section, with a plain code section and with the original entry point 0x6FB38D. The command below runs it and moves the copy to `temp/pe/swkotor.exe`.
+
+```
+cp dump/pc/swkotor.exe temp/pe/ && steamless temp/pe/swkotor.exe && mv temp/pe/swkotor.exe.unpacked.exe temp/pe/swkotor.exe
+```
+
+Steamless 3.1.0.5 names three of the sections of the copy `.textV`, `.dataV` and `.rsrcV`. The section contents are not affected.
+
+## Stub header
+
+The stub begins at the entry point. Its first instructions load three constants: the address of its header (0x86F204), the header size (0x364 bytes) and a key (0x067262EF). The header is XOR-encoded word by word. The first word is XORed with the key, and every later word with the encoded word before it. The table below lists the decoded header fields that the stub uses.
+
+| Offset | Type | Meaning | Evidence | Confidence |
+| ------ | ---- | ------- | -------- | ---------- |
+| 0x00   | u32  | UNKNOWN | The value is 0x5EE9B07F. The stub does not read it. | low |
+| 0x04   | u32  | Address of the import slot of GetModuleHandleA, or 0 | The stub calls through this slot with the name "kernel32.dll" from 0x48 (0x86D50F). | high |
+| 0x08   | u32  | Address of the import slot of GetModuleHandleW, or 0 | Called with the wide name at 0x58 if 0x04 is 0. The value is 0. | medium |
+| 0x0C   | u32  | Address of the import slot of GetProcAddress, or 0 | If 0, the stub looks the routine up in the export table of kernel32 itself (routine 0x86D005). | high |
+| 0x10   | u32  | Address of the import slot of LoadLibraryA, or 0 | Called with the name at 0x48 if 0x04 and 0x08 are 0. | medium |
+| 0x14   | u32  | Address of the import slot of LoadLibraryW, or 0 | Called with the wide name at 0x58 as the last choice. The value is 0. | medium |
+| 0x18   | u32  | Address of the stub code (0x86D000) | The stub computes a checksum over 0x18 and 0x1C bytes from here. | high |
+| 0x1C   | u32  | Size of the stub code (0x2204) | See above. | high |
+| 0x20   | u32  | Checksum, and the key of the payload (0x03C1C421) | The stub clears this field, computes a checksum over the stub code and the header with the routine at 0x86D266, and compares it with the saved value. The payload begins with the same value (see below). | high |
+| 0x24   | u32  | Address of the payload (0x8C1168) | See "Payload". | high |
+| 0x28   | u32  | Size of the payload (0x1000) | See "Payload". | high |
+| 0x2C   | u32  | Steam application ID (32370) | Matches `32370_install.vdf` in `dump/pc`. | high |
+| 0x34   | char[] | The application ID as text, "032370" | Readable text. | medium |
+| 0x3C   | u32  | Offset in the payload of the address of SteamDRMP.dll (0x82C) | The stub reads the DLL address from this payload offset (0x86DC2D). | high |
+| 0x40   | u32  | Offset in the payload of the size of SteamDRMP.dll (0xF14) | Read at 0x86DC42. | high |
+| 0x44   | u32  | Offset in the payload of the XTEA key of SteamDRMP.dll (0x8E4) | Used as the key of the DLL decryption at 0x86DC6C. | high |
+| 0x48   | strings | Names of DLLs and Windows routines, error messages and the shared memory names of Steam | Readable text, for example "kernel32.dll", "VirtualProtect", "Local\SteamStart_SharedMemFile" and "-applaunch ". | high |
+
+## Payload
+
+The payload is 0x1000 bytes long. Its first word equals the checksum at 0x20 of the header, and the remaining words are XOR-encoded in the same rolling way, with that value as the first key (stub code, 0x86DB8B). If the first word differs from the checksum, the stub asks a running Steam client for the payload through shared memory. In this file the payload is complete.
+
+Most of the payload is random filler. The DLL reads its fields from fixed offsets, which are constants in the code of its routine `start` (0x1000404F in the DLL image). The table below lists the fields.
+
+| Offset | Type     | Meaning | Value | Confidence |
+| ------ | -------- | ------- | ----- | ---------- |
+| 0x000  | u32      | Equals the checksum at 0x20 of the header | 0x03C1C421. `start` checks it first and fails otherwise. | high |
+| 0x574  | u8[32]   | AES-256 key of the code section | Decrypts the code (see below). | high |
+| 0x6EC  | u32      | Original entry point | 0x6FB38D. `start` returns it, and the stub jumps to it. | high |
+| 0x82C  | u32      | Address of the encrypted SteamDRMP.dll | 0x86F568, inside `.bind`. | high |
+| 0x8E4  | u32[4]   | XTEA key of SteamDRMP.dll | Decrypts the DLL. | high |
+| 0xB34  | u32      | Number of encrypted bytes of the code section | 0x33BFF0 | high |
+| 0xBAC  | u8[32]   | Encrypted IV and the encrypted first block of the code | See below. | high |
+| 0xC98  | u32      | Address of the code section | 0x401000 | high |
+| 0xDF8  | u32      | Flags | 0x20. If bit 2 is set, the code is not encrypted. Bit 1 makes `start` skip a check of the executable file. The other bits are UNKNOWN. | medium |
+| 0xE54  | u32      | Steam application ID | 32370 | high |
+| 0xF14  | u32      | Size of SteamDRMP.dll in bytes | 0x51C00 | high |
+
+## SteamDRMP.dll and the code section
+
+The stub decrypts SteamDRMP.dll with XTEA, a 64-bit block cipher, in CBC (cipher block chaining) mode. It uses 32 rounds, the delta 0x9E3779B9, the key from the payload and an IV (initialization vector) of two words 0x55555555 (stub code, 0x86DC82). The result is a 32-bit PE DLL with the image base 0x10000000. It calls itself `steamdrm.dll` and exports one routine, `start`, at 0x1000404F. It contains the AES tables of the Crypto++ library. The stub maps the DLL into memory and calls `start` with the payload and its size (0x86E869).
+
+`start` decrypts the code section with AES-256 (0x1000440E). It joins the 32 bytes at 0xBAC of the payload and the 0x33BFF0 bytes at the code address into one buffer. It decrypts the first 16 bytes in ECB (electronic codebook) mode, which gives the IV. It then decrypts the remaining 0x33C000 bytes in CBC mode with that IV and writes the result over the code section (routine 0x10003A6F). The first 16 bytes of the plain code therefore come from the payload, and the encrypted code in the file is shifted by one block. The last 16 bytes of the result are PKCS#7 padding, 16 bytes of the value 0x10, and are dropped.
+
+## Disassembly and verification
+
+The command below disassembles the code of the executable that Steamless writes.
+
+```
+objdump -d -M intel --no-show-raw-insn temp/pe/swkotor.exe > temp/pe/swkotor.asm
+```
+
+The decrypted code is correct for four reasons. Decrypting the code by the steps above gives exactly the code that Steamless writes, and the last block of that decryption is 16 bytes of 0x10 padding, which a wrong key or IV would not produce. The original entry point disassembles as the startup routine of the Microsoft C runtime, which calls GetVersionExA with a structure size of 0x94. Calls in the code land on routine entries. The code refers to the strings of the formats in this document from the routines that read them, for example to "proceduretype" and the other TXI keywords from the TXI parser at 0x422390, and to the field labels of `GLOBALVARS.res` from its loader at 0x52A2A3.
+
+The engine routines found so far are named in the sections of the formats they read, as "PC code" with their address.
+
+## Resource type table
+
+The resource manager builds a table that pairs each resource type number with its file extension (PC code, around 0x5E7656). The table holds 87 entries, from 0 ("res") to 3011 ("xbx"), and ends with 65535. It is the only list of resource types in the program. All 40 extensions in `kotor.Ext` equal the engine's extension for the same number. This includes the names that were inferred only from the extension pool: 0 is "res", 2057 is "sav", 2016 is "wok", 2052 is "dwk" and 2053 is "pwk". The other 47 entries are types that the game files do not use, such as 2005 "fnt", 2033 "dds" and 3009 "rsv".
+
 # Xbox executable: default.xbe
 
-`dump/xbox/default.xbe` is the program of the Xbox build. It is an XBE file, the executable format of the original Xbox. Its code is not encrypted, unlike the code of the PC executable, so its routines that read the game files can be disassembled and read. Several sections of this document rely on it. The XBE format is documented publicly. The fields below are the ones that `cmd/xbe` uses, and each was checked on the four XBE files of the dump: `default.xbe`, `dashupdate.xbe`, `downloader.xbe` and `update.xbe`.
+`dump/xbox/default.xbe` is the program of the Xbox build. It is an XBE file, the executable format of the original Xbox. Its code is not encrypted, so its routines that read the game files can be disassembled and read directly. Several sections of this document relied on it before the PC code was decrypted. The XBE format is documented publicly. The fields below are the ones that `cmd/xbe` uses, and each was checked on the four XBE files of the dump: `default.xbe`, `dashupdate.xbe`, `downloader.xbe` and `update.xbe`.
 
 The header names the game "Star Wars: KotOR" with title ID LA-003. The build path in the debug fields is `d:\SW\dev\game\swmain\Xbox_Release_DVD_SHIP\default.exe`.
 
@@ -2576,4 +2687,4 @@ objdump -D -b binary -m i386 -M intel --adjust-vma=0x10000 --start-address=0x110
 
 The routines of the game were found through the strings they use, such as the field labels of a GFF file, the keywords of the model text parser and the signatures of the archives. The addresses given as "Xbox code" in this document are addresses in this image. The disassembly is coherent, because string references resolve, calls land on routine entries, and the control flow of each routine that was read is consistent. No other disassembler is installed, so the output of objdump was not compared with an independent tool.
 
-The Xbox build shares the formats of the PC build, but a few structures differ. The mesh header of a model is 0x148 bytes in the Xbox engine instead of 0x14C (see "Mesh header"), and the Xbox engine loads up to six additional string tables for downloadable content. A statement that rests only on the Xbox code may therefore differ in the PC build. Each such statement says so.
+The Xbox build shares the formats of the PC build, but a few structures differ. The mesh header of a model is 0x148 bytes in the Xbox engine instead of 0x14C (see "Mesh header"). Both executables name up to six additional string tables for downloadable content (`LIVE%d`), and neither dump contains such a table. A statement that rests only on the Xbox code may therefore differ in the PC build. Each such statement says so.
