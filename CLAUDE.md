@@ -2,7 +2,7 @@
 
 ## Objective
 
-- You are reverse engineering the game in `~/re/swkotor`
+- You are reverse engineering the game in `~/re/dump/<platform>`, where `<platform>` is `pc` or `xbox`
 - You will focus on reverse engineering the file formats
 
 ## Tools
@@ -28,13 +28,13 @@ The following tools are installed:
 ## Rules
 
 - The working directory is `~/re`
-- You are forbidden from editing the original game files in `~/re/swkotor`
+- You are forbidden from editing the original game files in `~/re/dump`
 - Scratch work goes in the `~/re/temp` directory
-- Converted, human-readable (or in otherwise ubiquitous binary format) assets should be stored in the `~/re/extracted` directory
+- Converted, human-readable (or in otherwise ubiquitous binary format) assets should be stored in the `~/re/extract/<platform>` directory of the build they come from
   - These assets should be primarily organized similarly to how they are organized in the original game files
   - When the original game files don't offer a clear structure, prefer to organize assets by feature and with a flat structure
   - Converted assets must use the most widely supported encoding, not just a common container (e.g. PCM WAV, not ADPCM WAV)
-  - Verify each output with an independent tool (e.g. ffprobe, a mesh loader) before storing it in `~/re/extracted`. If no such tool is available, say so and mark the output unverified
+  - Verify each output with an independent tool (e.g. ffprobe, a mesh loader) before storing it in `~/re/extract/<platform>`. If no such tool is available, say so and mark the output unverified
 - Gather evidence before hypothesizing: file, xxd, strings, entropy per region. Compare at least 5 samples of each type.
 - Record findings in `~/re/README.md`, which holds all formats in one file. Give each field its offset, type, evidence and confidence. Write UNKNOWN for anything unverified.
 - A parser is correct only if it consumes each file exactly, keeps offsets inside the file, and yields plausible counts. Report pass/fail per sample.

@@ -4,7 +4,7 @@
 //
 // usage: go run ./cmd/unpack data/models.bif outdir [resref...]
 //
-//	go run ./cmd/unpack swkotor/modules/danm13_s.rim outdir [resref...]
+//	go run ./cmd/unpack dump/pc/modules/danm13_s.rim outdir [resref...]
 package main
 
 import (

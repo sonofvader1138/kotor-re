@@ -1,9 +1,9 @@
-// Command extract converts all supported game assets into ~/re/extracted and writes each parser's report
-// to ~/re/temp/reports. It does not check the outputs with independent tools; the verify command does that.
+// Command extract converts all supported game assets into ~/re/extract/<platform> and writes each parser's report
+// to ~/re/temp/reports/<platform>. It does not check the outputs with independent tools; the verify command does that.
 // Movies require ffmpeg. All stages run at the same time. Each stage writes its own outputs and reports
 // and keeps its own summary lines, which are printed in stage order at the end.
 //
-// usage: go run ./cmd/extract [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [patch] [lips] [modules] [rims] [bifs] [tlk] [saves]   (default: all)
+// usage: go run ./cmd/extract [-platform pc|xbox] [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [patch] [lips] [modules] [rims] [bifs] [tlk] [saves]   (default: all)
 package main
 
 import (
@@ -47,7 +47,7 @@ func prune(dir string, keep map[string]bool, exts []string) {
 	}
 }
 
-// texturePaths maps each texture resref to its PNG file in the texture packs, relative to extracted. The first
+// texturePaths maps each texture resref to its PNG file in the texture packs, relative to extract. The first
 // pack in priority order wins, so the packs are read in reverse.
 func texturePaths() map[string]string {
 	paths := map[string]string{}
@@ -83,7 +83,7 @@ func writeModel(out, label, resref string, mdl, mdx []byte, texturePath map[stri
 			return ""
 		}
 
-		relative, err := filepath.Rel(out, filepath.Join(kotor.Extracted, path))
+		relative, err := filepath.Rel(out, filepath.Join(kotor.Extract, path))
 		if err != nil {
 			kotor.Fatal(err.Error())
 		}
@@ -127,7 +127,7 @@ func noteModels(summary *kotor.Summary, stage string, counts *modelCounts) {
 		fmt.Sprintf("%s: model textures not found: %d (%s)", stage, len(missingNames), strings.Join(missingNames, " ")))
 }
 
-// Models: data/<archive>.bif -> extracted/data/<archive>/*.gltf + *.bin (passing, with geometry or animations),
+// Models: data/<archive>.bif -> extract/data/<archive>/*.gltf + *.bin (passing, with geometry or animations),
 // one folder per archive in kotor.ModelBifs. The glTF node extras hold the decoded node headers, mesh headers,
 // static controller values and face fields, and the model's animations and skins are glTF animations and
 // skins. The walkmeshes of an archive become <resref>.<wok|dwk|pwk>.gltf + .bin in the same folder. Only
@@ -143,7 +143,7 @@ func convertModels(summary *kotor.Summary) {
 	counts := &modelCounts{missing: map[string]bool{}}
 	walkmeshes := map[string]int{}
 	for _, name := range kotor.ModelBifs {
-		out := filepath.Join(kotor.Extracted, "data", name)
+		out := filepath.Join(kotor.Extract, "data", name)
 		kotor.MakeDir(out)
 
 		resources := kotor.BifResources("data/"+name+".bif", key)
@@ -279,11 +279,11 @@ func writeWalkmesh(out string, resource kotor.Resource, materials []surfaceMater
 	return line, []string{label + ".gltf", label + ".bin"}
 }
 
-// Textures: TexturePacks/<pack>.erf -> extracted/TexturePacks/<pack>/*.png (+ *.txi when present)
+// Textures: TexturePacks/<pack>.erf -> extract/TexturePacks/<pack>/*.png (+ *.txi when present)
 func convertTextures(summary *kotor.Summary) {
 	for _, pack := range kotor.TexturePacks {
 		fmt.Printf("textures %s...\n", pack)
-		out := filepath.Join(kotor.Extracted, "TexturePacks", pack)
+		out := filepath.Join(kotor.Extract, "TexturePacks", pack)
 		kotor.MakeDir(out)
 
 		var report []string
@@ -308,15 +308,15 @@ func convertTextures(summary *kotor.Summary) {
 }
 
 // TGA images and their TXI texture options from three groups of BIF archives:
-// data/lightmaps*.bif -> extracted/data/lightmaps, data/textures.bif -> extracted/data/textures,
-// data/legacy.bif -> extracted/data/legacy. Images become 8-bit PNG with the TGA's channels (gray, RGB or
+// data/lightmaps*.bif -> extract/data/lightmaps, data/textures.bif -> extract/data/textures,
+// data/legacy.bif -> extract/data/legacy. Images become 8-bit PNG with the TGA's channels (gray, RGB or
 // RGBA), top row first. The TGA parser must consume each file exactly. The room visibility lists of the
 // lightmap archives are converted by writeResource into the same folder.
 func convertTga(summary *kotor.Summary) {
 	key := kotor.ReadKey()
 	for _, group := range kotor.TgaGroups {
 		fmt.Printf("tga %s...\n", group.Name)
-		out := filepath.Join(kotor.Extracted, "data", group.Name)
+		out := filepath.Join(kotor.Extract, "data", group.Name)
 		kotor.MakeDir(out)
 
 		var report []string
@@ -374,14 +374,14 @@ func convertTga(summary *kotor.Summary) {
 	}
 }
 
-// Stream audio: streammusic/*.wav, streamsounds/*.wav and streamwaves/**/*.wav -> extracted/<folder>/**/*.mp3 | *.wav (PCM).
+// Stream audio: streammusic/*.wav, streamsounds/*.wav and streamwaves/**/*.wav -> extract/<folder>/**/*.mp3 | *.wav (PCM).
 // All three folders use the layouts that kotor.UnwrapAudio detects. kotor.DecodeAdpcm copies 16-bit PCM
 // unchanged.
 // streamwaves has one subfolder per module and dialog, which the output keeps.
 func convertAudio(summary *kotor.Summary, stage, folder string) {
 	fmt.Printf("%s...\n", stage)
 	src := filepath.Join(kotor.Game, folder)
-	out := filepath.Join(kotor.Extracted, folder)
+	out := filepath.Join(kotor.Extract, folder)
 	kotor.MakeDir(out)
 
 	var report []string
@@ -409,7 +409,7 @@ func convertAudio(summary *kotor.Summary, stage, folder string) {
 	summary.Tally(stage, report)
 }
 
-// Movies: movies/*.bik -> extracted/movies/*.mp4 (H.264 High profile, yuv420p; AAC LC audio).
+// Movies: movies/*.bik -> extract/movies/*.mp4 (H.264 High profile, yuv420p; AAC LC audio).
 // Requires ffmpeg, which decodes Bink. One ffmpeg process does not keep all CPUs busy at this resolution,
 // so movieJobs of them run at once, largest movie first, so that the last ones to finish are short.
 // One job per cpusPerMovie CPUs keeps all CPUs busy.
@@ -430,7 +430,7 @@ func convertMovies(summary *kotor.Summary) {
 
 	fmt.Println("movies...")
 	src := filepath.Join(kotor.Game, "movies")
-	out := filepath.Join(kotor.Extracted, "movies")
+	out := filepath.Join(kotor.Extract, "movies")
 	kotor.MakeDir(out)
 
 	files := kotor.ListFiles(src, ".bik", false)
@@ -505,11 +505,11 @@ func convertMovies(summary *kotor.Summary) {
 	summary.Tally("movies", report)
 }
 
-// GUI: resource type 2047 in data/gui.bif -> extracted/data/gui/*.json, converted by writeResource. The GUI
+// GUI: resource type 2047 in data/gui.bif -> extract/data/gui/*.json, converted by writeResource. The GUI
 // layouts of patch.erf are converted by the patch stage.
 func convertGui(summary *kotor.Summary) {
 	fmt.Println("gui...")
-	out := filepath.Join(kotor.Extracted, "data", "gui")
+	out := filepath.Join(kotor.Extract, "data", "gui")
 	kotor.MakeDir(out)
 
 	var report []string
@@ -530,11 +530,11 @@ func convertGui(summary *kotor.Summary) {
 	summary.Tally("gui", report)
 }
 
-// Patch: patch.erf -> extracted/patch/, converted by writeResource: GUI layouts, textures, 2DA tables and one
+// Patch: patch.erf -> extract/patch/, converted by writeResource: GUI layouts, textures, 2DA tables and one
 // model. The MDX resource is the vertex data of the model of the same name and is not converted on its own.
 func convertPatch(summary *kotor.Summary) {
 	fmt.Println("patch...")
-	out := filepath.Join(kotor.Extracted, "patch")
+	out := filepath.Join(kotor.Extract, "patch")
 	kotor.MakeDir(out)
 
 	entries := kotor.ReadErf(filepath.Join(kotor.Game, "patch.erf"))
@@ -572,13 +572,13 @@ func convertPatch(summary *kotor.Summary) {
 	noteModels(summary, "patch", inputs.counts)
 }
 
-// Lips: lips/<module>.mod -> extracted/lips/<module>/<resref>.csv, with one "time_s,shape" line per keyframe.
+// Lips: lips/<module>.mod -> extract/lips/<module>/<resref>.csv, with one "time_s,shape" line per keyframe.
 // Each archive keeps its own folder, so names that occur in several archives are written once per archive.
 // Empty archives produce no folder.
 func convertLips(summary *kotor.Summary) {
 	fmt.Println("lips...")
 	src := filepath.Join(kotor.Game, "lips")
-	out := filepath.Join(kotor.Extracted, "lips")
+	out := filepath.Join(kotor.Extract, "lips")
 	kotor.MakeDir(out)
 
 	var report []string
@@ -653,7 +653,7 @@ func gffFile(data []byte, ext string, tlk *kotor.Tlk) ([]byte, string, string) {
 	return append(text, '\n'), notes, ""
 }
 
-// Modules: modules/<archive>.rim -> extracted/modules/<archive>/, one folder per archive. A GFF resource
+// Modules: modules/<archive>.rim -> extract/modules/<archive>/, one folder per archive. A GFF resource
 // becomes <resref>.<ext>.json in the form of gffJson, with localized strings resolved through dialog.tlk.
 // A compiled script becomes <resref>.ncs.txt, its disassembly with the routine names of nwscript.nss.
 // The extension stays in the name because an area's ARE and GIT resources share a resref. A GFF resource
@@ -663,7 +663,7 @@ func convertModules(summary *kotor.Summary) {
 	tlk := dialogTlk()
 	routines := kotor.ReadNwscript(kotor.ReadKey())
 	src := filepath.Join(kotor.Game, "modules")
-	out := filepath.Join(kotor.Extracted, "modules")
+	out := filepath.Join(kotor.Extract, "modules")
 	kotor.MakeDir(out)
 
 	var report []string
@@ -907,7 +907,7 @@ func writeResource(dir, label string, resource kotor.Resource, mdx []byte, input
 	return line, []string{file}
 }
 
-// Rims: rims/<archive>.rim -> extracted/rims/<archive>/, one folder per archive. Every archive whose name
+// Rims: rims/<archive>.rim -> extract/rims/<archive>/, one folder per archive. Every archive whose name
 // ends in "dx" holds the MDX data of the models in the archive of the same name without "dx", and no other
 // resources. Each resource is converted by writeResource. Each archive also gets a report line with its
 // resource count, so that the four empty archives are reported too. MDX data without a model in the
@@ -916,7 +916,7 @@ func convertRims(summary *kotor.Summary) {
 	fmt.Println("rims...")
 	inputs := newResourceInputs()
 	src := filepath.Join(kotor.Game, "rims")
-	out := filepath.Join(kotor.Extracted, "rims")
+	out := filepath.Join(kotor.Extract, "rims")
 	kotor.MakeDir(out)
 
 	var report []string
@@ -982,7 +982,7 @@ func convertRims(summary *kotor.Summary) {
 	summary.Note(fmt.Sprintf("rims: MDX data without a model, not converted: %d (%s)", len(orphans), strings.Join(orphans, " ")))
 }
 
-// Bifs: data/<archive>.bif -> extracted/data/<archive>/, one folder per archive in kotor.ResourceBifs. Each
+// Bifs: data/<archive>.bif -> extract/data/<archive>/, one folder per archive in kotor.ResourceBifs. Each
 // resource is converted by writeResource.
 func convertBifs(summary *kotor.Summary) {
 	fmt.Println("bifs...")
@@ -991,7 +991,7 @@ func convertBifs(summary *kotor.Summary) {
 
 	var report []string
 	for _, name := range kotor.ResourceBifs {
-		out := filepath.Join(kotor.Extracted, "data", name)
+		out := filepath.Join(kotor.Extract, "data", name)
 		kotor.MakeDir(out)
 
 		written := map[string]bool{}
@@ -1008,7 +1008,7 @@ func convertBifs(summary *kotor.Summary) {
 	summary.Tally("bifs", report)
 }
 
-// Tlk: dialog.tlk -> extracted/dialog.tlk.json, the string table as an object with "language", the u32 at
+// Tlk: dialog.tlk -> extract/dialog.tlk.json, the string table as an object with "language", the u32 at
 // header offset 8, and "entries", one object per entry in file order. Each entry has "strref", its
 // position in the table; "flags"; "sound", the sound resref; and "text". The sound and text are empty
 // strings when the entry has none. ReadTlk rejects every value this form leaves out.
@@ -1043,12 +1043,12 @@ func convertTlk(summary *kotor.Summary) {
 		return
 	}
 
-	kotor.WriteFile(filepath.Join(kotor.Extracted, "dialog.tlk.json"), append(text, '\n'))
+	kotor.WriteFile(filepath.Join(kotor.Extract, "dialog.tlk.json"), append(text, '\n'))
 	line := fmt.Sprintf("dialog.tlk entries=%d text=%d sound=%d PASS", len(tlk.Entries), withText, withSound)
 	summary.Tally("tlk", []string{line})
 }
 
-// Saves: saves/<save>/ -> extracted/saves/<save>/, one folder per saved game. Files outside the save folders
+// Saves: saves/<save>/ -> extract/saves/<save>/, one folder per saved game. Files outside the save folders
 // are not converted.
 //
 //   - A GFF file (*.res) becomes <name>.res.json in the form of gffJson. GLOBALVARS.res also becomes
@@ -1061,7 +1061,7 @@ func convertSaves(summary *kotor.Summary) {
 	fmt.Println("saves...")
 	inputs := &resourceInputs{tlk: dialogTlk()}
 	src := filepath.Join(kotor.Game, "saves")
-	out := filepath.Join(kotor.Extracted, "saves")
+	out := filepath.Join(kotor.Extract, "saves")
 	kotor.MakeDir(out)
 
 	var report []string

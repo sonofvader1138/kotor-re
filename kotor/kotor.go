@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -28,10 +29,19 @@ var Root = func() string {
 	return filepath.Join(filepath.Dir(file), "..")
 }()
 
+// Platforms lists the builds of the game that a dump can come from. The dump of each build is read from
+// dump/<platform>, and its outputs go to extract/<platform> and temp/reports/<platform>.
+var Platforms = []string{"pc", "xbox"}
+
+// DefaultPlatform is the build that the commands read when no -platform flag is given.
+const DefaultPlatform = "pc"
+
+// Game is the dump being read, Extract the folder that receives its converted assets, and Reports the
+// folder that receives the parser and check reports. RunStages sets them from the -platform flag.
 var (
-	Game      = filepath.Join(Root, "swkotor")
-	Extracted = filepath.Join(Root, "extracted")
-	Reports   = filepath.Join(Root, "temp", "reports")
+	Game    = filepath.Join(Root, "dump", DefaultPlatform)
+	Extract = filepath.Join(Root, "extract", DefaultPlatform)
+	Reports = filepath.Join(Root, "temp", "reports", DefaultPlatform)
 )
 
 // Resource type codes used in KEY, BIF and ERF tables.
@@ -108,12 +118,12 @@ type TgaGroup struct {
 	Pattern *regexp.Regexp
 }
 
-// ModelBifs lists the BIF archives that hold models. Each archive becomes the folder extracted/data/<name>.
+// ModelBifs lists the BIF archives that hold models. Each archive becomes the folder extract/data/<name>.
 var ModelBifs = []string{"models", "items", "party", "player"}
 
 // ResourceBifs lists the BIF archives whose resources are converted one by one, without models: tables,
 // sounds, scripts, templates, the journal and the room layouts. Each archive becomes the folder
-// extracted/data/<name>.
+// extract/data/<name>.
 var ResourceBifs = []string{"2da", "sounds", "scripts", "templates", "_newbif", "layouts"}
 
 var TgaGroups = []TgaGroup{
@@ -660,9 +670,27 @@ type Stage struct {
 	Run  func(*Summary)
 }
 
-// RunStages runs the stages whose names are given, or all of them when none are, at the same time. It then
-// prints their summaries in reportOrder.
-func RunStages(stages []Stage, names []string) {
+// RunStages reads the -platform flag and the stage names from args. It runs the named stages, or all of them
+// when none are named, at the same time, and then prints their summaries in reportOrder.
+func RunStages(stages []Stage, args []string) {
+	flags := flag.NewFlagSet(filepath.Base(os.Args[0]), flag.ExitOnError)
+	platform := flags.String("platform", DefaultPlatform, "build of the game to read: "+strings.Join(Platforms, " or "))
+	// The flag set exits on a parse error, so Parse never returns one.
+	_ = flags.Parse(args)
+	names := flags.Args()
+
+	if !slices.Contains(Platforms, *platform) {
+		Fatal(fmt.Sprintf("unknown platform %q; expected %s", *platform, strings.Join(Platforms, " or ")))
+	}
+
+	Game = filepath.Join(Root, "dump", *platform)
+	Extract = filepath.Join(Root, "extract", *platform)
+	Reports = filepath.Join(Root, "temp", "reports", *platform)
+
+	if _, err := os.Stat(Game); err != nil {
+		Fatal(fmt.Sprintf("no dump for platform %s: %v", *platform, err))
+	}
+
 	MakeDir(Reports)
 
 	results := map[string]*Summary{}
