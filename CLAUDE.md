@@ -37,9 +37,16 @@ The following tools are installed:
   - When the original game files don't offer a clear structure, prefer to organize assets by feature and with a flat structure
   - Converted assets must use the most widely supported encoding, not just a common container (e.g. PCM WAV, not ADPCM WAV)
   - Verify each output with an independent tool (e.g. ffprobe, a mesh loader) before storing it in `~/re/extract/<platform>`. If no such tool is available, say so and mark the output unverified
-- Gather evidence before hypothesizing: file, xxd, strings, entropy per region. Compare at least 5 samples of each type.
+- Reverse engineer only formats specific to the game. Skip standard formats that an installed tool already decodes, such as Bink through ffmpeg, and skip storefront details such as Steam's wrapper.
+- Read engine code only when it settles a question about a data format.
+- Use the installed tools instead of writing replacements. If a tool fails, report what it needs and wait.
+- Gather evidence before hypothesizing: file, xxd, strings, entropy per region. Compare at least 5 samples of each type. If fewer than 5 exist, say so and ask for more.
 - Record findings in `~/re/README.md`, which holds all formats in one file. Give each field its offset, type, evidence and confidence. Write UNKNOWN for anything unverified.
+- Describe findings for the build (platform, region and revision), not for the particular copy that was dumped.
+- In `~/re/TODO.md`, state for each item whether it affects the extracted data or only the documentation.
 - A parser is correct only if it consumes each file exactly, keeps offsets inside the file, and yields plausible counts. Report pass/fail per sample.
+- After a refactor, rename or port, run the extraction again and compare it with the current `~/re/extract/<platform>`. Compare PNG images by pixels, and report every difference.
+- After changing a converter, run its stage again so that `~/re/extract/<platform>` matches the code.
 - Write all long-living code in Golang.
 - For short-lived scripts, you may use whichever language is most obvious, simple, or easy.
 
