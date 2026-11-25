@@ -209,14 +209,12 @@ const (
 	animationNameLength = 32
 )
 
-// The first two words of every animation header.
-var animationClassAddresses = [2]int{0x004134f0, 0x0043ece0}
-
 // readAnimations decodes the animations of the model and adds them to doc as glTF animations. targets maps
 // each glTF node of the model tree to its node number, flags and rest translation, and root is the glTF node
 // of the root of the model tree. The children of the model nodes are those of doc. Animation nodes are paired
-// with model nodes as the game pairs them (see pairAnimationNodes).
-func readAnimations(r *mdlReader, doc *Gltf, stats *MdlStats, targets map[int]mdlTarget, root int) {
+// with model nodes as the game pairs them (see pairAnimationNodes). Every animation header starts with the
+// class addresses of format.
+func readAnimations(r *mdlReader, doc *Gltf, stats *MdlStats, targets map[int]mdlTarget, root int, format mdlFormat) {
 	const (
 		animationArray  = 0x58
 		reservedStart   = 0x30
@@ -236,7 +234,7 @@ func readAnimations(r *mdlReader, doc *Gltf, stats *MdlStats, targets map[int]md
 		address1, _ := r.u32(offset + 4)
 		kind, _ := r.u8(offset + reservedEnd)
 		trailing, _ := r.u32(offset + trailingField)
-		if [2]int{address0, address1} != animationClassAddresses || kind != animationType || trailing != 0 ||
+		if [2]int{address0, address1} != format.animationClass || kind != animationType || trailing != 0 ||
 			slices.ContainsFunc(Slice(r.data, offset+reservedStart, offset+reservedEnd), func(b byte) bool { return b != 0 }) {
 			r.problem("unexpected animation header of " + name)
 		}

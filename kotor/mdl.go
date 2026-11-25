@@ -33,12 +33,66 @@ const (
 	nodeFlagLightsaber = 0x800
 )
 
-// The first two words of a mesh header are a pair of addresses in the executable, one pair per mesh class.
-// AABB and lightsaber meshes use the pair of the plain triangle mesh.
-var meshClassAddresses = map[string][2]int{
-	"trimesh": {0x00405750, 0x00405760},
-	"dangly":  {0x00405740, 0x00405730},
-	"skin":    {0x00405710, 0x00405720},
+// mdlFormat holds the values in which the PC and Xbox forms of a model differ (see "Xbox models" in
+// README.md).
+//
+//   - The model, mesh and animation headers start with pairs of addresses in the executable, one pair per
+//     class. AABB and lightsaber meshes use the pair of the plain triangle mesh.
+//   - The Xbox mesh header is 0x148 bytes. It lacks the offset of the vertex positions in the MDL at 0x148,
+//     so the Xbox positions exist only in the MDX vertex records.
+//   - The Xbox vertex records store each normal, and each of the three vectors of the tangent space, as one
+//     packed u32 (see unpackNormal).
+//   - The extra bytes of a skinned vertex record hold four f32 bone weights and four local bone indices,
+//     which are f32 on PC and i16 on Xbox. The bone map of the skin header also holds f32 on PC and i16 on
+//     Xbox.
+type mdlFormat struct {
+	modelClass      [2]int
+	animationClass  [2]int
+	meshClass       map[string][2]int
+	meshHeaderSize  int
+	mdlPositions    bool
+	packedNormals   bool
+	skinIndexSize   int
+	skinVertexExtra int
+}
+
+var mdlFormats = map[bool]mdlFormat{
+	false: {
+		modelClass:     [2]int{0x00413670, 0x00405520},
+		animationClass: [2]int{0x004134f0, 0x0043ece0},
+		meshClass: map[string][2]int{
+			"trimesh": {0x00405750, 0x00405760},
+			"dangly":  {0x00405740, 0x00405730},
+			"skin":    {0x00405710, 0x00405720},
+		},
+		meshHeaderSize:  0x14c,
+		mdlPositions:    true,
+		skinIndexSize:   4,
+		skinVertexExtra: skinWeightsSize + skinSlots*4,
+	},
+	true: {
+		modelClass:     [2]int{0x0040ed10, 0x0040ed20},
+		animationClass: [2]int{0x0040e760, 0x0045c8b0},
+		meshClass: map[string][2]int{
+			"trimesh": {0x00411d70, 0x00411070},
+			"dangly":  {0x00411af0, 0x00411ae0},
+			"skin":    {0x00411060, 0x00411070},
+		},
+		meshHeaderSize:  0x148,
+		packedNormals:   true,
+		skinIndexSize:   2,
+		skinVertexExtra: skinWeightsSize + skinSlots*2,
+	},
+}
+
+// unpackNormal decodes a normal of an Xbox vertex record. The u32 holds x in bits 0 to 10 and y in bits 11
+// to 21 as signed 11-bit values scaled by 1023, and z in bits 22 to 31 as a signed 10-bit value scaled by
+// 511. This is the NORMPACKED3 vertex format of the Xbox GPU.
+func unpackNormal(packed uint32) vec3 {
+	x := int32(packed<<21) >> 21
+	y := int32(packed<<10) >> 21
+	z := int32(packed) >> 22
+	return vec3{float64(x) / 1023, float64(y) / 1023, float64(z) / 511}
 }
 
 // A face is 32 bytes: the f32[3] face normal, the f32 plane distance, the u32 material, the u16[3] adjacent
@@ -87,26 +141,28 @@ const (
 
 // Each vertex component of an MDX vertex record has a bit in the vertex flags and an offset in the mesh header
 // that gives its position within the record, or 0xFFFFFFFF when the component is absent.
+// packedSize is the size of the component in an Xbox vertex record.
 var vertexComponents = []struct {
-	bit    int
-	offset int
-	name   string
-	size   int
+	bit        int
+	offset     int
+	name       string
+	size       int
+	packedSize int
 }{
-	{0x01, 0x104, "position", 12},
-	{0x20, 0x108, "normal", 12},
-	{0x02, 0x110, "uv1", 8},
-	{0x04, 0x114, "uv2", 8},
-	{0x80, 0x120, "tangent_space", 36},
+	{0x01, 0x104, "position", 12, 12},
+	{0x20, 0x108, "normal", 12, 4},
+	{0x02, 0x110, "uv1", 8, 8},
+	{0x04, 0x114, "uv2", 8, 8},
+	{0x80, 0x120, "tangent_space", 36, 12},
 }
 
-// The vertex records of a skinned mesh carry 32 more bytes, which the skin header describes: four f32 bone
-// weights and four f32 local bone indices. The weights of a vertex sum to 1 within weightTolerance.
+// The vertex records of a skinned mesh carry more bytes, which the skin header describes: four f32 bone
+// weights and four local bone indices (see mdlFormat). The weights of a vertex sum to 1 within
+// weightTolerance.
 const (
 	mdxAlignment    = 16
 	plainTerminator = 1e7
 	skinTerminator  = 1e6
-	skinVertexExtra = 32
 	skinWeightsSize = 16
 	skinSlots       = 4
 	weightTolerance = 1e-3
@@ -118,8 +174,6 @@ const (
 	modelType       = 2
 	modelNameLength = 32
 )
-
-var modelClassAddresses = [2]int{0x00413670, 0x00405520}
 
 // Fields of the node header after the flags, the node number and the name index.
 const (
@@ -156,9 +210,12 @@ const minNormalCosine = 0.99
 // A vertex normal counts as unit length when its length differs from 1 by less than this value, and as zero
 // when its length is below zeroLength. glTF requires unit normals. Zero normals are replaced (see the mesh
 // conversion), and a mesh with any other normal is written without normals.
+// A packed Xbox normal loses up to about 0.0012 of its length to rounding, so it counts as unit length
+// within packedUnitTolerance and is then normalized.
 const (
-	unitTolerance = 1e-3
-	zeroLength    = 1e-6
+	unitTolerance       = 1e-3
+	packedUnitTolerance = 5e-3
+	zeroLength          = 1e-6
 )
 
 // upAxis replaces a zero normal of a vertex that no face uses.
@@ -283,10 +340,11 @@ type MdlModel struct {
 
 // MdlOptions changes what ConvertMdl writes. Supermodels lists the animations that the model inherits (see
 // SupermodelLinks). AnimationsOnly writes only the node tree and the animations, without meshes, for the
-// shared animation file of a supermodel.
+// shared animation file of a supermodel. Xbox reads the Xbox form of the model.
 type MdlOptions struct {
 	Supermodels    []MdlSupermodelLink
 	AnimationsOnly bool
+	Xbox           bool
 }
 
 type MdlResult struct {
@@ -438,6 +496,7 @@ func (r *mdlReader) unclaimed() (int, int) {
 func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) string, options MdlOptions) MdlResult {
 	reader := newMdlReader(mdl[min(fileHeaderSize, len(mdl)):])
 	mdxReader := newMdlReader(mdx)
+	format := mdlFormats[options.Xbox]
 	var stats MdlStats
 
 	inBounds := reader.inBounds
@@ -457,7 +516,7 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 	address0, _ := u32(0)
 	address1, _ := u32(4)
 	geometryType, _ := u8(0x4c)
-	if [2]int{address0, address1} != modelClassAddresses || geometryType != modelType {
+	if [2]int{address0, address1} != format.modelClass || geometryType != modelType {
 		reader.problem(fmt.Sprintf("model header starts with %#x %#x and has type %d", address0, address1, geometryType))
 	}
 
@@ -521,10 +580,10 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 			kind = "lightsaber"
 		}
 
-		reader.claim(header, meshHeaderSize, "mesh header")
+		reader.claim(header, format.meshHeaderSize, "mesh header")
 		address0, _ := u32(header)
 		address1, _ := u32(header + 4)
-		if [2]int{address0, address1} != meshClassAddresses[class] {
+		if [2]int{address0, address1} != format.meshClass[class] {
 			problem(fmt.Sprintf("class addresses %#x %#x for a %s mesh", address0, address1, kind))
 		}
 
@@ -539,10 +598,15 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 		vertexFlags, _ := u32(header + meshVertexFlags)
 		vertexCount, _ := u16(header + meshVertexCount)
 		uvSetCount, _ := u16(header + meshUvSetCount)
-		mdxOffset, _ := u32(header + meshMdxOffset)
-		vertexOffset, ok := u32(header + meshVertexOffset)
+		mdxOffset, ok := u32(header + meshMdxOffset)
 		if !ok {
 			return nil
+		}
+		vertexOffset := none
+		if format.mdlPositions {
+			if vertexOffset, ok = u32(header + meshVertexOffset); !ok {
+				return nil
+			}
 		}
 		render, _ := u8(header + meshRender)
 		lightmapped, _ := u8(header + meshLightmapped)
@@ -567,10 +631,13 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 				componentOffsets[component.name] = offset
 				componentNames = append(componentNames, component.name)
 				recordSize += component.size
+				if format.packedNormals {
+					recordSize += component.packedSize - component.size
+				}
 			}
 		}
 		if kind == "skin" {
-			recordSize += skinVertexExtra
+			recordSize += format.skinVertexExtra
 		}
 		if vertexFlags&^knownBits != 0 {
 			problem(fmt.Sprintf("unknown vertex flags %#x", vertexFlags))
@@ -621,16 +688,44 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 		}
 		extras.Mesh = &decoded
 
-		if !inBounds(faceOffset, faceSize*faceCount, "faces "+name) ||
-			!inBounds(vertexOffset, vertexSize*vertexCount, "verts "+name) {
+		// The PC model stores the vertex positions in the MDL and repeats them in the MDX records. The Xbox
+		// model stores them only in the MDX records, or for a lightsaber mesh in its lightsaber header.
+		if !inBounds(faceOffset, faceSize*faceCount, "faces "+name) {
 			return nil
 		}
-		reader.claim(vertexOffset, vertexSize*vertexCount, "vertices")
-
 		verts := make([]vec3, 0, vertexCount)
-		for i := range vertexCount {
-			values, _ := f32(vertexOffset+vertexSize*i, 3)
-			verts = append(verts, vec3{values[0], values[1], values[2]})
+		positionOffset, hasPosition := componentOffsets["position"]
+		switch {
+		case format.mdlPositions:
+			if !inBounds(vertexOffset, vertexSize*vertexCount, "verts "+name) {
+				return nil
+			}
+			reader.claim(vertexOffset, vertexSize*vertexCount, "vertices")
+			for i := range vertexCount {
+				values, _ := f32(vertexOffset+vertexSize*i, 3)
+				verts = append(verts, vec3{values[0], values[1], values[2]})
+			}
+
+		case kind == "lightsaber":
+			// A lightsaber mesh has no vertex records. Its header holds the positions (see readLightsaber).
+			positions, _ := u32(header + format.meshHeaderSize)
+			if !inBounds(positions, vertexSize*vertexCount, "verts "+name) {
+				return nil
+			}
+			for i := range vertexCount {
+				values, _ := f32(positions+vertexSize*i, 3)
+				verts = append(verts, vec3{values[0], values[1], values[2]})
+			}
+
+		case hasPosition && vertexCount > 0:
+			if mdxOffset+stride*vertexCount > len(mdx) {
+				problem("mdx range")
+				return nil
+			}
+			for i := range vertexCount {
+				record := mdxOffset + stride*i + positionOffset
+				verts = append(verts, vec3{mdxFloat(record), mdxFloat(record + 4), mdxFloat(record + 8)})
+			}
 		}
 
 		// The bounding box encloses the vertices and the origin of the node.
@@ -718,14 +813,14 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 		}
 
 		// The header of the mesh subclass follows the mesh header.
-		subclass := header + meshHeaderSize
+		subclass := header + format.meshHeaderSize
 		var skin mdlSkin
 		var saberUvs [][2]float64
 		var saberNormals []vec3
 		switch kind {
 		case "skin":
-			skin = readSkin(reader, subclass, name)
-			if skin.weightOffset != recordSize-skinVertexExtra || skin.indexOffset != skin.weightOffset+skinWeightsSize {
+			skin = readSkin(reader, subclass, name, format)
+			if skin.weightOffset != recordSize-format.skinVertexExtra || skin.indexOffset != skin.weightOffset+skinWeightsSize {
 				problem(fmt.Sprintf("bone weights at %d and bone indices at %d in a %d-byte record", skin.weightOffset, skin.indexOffset, recordSize))
 			}
 		case "dangly":
@@ -868,7 +963,6 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 		// coordinates come from the MDX, or for a lightsaber mesh from the arrays of its header. glTF puts
 		// v = 0 at the top of an image and the game at the bottom (see "Pixel data layout" in README.md), so
 		// v becomes 1 - v.
-		positionOffset, hasPosition := componentOffsets["position"]
 		normalOffset, normalPresent := componentOffsets["normal"]
 		hasNormal := normalPresent && hasMdx
 		// A zero normal becomes the normalized sum of the stored normals of the faces that use the vertex.
@@ -901,6 +995,12 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 
 			if hasNormal {
 				normal := vec3{mdxFloat(record + normalOffset), mdxFloat(record + normalOffset + 4), mdxFloat(record + normalOffset + 8)}
+				if format.packedNormals {
+					normal = unpackNormal(binary.LittleEndian.Uint32(mdx[record+normalOffset:]))
+					if math.Abs(length(normal)-1) < packedUnitTolerance {
+						normal = vec3{normal[0] / length(normal), normal[1] / length(normal), normal[2] / length(normal)}
+					}
+				}
 				if length(normal) < zeroLength {
 					stats.NormalsReplaced++
 					normal = upAxis
@@ -945,8 +1045,8 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 			}
 		}
 
-		// The 32 extra bytes of a skinned vertex record hold four f32 bone weights and four f32 local bone
-		// indices. An unused slot has weight 0 and index -1, and becomes joint 0. The stored weights sum to 1
+		// The extra bytes of a skinned vertex record hold four f32 bone weights and four local bone indices,
+		// f32 on PC and i16 on Xbox. An unused slot has weight 0 and index -1, and becomes joint 0. The stored weights sum to 1
 		// only within about 1e-6, and glTF requires a closer sum, so they are divided by their sum and the
 		// largest becomes 1 minus the others.
 		skinned := kind == "skin" && hasMdx && len(skin.bones) > 0
@@ -961,6 +1061,9 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 				for slot := range skinSlots {
 					weight := mdxFloat(record + skin.weightOffset + 4*slot)
 					bone := mdxFloat(record + skin.indexOffset + 4*slot)
+					if format.skinIndexSize == 2 {
+						bone = float64(int16(binary.LittleEndian.Uint16(mdx[record+skin.indexOffset+2*slot:])))
+					}
 					joint := 0
 					switch {
 					case weight == 0 && bone == -1:
@@ -1213,7 +1316,7 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 	}
 
 	if rootIndex >= 0 {
-		readAnimations(reader, doc, &stats, targets, rootIndex)
+		readAnimations(reader, doc, &stats, targets, rootIndex, format)
 	}
 
 	stats.Unclaimed, stats.Shared = reader.unclaimed()

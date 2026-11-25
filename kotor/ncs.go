@@ -382,7 +382,7 @@ func ReportNcs(label string, ncs *Ncs) string {
 
 // ReadNwscript returns the routines declared in nwscript.nss, which is in data/scripts.bif.
 func ReadNwscript(key *Key) []NcsRoutine {
-	for _, resource := range BifResources("data/scripts.bif", key) {
+	for _, resource := range BifResources(BifPath("scripts"), key) {
 		if resource.Type == TypeNss && resource.Resref == "nwscript" {
 			return ParseNwscript(string(resource.Data))
 		}

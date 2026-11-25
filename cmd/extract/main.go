@@ -1,9 +1,9 @@
 // Command extract converts all supported game assets into ~/re/extract/<platform> and writes each parser's report
 // to ~/re/temp/reports/<platform>. It does not check the outputs with independent tools; the verify command does that.
-// Movies require ffmpeg. All stages run at the same time. Each stage writes its own outputs and reports
+// Movies and the Xbox WMA files require ffmpeg. All stages run at the same time. Each stage writes its own outputs and reports
 // and keeps its own summary lines, which are printed in stage order at the end.
 //
-// usage: go run ./cmd/extract [-platform pc|xbox] [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [patch] [lips] [modules] [rims] [bifs] [tlk] [saves]   (default: all)
+// usage: go run ./cmd/extract [-platform pc|xbox] [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [erfs] [lips] [modules] [rims] [bifs] [tlk] [saves]   (default: all)
 package main
 
 import (
@@ -47,15 +47,35 @@ func prune(dir string, keep map[string]bool, exts []string) {
 	}
 }
 
-// texturePaths maps each texture resref to its PNG file in the texture packs, relative to extract. The first
-// pack in priority order wins, so the packs are read in reverse.
+// texturePaths maps each texture resref to its PNG file, relative to extract. On PC the textures are those
+// of the texture packs in kotor.Build.MaterialPacks. On Xbox they are the TXB textures of the BIF archives in
+// kotor.Build.ResourceBifs and kotor.Build.ModelBifs, and then those of the ERF archives in kotor.Build.Erfs.
+// The first pack or archive in that order wins, so they are read in reverse. The TXB textures of the RIM archives are added by rimTexturePaths.
 func texturePaths() map[string]string {
 	paths := map[string]string{}
-	for _, pack := range slices.Backward(kotor.MaterialPacks) {
-
+	for _, pack := range slices.Backward(kotor.Build.MaterialPacks) {
 		for _, entry := range packErf(pack) {
 			if entry.Ext == "tpc" {
 				paths[entry.Resref] = filepath.Join("TexturePacks", pack, entry.Resref+".png")
+			}
+		}
+	}
+
+	// The TXB textures of the ERF archives rank below those of the BIF archives.
+	for _, name := range kotor.Build.Erfs {
+		for _, entry := range kotor.ReadErf(filepath.Join(kotor.Game, name+".erf")) {
+			if entry.Ext == "txb" {
+				paths[entry.Resref] = filepath.Join(name, entry.Resref+".png")
+			}
+		}
+	}
+
+	key := kotor.ReadKey()
+	for _, name := range slices.Backward(slices.Concat(kotor.Build.ResourceBifs, kotor.Build.ModelBifs)) {
+		bif := slices.Index(key.Bifs, kotor.BifPath(name))
+		for _, entry := range key.Keys {
+			if int(entry.Bif) == bif && entry.Type == kotor.TypeTxb {
+				paths[entry.Resref] = filepath.Join(kotor.Build.Data, name, entry.Resref+".png")
 			}
 		}
 	}
@@ -78,7 +98,7 @@ type supermodelModel struct {
 	resref  string
 }
 
-// supermodelIndex holds the models of the BIF archives in kotor.ModelBifs by lowercase resref, and the
+// supermodelIndex holds the models of the BIF archives in kotor.Build.ModelBifs by lowercase resref, and the
 // resrefs of those that provide animations to another model of these archives. Each of the latter gets a
 // shared animation file. Supermodel names are resolved only against these archives.
 type supermodelIndex struct {
@@ -90,8 +110,8 @@ type supermodelIndex struct {
 var supermodels = sync.OnceValue(func() supermodelIndex {
 	key := kotor.ReadKey()
 	index := supermodelIndex{models: map[string]supermodelModel{}, shared: map[string]bool{}}
-	for _, name := range kotor.ModelBifs {
-		for _, resource := range kotor.BifResources("data/"+name+".bif", key) {
+	for _, name := range kotor.Build.ModelBifs {
+		for _, resource := range kotor.BifResources(kotor.BifPath(name), key) {
 			if resource.Ext != "mdl" {
 				continue
 			}
@@ -123,7 +143,7 @@ func (index supermodelIndex) lookup(out string) func(string) (kotor.MdlTree, str
 			return kotor.MdlTree{}, "", false
 		}
 
-		target := filepath.Join(kotor.Extract, "data", model.archive, model.resref+sharedAnimationSuffix+".gltf")
+		target := filepath.Join(kotor.Extract, kotor.Build.Data, model.archive, model.resref+sharedAnimationSuffix+".gltf")
 		relative, err := filepath.Rel(out, target)
 		if err != nil {
 			kotor.Fatal(err.Error())
@@ -159,7 +179,7 @@ func writeModel(out, label, resref string, mdl, mdx []byte, texturePath map[stri
 		links = kotor.SupermodelLinks(tree, index.lookup(out))
 	}
 
-	model := kotor.ConvertMdl(mdl, mdx, resref, resref+".bin", imageUri, kotor.MdlOptions{Supermodels: links})
+	model := kotor.ConvertMdl(mdl, mdx, resref, resref+".bin", imageUri, kotor.MdlOptions{Supermodels: links, Xbox: kotor.Build.Xbox})
 	counts.hidden += model.Stats.Hidden
 	counts.normalsReplaced += model.Stats.NormalsReplaced
 	counts.normalsOmitted += model.Stats.NormalsOmitted
@@ -184,8 +204,8 @@ func writeModel(out, label, resref string, mdl, mdx []byte, texturePath map[stri
 	// Only the BIF stage writes shared animation files, into the folder that the URIs of the links name.
 	shared := resref + sharedAnimationSuffix
 	owner, known := index.models[strings.ToLower(resref)]
-	if known && index.shared[strings.ToLower(resref)] && filepath.Clean(out) == filepath.Join(kotor.Extract, "data", owner.archive) {
-		animations := kotor.ConvertMdl(mdl, mdx, shared, shared+".bin", nil, kotor.MdlOptions{AnimationsOnly: true})
+	if known && index.shared[strings.ToLower(resref)] && filepath.Clean(out) == filepath.Join(kotor.Extract, kotor.Build.Data, owner.archive) {
+		animations := kotor.ConvertMdl(mdl, mdx, shared, shared+".bin", nil, kotor.MdlOptions{AnimationsOnly: true, Xbox: kotor.Build.Xbox})
 		if len(animations.Errors) > 0 {
 			return label + " FAIL: shared animation file: " + animations.Errors[0], files
 		}
@@ -211,11 +231,11 @@ func noteModels(summary *kotor.Summary, stage string, counts *modelCounts) {
 		fmt.Sprintf("%s: model textures not found: %d (%s)", stage, len(missingNames), strings.Join(missingNames, " ")))
 }
 
-// Models: data/<archive>.bif -> extract/data/<archive>/*.gltf + *.bin (passing, with geometry or animations),
-// one folder per archive in kotor.ModelBifs. The glTF node extras hold the decoded node headers, mesh headers,
+// Models: <data>/<archive>.bif -> extract/<data>/<archive>/*.gltf + *.bin (passing, with geometry or
+// animations), one folder per archive in kotor.Build.ModelBifs, where <data> is kotor.Build.Data. The glTF node extras hold the decoded node headers, mesh headers,
 // static controller values and face fields, and the model's animations and skins are glTF animations and
-// skins. The walkmeshes of an archive become <resref>.<wok|dwk|pwk>.gltf + .bin in the same folder. Only
-// models.bif holds walkmeshes.
+// skins. The walkmeshes of an archive become <resref>.<wok|dwk|pwk>.gltf + .bin in the same folder. The
+// Xbox model archives also hold TXB textures, which writeResource converts into the same folder.
 func convertModels(summary *kotor.Summary) {
 	fmt.Println("models...")
 	texturePath := texturePaths()
@@ -226,11 +246,12 @@ func convertModels(summary *kotor.Summary) {
 	var walkmeshReport []string
 	counts := &modelCounts{missing: map[string]bool{}}
 	walkmeshes := map[string]int{}
-	for _, name := range kotor.ModelBifs {
-		out := filepath.Join(kotor.Extract, "data", name)
+	var textureReport []string
+	for _, name := range kotor.Build.ModelBifs {
+		out := filepath.Join(kotor.Extract, kotor.Build.Data, name)
 		kotor.MakeDir(out)
 
-		resources := kotor.BifResources("data/"+name+".bif", key)
+		resources := kotor.BifResources(kotor.BifPath(name), key)
 		mdx := map[string][]byte{}
 		for _, resource := range resources {
 			if resource.Ext == "mdx" {
@@ -254,6 +275,10 @@ func convertModels(summary *kotor.Summary) {
 				if files == nil {
 					walkmeshes["empty "+resource.Ext]++
 				}
+
+			case "txb":
+				line, files = writeResource(out, label, resource, nil, nil)
+				textureReport = append(textureReport, line)
 			}
 
 			for _, file := range files {
@@ -261,10 +286,13 @@ func convertModels(summary *kotor.Summary) {
 			}
 		}
 
-		prune(out, written, []string{".gltf", ".bin"})
+		prune(out, written, []string{".gltf", ".bin", ".png", ".txi"})
 	}
 
 	summary.Tally("models", report)
+	if len(textureReport) > 0 {
+		summary.Tally("model_textures", textureReport)
+	}
 	noteModels(summary, "models", counts)
 	summary.Tally("walkmeshes", walkmeshReport)
 	summary.Note(fmt.Sprintf("walkmeshes: without faces, not written: %d wok, %d dwk, %d pwk",
@@ -298,9 +326,27 @@ func (material surfaceMaterial) color() (float64, float64, float64) {
 	return rgb[0] + low, rgb[1] + low, rgb[2] + low
 }
 
-// surfaceMaterials reads the rows of surfacemat.2da in data/2da.bif.
+// tables returns the resources of the archive that holds the 2DA tables, kotor.Build.TableArchive.
+func tables() []kotor.Resource {
+	archive := kotor.Build.TableArchive
+	if filepath.Ext(archive) == ".bif" {
+		return kotor.BifResources(archive, kotor.ReadKey())
+	}
+
+	rim, problem := kotor.ReadRim(kotor.ReadFile(filepath.Join(kotor.Game, kotor.Build.Rims, archive)))
+	if problem != "" {
+		kotor.Fatal(archive + ": " + problem)
+	}
+	resources := make([]kotor.Resource, len(rim.Entries))
+	for i, entry := range rim.Entries {
+		resources[i] = kotor.Resource{Resref: entry.Resref, Type: entry.Type, Ext: entry.Ext, Data: entry.Data}
+	}
+	return resources
+}
+
+// surfaceMaterials reads the rows of surfacemat.2da in the archive of the tables.
 func surfaceMaterials() []surfaceMaterial {
-	for _, resource := range kotor.BifResources("data/2da.bif", kotor.ReadKey()) {
+	for _, resource := range tables() {
 		if resource.Resref != "surfacemat" || resource.Ext != "2da" {
 			continue
 		}
@@ -325,7 +371,7 @@ func surfaceMaterials() []surfaceMaterial {
 		}
 		return materials
 	}
-	kotor.Fatal("surfacemat.2da not in data/2da.bif")
+	kotor.Fatal("surfacemat.2da not in " + kotor.Build.TableArchive)
 	return nil
 }
 
@@ -365,7 +411,7 @@ func writeWalkmesh(out string, resource kotor.Resource, materials []surfaceMater
 
 // Textures: TexturePacks/<pack>.erf -> extract/TexturePacks/<pack>/*.png (+ *.txi when present)
 func convertTextures(summary *kotor.Summary) {
-	for _, pack := range kotor.TexturePacks {
+	for _, pack := range kotor.Build.TexturePacks {
 		fmt.Printf("textures %s...\n", pack)
 		out := filepath.Join(kotor.Extract, "TexturePacks", pack)
 		kotor.MakeDir(out)
@@ -395,12 +441,32 @@ func convertTextures(summary *kotor.Summary) {
 // data/lightmaps*.bif -> extract/data/lightmaps, data/textures.bif -> extract/data/textures,
 // data/legacy.bif -> extract/data/legacy. Images become 8-bit PNG with the TGA's channels (gray, RGB or
 // RGBA), top row first. The TGA parser must consume each file exactly. The room visibility lists of the
-// lightmap archives are converted by writeResource into the same folder.
+// lightmap archives are converted by writeResource into the same folder. These groups exist only on PC.
+//
+// The Xbox build keeps one TGA image outside the archives: errortex/*.tga -> extract/errortex/*.png.
 func convertTga(summary *kotor.Summary) {
+	errortex := filepath.Join(kotor.Game, "errortex")
+	var looseReport []string
+	looseWritten := map[string]bool{}
+	for _, file := range kotor.ListFiles(errortex, ".tga", false) {
+		kotor.MakeDir(filepath.Join(kotor.Extract, "errortex"))
+		resref := strings.TrimSuffix(file, filepath.Ext(file))
+		resource := kotor.Resource{Resref: resref, Type: kotor.TypeTga, Ext: "tga", Data: kotor.ReadFile(filepath.Join(errortex, file))}
+		line, files := writeResource(filepath.Join(kotor.Extract, "errortex"), "errortex/"+file, resource, nil, nil)
+		looseReport = append(looseReport, line)
+		for _, written := range files {
+			looseWritten[written] = true
+		}
+	}
+	if len(looseReport) > 0 {
+		prune(filepath.Join(kotor.Extract, "errortex"), looseWritten, []string{".png"})
+		summary.Tally("tga_errortex", looseReport)
+	}
+
 	key := kotor.ReadKey()
-	for _, group := range kotor.TgaGroups {
+	for _, group := range kotor.Build.TgaGroups {
 		fmt.Printf("tga %s...\n", group.Name)
-		out := filepath.Join(kotor.Extract, "data", group.Name)
+		out := filepath.Join(kotor.Extract, kotor.Build.Data, group.Name)
 		kotor.MakeDir(out)
 
 		var report []string
@@ -462,15 +528,26 @@ func convertTga(summary *kotor.Summary) {
 // All three folders use the layouts that kotor.UnwrapAudio detects. kotor.DecodeAdpcm copies 16-bit PCM
 // unchanged.
 // streamwaves has one subfolder per module and dialog, which the output keeps.
+//
+// The Xbox build also stores stream audio as WMA (Windows Media Audio) files. ffmpeg decodes each one to
+// <name>.wma.wav, 16-bit PCM. The extension of the source stays in the name, because 50 music tracks exist
+// both as WAV and as WMA files. Several ffmpeg processes run at once.
 func convertAudio(summary *kotor.Summary, stage, folder string) {
 	fmt.Printf("%s...\n", stage)
 	src := filepath.Join(kotor.Game, folder)
 	out := filepath.Join(kotor.Extract, folder)
 	kotor.MakeDir(out)
 
-	var report []string
-	written := map[string]bool{}
-	for _, file := range kotor.ListFiles(src, ".wav", true) {
+	wavFiles := kotor.ListFiles(src, ".wav", true)
+	wmaFiles := kotor.ListFiles(src, ".wma", true)
+	if len(wmaFiles) > 0 && !kotor.Has("ffmpeg") {
+		summary.Note(stage + ": ffmpeg missing: WMA files not converted")
+		wmaFiles = nil
+	}
+
+	report := make([]string, len(wavFiles)+len(wmaFiles))
+	outputs := make([]string, len(report))
+	for i, file := range wavFiles {
 		name := strings.TrimSuffix(file, filepath.Ext(file))
 		unwrapped := kotor.UnwrapAudio(kotor.ReadFile(filepath.Join(src, file)))
 		data, failure, info := unwrapped.Payload, unwrapped.Err, unwrapped.Info
@@ -480,26 +557,68 @@ func convertAudio(summary *kotor.Summary, stage, folder string) {
 			info += " " + decoded.Info
 		}
 
-		report = append(report, fmt.Sprintf("%s %s %s %s", name, unwrapped.Kind, info, kotor.Verdict(failure)))
+		report[i] = fmt.Sprintf("%s %s %s %s", name, unwrapped.Kind, info, kotor.Verdict(failure))
 		if failure == "" {
-			outFile := name + "." + unwrapped.Kind
-			kotor.MakeDir(filepath.Join(out, filepath.Dir(outFile)))
-			kotor.WriteFile(filepath.Join(out, outFile), data)
-			written[outFile] = true
+			outputs[i] = name + "." + unwrapped.Kind
+			kotor.MakeDir(filepath.Join(out, filepath.Dir(outputs[i])))
+			kotor.WriteFile(filepath.Join(out, outputs[i]), data)
 		}
 	}
 
+	queue := make(chan int, len(wmaFiles))
+	for i := range wmaFiles {
+		queue <- i
+	}
+	close(queue)
+
+	var group sync.WaitGroup
+	for range runtime.NumCPU() {
+		group.Go(func() {
+			for i := range queue {
+				file := wmaFiles[i]
+				outFile := strings.TrimSuffix(file, filepath.Ext(file)) + ".wma.wav"
+				kotor.MakeDir(filepath.Join(out, filepath.Dir(outFile)))
+				result := kotor.Exec("ffmpeg", []string{
+					"-v", "error", "-y", "-i", filepath.Join(src, file),
+					"-map", "0:a", "-c:a", "pcm_s16le", "-f", "wav", filepath.Join(out, outFile),
+				}, nil)
+
+				slot := len(wavFiles) + i
+				if result.Status != 0 || strings.TrimSpace(result.Stderr) != "" {
+					report[slot] = file + " wma FAIL: ffmpeg: " + kotor.FirstLine(result.Stderr)
+					continue
+				}
+				report[slot] = file + " wma PASS"
+				outputs[slot] = outFile
+			}
+		})
+	}
+	group.Wait()
+
+	written := map[string]bool{}
+	for _, file := range outputs {
+		if file != "" {
+			written[file] = true
+		}
+	}
 	prune(out, written, []string{".mp3", ".wav"})
 	summary.Tally(stage, report)
 }
 
-// Movies: movies/*.bik -> extract/movies/*.mp4 (H.264 High profile, yuv420p; AAC LC audio).
-// Requires ffmpeg, which decodes Bink. One ffmpeg process does not keep all CPUs busy at this resolution,
+// Movies: movies/*.bik (PC) or movies/*.xmv (Xbox) -> extract/movies/*.mp4 (H.264 High profile, yuv420p;
+// AAC LC audio). Requires ffmpeg, which decodes Bink and XMV. The Bink header is parsed and reported first;
+// an XMV file is reported by name only. One ffmpeg process does not keep all CPUs busy at this resolution,
 // so movieJobs of them run at once, largest movie first, so that the last ones to finish are short.
 // One job per cpusPerMovie CPUs keeps all CPUs busy.
 // CRF (constant rate factor) 12 keeps every frame of every movie at 40 dB PSNR or more against the Bink
 // frame, which verify requires. At CRF 18, frames in 12 movies fell as low as 36.5 dB. CRF 12 makes
 // files about 1.7 times larger.
+//
+// ffmpeg's XMV demuxer ends every XMV movie of more than one packet with the message xmvEndError, after it has
+// read the last packet. The packet chain of every movie ends exactly at the end of its file, and the converted
+// movies hold every video frame, so this message alone is not a failure.
+const xmvEndError = ": Input/output error"
+
 const (
 	cpusPerMovie      = 3
 	movieCrf          = "12"
@@ -517,7 +636,7 @@ func convertMovies(summary *kotor.Summary) {
 	out := filepath.Join(kotor.Extract, "movies")
 	kotor.MakeDir(out)
 
-	files := kotor.ListFiles(src, ".bik", false)
+	files := kotor.ListFiles(src, kotor.Build.Movie, false)
 
 	// Each movie's report line goes to its own slot, and written records the outputs ffmpeg produced.
 	report := make([]string, len(files))
@@ -527,10 +646,14 @@ func convertMovies(summary *kotor.Summary) {
 		name := strings.TrimSuffix(file, filepath.Ext(file))
 		inFile := filepath.Join(src, file)
 		outFile := filepath.Join(out, name+".mp4")
-		movie := kotor.ParseBink(kotor.ReadFile(inFile))
-		if len(movie.Errors) > 0 {
-			report[i] = kotor.ReportBink(file, movie)
-			return
+		line := file + " xmv PASS"
+		if kotor.Build.Movie == ".bik" {
+			movie := kotor.ParseBink(kotor.ReadFile(inFile))
+			line = kotor.ReportBink(file, movie)
+			if len(movie.Errors) > 0 {
+				report[i] = line
+				return
+			}
 		}
 
 		result := kotor.Exec("ffmpeg", []string{
@@ -540,13 +663,17 @@ func convertMovies(summary *kotor.Summary) {
 			"-c:a", "aac", "-b:a", movieAudioBitrate,
 			"-movflags", "+faststart", outFile,
 		}, nil)
-		if result.Status != 0 || strings.TrimSpace(result.Stderr) != "" {
-			report[i] = name + ".mp4 FAIL: ffmpeg: " + kotor.FirstLine(result.Stderr)
+		stderr := strings.TrimSpace(result.Stderr)
+		if kotor.Build.Movie == ".xmv" {
+			stderr = strings.TrimSpace(strings.TrimSuffix(stderr, inFile+xmvEndError))
+		}
+		if result.Status != 0 || stderr != "" {
+			report[i] = name + ".mp4 FAIL: ffmpeg: " + kotor.FirstLine(stderr)
 			return
 		}
 
 		written[i] = true
-		report[i] = kotor.ReportBink(file, movie)
+		report[i] = line
 	}
 
 	sizes := make([]int64, len(files))
@@ -589,21 +716,21 @@ func convertMovies(summary *kotor.Summary) {
 	summary.Tally("movies", report)
 }
 
-// GUI: resource type 2047 in data/gui.bif -> extract/data/gui/*.json, converted by writeResource. The GUI
-// layouts of patch.erf are converted by the patch stage.
+// GUI: resource type 2047 in <data>/gui.bif -> extract/<data>/gui/*.json, converted by writeResource. The GUI
+// layouts of patch.erf are converted by the erfs stage.
 func convertGui(summary *kotor.Summary) {
 	fmt.Println("gui...")
-	out := filepath.Join(kotor.Extract, "data", "gui")
+	out := filepath.Join(kotor.Extract, kotor.Build.Data, "gui")
 	kotor.MakeDir(out)
 
 	var report []string
 	written := map[string]bool{}
-	for _, resource := range kotor.BifResources("data/gui.bif", kotor.ReadKey()) {
+	for _, resource := range kotor.BifResources(kotor.BifPath("gui"), kotor.ReadKey()) {
 		if resource.Type != kotor.TypeGui {
 			continue
 		}
 
-		line, files := writeResource(out, "data/gui/"+resource.Resref, resource, nil, nil)
+		line, files := writeResource(out, kotor.Build.Data+"/gui/"+resource.Resref, resource, nil, nil)
 		report = append(report, line)
 		for _, file := range files {
 			written[file] = true
@@ -614,55 +741,59 @@ func convertGui(summary *kotor.Summary) {
 	summary.Tally("gui", report)
 }
 
-// Patch: patch.erf -> extract/patch/, converted by writeResource: GUI layouts, textures, 2DA tables and one
-// model. The MDX resource is the vertex data of the model of the same name and is not converted on its own.
-func convertPatch(summary *kotor.Summary) {
-	fmt.Println("patch...")
-	out := filepath.Join(kotor.Extract, "patch")
-	kotor.MakeDir(out)
+// Erfs: <name>.erf -> extract/<name>/ for each archive in kotor.Build.Erfs, converted by writeResource. The
+// PC archive patch.erf holds GUI layouts, textures, 2DA tables and one model. The Xbox archive players.erf
+// holds the party models, their textures and conversations. An MDX resource is the vertex data of the model of
+// the same name and is not converted on its own.
+func convertErfs(summary *kotor.Summary) {
+	for _, name := range kotor.Build.Erfs {
+		fmt.Printf("%s...\n", name)
+		out := filepath.Join(kotor.Extract, name)
+		kotor.MakeDir(out)
 
-	entries := kotor.ReadErf(filepath.Join(kotor.Game, "patch.erf"))
-	mdx := map[string][]byte{}
-	for _, entry := range entries {
-		if entry.Ext == "mdx" {
-			mdx[entry.Resref] = entry.Data()
-		}
-	}
-
-	inputs := &resourceInputs{texturePath: texturePaths(), counts: &modelCounts{missing: map[string]bool{}}}
-	var report []string
-	written := map[string]bool{}
-	for _, entry := range entries {
-		label := entry.Resref + "." + entry.Ext
-		if entry.Ext == "mdx" {
-			problem := ""
-			if !slices.ContainsFunc(entries, func(other kotor.ErfEntry) bool { return other.Resref == entry.Resref && other.Ext == "mdl" }) {
-				problem = "no model of the same name"
+		entries := kotor.ReadErf(filepath.Join(kotor.Game, name+".erf"))
+		mdx := map[string][]byte{}
+		for _, entry := range entries {
+			if entry.Ext == "mdx" {
+				mdx[entry.Resref] = entry.Data()
 			}
-			report = append(report, label+" vertex data of the model "+kotor.Verdict(problem))
-			continue
 		}
 
-		resource := kotor.Resource{Resref: entry.Resref, Type: entry.Type, Ext: entry.Ext, Data: entry.Data()}
-		line, files := writeResource(out, label, resource, mdx[entry.Resref], inputs)
-		report = append(report, line)
-		for _, file := range files {
-			written[file] = true
+		inputs := newResourceInputs()
+		var report []string
+		written := map[string]bool{}
+		for _, entry := range entries {
+			label := entry.Resref + "." + entry.Ext
+			if entry.Ext == "mdx" {
+				problem := ""
+				if !slices.ContainsFunc(entries, func(other kotor.ErfEntry) bool { return other.Resref == entry.Resref && other.Ext == "mdl" }) {
+					problem = "no model of the same name"
+				}
+				report = append(report, label+" vertex data of the model "+kotor.Verdict(problem))
+				continue
+			}
+
+			resource := kotor.Resource{Resref: entry.Resref, Type: entry.Type, Ext: entry.Ext, Data: entry.Data()}
+			line, files := writeResource(out, label, resource, mdx[entry.Resref], inputs)
+			report = append(report, line)
+			for _, file := range files {
+				written[file] = true
+			}
 		}
+
+		prune(out, written, []string{".json", ".png", ".txi", ".csv", ".gltf", ".bin"})
+		summary.Tally(name, report)
+		noteModels(summary, name, inputs.counts)
 	}
-
-	prune(out, written, []string{".json", ".png", ".txi", ".csv", ".gltf", ".bin"})
-	summary.Tally("patch", report)
-	noteModels(summary, "patch", inputs.counts)
 }
 
-// Lips: lips/<module>.mod -> extract/lips/<module>/<resref>.csv, with one "time_s,shape" line per keyframe.
+// Lips: <lips>/<module>.mod -> extract/<lips>/<module>/<resref>.csv, where <lips> is kotor.Build.Lips, with one "time_s,shape" line per keyframe.
 // Each archive keeps its own folder, so names that occur in several archives are written once per archive.
 // Empty archives produce no folder.
 func convertLips(summary *kotor.Summary) {
 	fmt.Println("lips...")
-	src := filepath.Join(kotor.Game, "lips")
-	out := filepath.Join(kotor.Extract, "lips")
+	src := filepath.Join(kotor.Game, kotor.Build.Lips)
+	out := filepath.Join(kotor.Extract, kotor.Build.Lips)
 	kotor.MakeDir(out)
 
 	var report []string
@@ -793,11 +924,12 @@ func convertModules(summary *kotor.Summary) {
 
 // resourceInputs holds what writeResource needs besides the resource: the string table for localized
 // strings and sound sets, the engine routines for script listings, the texture paths for model materials,
-// and the counts of what the models leave out.
+// the surface materials of walkmeshes, and the counts of what the models leave out.
 type resourceInputs struct {
 	tlk         *kotor.Tlk
 	routines    []kotor.NcsRoutine
 	texturePath map[string]string
+	materials   []surfaceMaterial
 	counts      *modelCounts
 }
 
@@ -806,6 +938,7 @@ func newResourceInputs() *resourceInputs {
 		tlk:         dialogTlk(),
 		routines:    kotor.ReadNwscript(kotor.ReadKey()),
 		texturePath: texturePaths(),
+		materials:   surfaceMaterials(),
 		counts:      &modelCounts{missing: map[string]bool{}},
 	}
 }
@@ -814,6 +947,8 @@ func newResourceInputs() *resourceInputs {
 // names of the files it wrote. mdx is the MDX data of a model and is ignored for other types.
 //
 //   - A model becomes <resref>.gltf and <resref>.bin (see writeModel).
+//   - A walkmesh becomes <resref>.<ext>.gltf and .bin (see writeWalkmesh). A walkmesh without faces is not
+//     written.
 //   - A sound becomes <resref>.wav as 16-bit PCM: 16-bit PCM files are copied, and IMA ADPCM and 8-bit PCM
 //     files are converted (see kotor.DecodeAdpcm).
 //   - A 2DA table becomes <resref>.2da.csv (see kotor.TwoDaCsv).
@@ -822,8 +957,9 @@ func newResourceInputs() *resourceInputs {
 //   - A script source becomes <resref>.nss, its text decoded as Windows-1252 and written as UTF-8. The line
 //     breaks are kept.
 //   - A TXI file is copied to <resref>.txi.
-//   - A texture becomes <resref>.png, its top mipmap level as 8-bit RGBA, and <resref>.txi, its TXI
-//     trailer without trailing NUL bytes, when the trailer holds text.
+//   - A texture (TPC, or TXB on Xbox) becomes <resref>.png, its top mipmap level as 8-bit RGBA, and
+//     <resref>.txi, its TXI trailer without trailing NUL bytes, when the trailer holds text.
+//   - A TGA image becomes <resref>.png, 8-bit with the TGA's channels.
 //   - A GUI layout becomes <resref>.json in the form of gffJson. It must use every byte of its regions.
 //   - A letter table becomes <resref>.ltr.json (see ltrJson).
 //   - A room visibility list becomes <resref>.vis.json (see visJson). It needs no inputs.
@@ -836,6 +972,9 @@ func writeResource(dir, label string, resource kotor.Resource, mdx []byte, input
 	switch resource.Ext {
 	case "mdl":
 		return writeModel(dir, label, resource.Resref, resource.Data, mdx, inputs.texturePath, inputs.counts)
+
+	case "wok", "dwk", "pwk":
+		return writeWalkmesh(dir, resource, inputs.materials)
 
 	case "wav":
 		problem := kotor.RiffWalk(resource.Data)
@@ -891,8 +1030,8 @@ func writeResource(dir, label string, resource kotor.Resource, mdx []byte, input
 		line = fmt.Sprintf("%s bytes=%d PASS", label, len(resource.Data))
 		output = resource.Data
 
-	case "tpc":
-		texture := kotor.ParseTpc(resource.Data)
+	case "tpc", "txb":
+		texture := kotor.ParseTpc(resource.Data, resource.Ext == "txb")
 		image := kotor.DecodeTpc(resource.Data, texture)
 		line = kotor.ReportTpc(label, texture)
 		if image == nil {
@@ -908,6 +1047,15 @@ func writeResource(dir, label string, resource kotor.Resource, mdx []byte, input
 			kotor.WriteFile(filepath.Join(dir, files[1]), []byte(strings.TrimRight(txi, "\x00")))
 		}
 		return line, files
+
+	case "tga":
+		header := kotor.ParseTga(resource.Data)
+		image := kotor.DecodeTga(resource.Data, header)
+		line = kotor.ReportTga(label, header)
+		file = resource.Resref + ".png"
+		if image != nil {
+			output = kotor.EncodePng(image.Width, image.Height, image.Pix, image.Channels)
+		}
 
 	case "gui":
 		file = resource.Resref + ".json"
@@ -991,16 +1139,21 @@ func writeResource(dir, label string, resource kotor.Resource, mdx []byte, input
 	return line, []string{file}
 }
 
-// Rims: rims/<archive>.rim -> extract/rims/<archive>/, one folder per archive. Every archive whose name
-// ends in "dx" holds the MDX data of the models in the archive of the same name without "dx", and no other
-// resources. Each resource is converted by writeResource. Each archive also gets a report line with its
-// resource count, so that the four empty archives are reported too. MDX data without a model in the
-// partner archive is counted in the summary and not converted.
+// Rims: <rims>/<archive>.rim -> extract/<rims>/<archive>/, one folder per archive, where <rims> is
+// kotor.Build.Rims. Every archive whose name ends in "dx" is the partner of the archive of the same name
+// without "dx". It holds the MDX data of the partner's models and, on Xbox, the TXB textures of the
+// partner's models, and no other resources. Its textures are converted into its own folder, and the
+// partner's models refer to them before the textures of texturePaths. Every other resource is converted by
+// writeResource. Each archive also gets a report line with its resource count, so that empty archives are
+// reported too. A model whose partner archive lacks its MDX data takes the MDX data of the same name from
+// globaldx.rim, the partner of the archive that the game always keeps loaded. In the Xbox build, 27 effect
+// models of the area archives need this. MDX data that no model uses is counted in the summary and not
+// converted.
 func convertRims(summary *kotor.Summary) {
 	fmt.Println("rims...")
 	inputs := newResourceInputs()
-	src := filepath.Join(kotor.Game, "rims")
-	out := filepath.Join(kotor.Extract, "rims")
+	src := filepath.Join(kotor.Game, kotor.Build.Rims)
+	out := filepath.Join(kotor.Extract, kotor.Build.Rims)
 	kotor.MakeDir(out)
 
 	var report []string
@@ -1017,69 +1170,108 @@ func convertRims(summary *kotor.Summary) {
 		archives[name] = rim
 	}
 
+	globalMdx := map[string][]byte{}
+	if global, ok := archives["globaldx"]; ok {
+		for _, entry := range global.Entries {
+			if entry.Ext == "mdx" {
+				globalMdx[entry.Resref] = entry.Data
+			}
+		}
+	}
+
 	written := map[string]bool{}
-	orphans := []string{}
+	used := map[string]bool{}
 	for _, name := range slices.Sorted(maps.Keys(archives)) {
 		if strings.HasSuffix(name, "dx") {
 			continue
 		}
 
+		dir := filepath.Join(out, name)
+		kotor.MakeDir(dir)
 		mdx := map[string][]byte{}
-		used := map[string]bool{}
-		if partner, ok := archives[name+"dx"]; ok {
+		texturePath := inputs.texturePath
+		partner, hasPartner := archives[name+"dx"]
+		if hasPartner {
+			partnerDir := filepath.Join(out, name+"dx")
+			texturePath = maps.Clone(inputs.texturePath)
 			for _, entry := range partner.Entries {
-				if entry.Ext != "mdx" {
-					report = append(report, name+"dx/"+entry.Resref+"."+entry.Ext+" FAIL: not MDX data")
-					continue
+				label := name + "dx/" + entry.Resref + "." + entry.Ext
+				switch entry.Ext {
+				case "mdx":
+					mdx[entry.Resref] = entry.Data
+
+				case "txb":
+					kotor.MakeDir(partnerDir)
+					resource := kotor.Resource{Resref: entry.Resref, Type: entry.Type, Ext: entry.Ext, Data: entry.Data}
+					line, files := writeResource(partnerDir, label, resource, nil, inputs)
+					report = append(report, line)
+					for _, file := range files {
+						written[filepath.Join(name+"dx", file)] = true
+					}
+					texturePath[entry.Resref] = filepath.Join(kotor.Build.Rims, name+"dx", entry.Resref+".png")
+
+				default:
+					report = append(report, label+" FAIL: neither MDX data nor a texture")
 				}
-				mdx[entry.Resref] = entry.Data
 			}
 		}
 
-		dir := filepath.Join(out, name)
-		kotor.MakeDir(dir)
+		archiveInputs := *inputs
+		archiveInputs.texturePath = texturePath
 		for _, entry := range archives[name].Entries {
 			label := name + "/" + entry.Resref + "." + entry.Ext
 			resource := kotor.Resource{Resref: entry.Resref, Type: entry.Type, Ext: entry.Ext, Data: entry.Data}
-			line, files := writeResource(dir, label, resource, mdx[entry.Resref], inputs)
-			if entry.Ext == "mdl" {
-				used[entry.Resref] = true
+			vertices, own := mdx[entry.Resref]
+			partnerName := name + "dx"
+			if !own && entry.Ext == "mdl" {
+				vertices, partnerName = globalMdx[entry.Resref], "globaldx"
+			}
+			line, files := writeResource(dir, label, resource, vertices, &archiveInputs)
+			if entry.Ext == "mdl" && vertices != nil {
+				used[partnerName+"/"+entry.Resref] = true
 			}
 
 			report = append(report, line)
 			for _, file := range files {
+				if written[filepath.Join(name, file)] {
+					report = append(report, label+" FAIL: "+file+" already written from another resource")
+				}
 				written[filepath.Join(name, file)] = true
 			}
 		}
 
-		for resref := range mdx {
-			if !used[resref] {
-				orphans = append(orphans, name+"dx/"+resref)
+	}
+
+	orphans := []string{}
+	for name, archive := range archives {
+		for _, entry := range archive.Entries {
+			if strings.HasSuffix(name, "dx") && entry.Ext == "mdx" && !used[name+"/"+entry.Resref] {
+				orphans = append(orphans, name+"/"+entry.Resref)
 			}
 		}
 	}
 
-	prune(out, written, []string{".gltf", ".bin", ".wav", ".csv", ".json", ".txt"})
+	prune(out, written, []string{".gltf", ".bin", ".wav", ".csv", ".json", ".txt", ".png", ".txi"})
 	summary.Tally("rims", report)
 	noteModels(summary, "rims", inputs.counts)
 	slices.Sort(orphans)
 	summary.Note(fmt.Sprintf("rims: MDX data without a model, not converted: %d (%s)", len(orphans), strings.Join(orphans, " ")))
 }
 
-// Bifs: data/<archive>.bif -> extract/data/<archive>/, one folder per archive in kotor.ResourceBifs. Each
-// resource is converted by writeResource.
+// Bifs: <data>/<archive>.bif -> extract/<data>/<archive>/, one folder per archive in kotor.Build.ResourceBifs.
+// Each resource is converted by writeResource.
 func convertBifs(summary *kotor.Summary) {
 	fmt.Println("bifs...")
 	inputs := newResourceInputs()
 	key := kotor.ReadKey()
 
 	var report []string
-	for _, name := range kotor.ResourceBifs {
-		out := filepath.Join(kotor.Extract, "data", name)
+	for _, name := range kotor.Build.ResourceBifs {
+		out := filepath.Join(kotor.Extract, kotor.Build.Data, name)
 		kotor.MakeDir(out)
 
 		written := map[string]bool{}
-		for _, resource := range kotor.BifResources("data/"+name+".bif", key) {
+		for _, resource := range kotor.BifResources(kotor.BifPath(name), key) {
 			label := name + "/" + resource.Resref + "." + resource.Ext
 			line, files := writeResource(out, label, resource, nil, inputs)
 			report = append(report, line)
@@ -1087,7 +1279,7 @@ func convertBifs(summary *kotor.Summary) {
 				written[file] = true
 			}
 		}
-		prune(out, written, []string{".wav", ".csv", ".json", ".txt", ".nss", ".txi"})
+		prune(out, written, []string{".wav", ".csv", ".json", ".txt", ".nss", ".txi", ".png"})
 	}
 	summary.Tally("bifs", report)
 }
@@ -1141,14 +1333,38 @@ func convertTlk(summary *kotor.Summary) {
 //   - The archive SAVEGAME.sav becomes the folder SAVEGAME/. Each resource is converted by writeResource,
 //     and a nested archive (type 2057, a saved module) becomes a subfolder named after its resref.
 //     Every archive must have the layout that kotor.ErfLayoutProblem checks.
+//
+// The Xbox build has no saves folder. Its folder localvault holds a saved player character, a BIC file,
+// which becomes extract/localvault/<name>.bic.json in the form of gffJson.
 func convertSaves(summary *kotor.Summary) {
 	fmt.Println("saves...")
 	inputs := &resourceInputs{tlk: dialogTlk()}
+	var report []string
+	vault := filepath.Join(kotor.Game, "localvault")
+	vaultWritten := map[string]bool{}
+	for _, file := range kotor.ListFiles(vault, ".bic", false) {
+		text, notes, problem := gffFile(kotor.ReadFile(filepath.Join(vault, file)), "bic", inputs.tlk)
+		report = append(report, "localvault/"+file+notes+" "+kotor.Verdict(problem))
+		if problem == "" {
+			kotor.MakeDir(filepath.Join(kotor.Extract, "localvault"))
+			kotor.WriteFile(filepath.Join(kotor.Extract, "localvault", file+".json"), text)
+			vaultWritten[file+".json"] = true
+		}
+	}
+	if len(vaultWritten) > 0 {
+		prune(filepath.Join(kotor.Extract, "localvault"), vaultWritten, []string{".json"})
+	}
+
 	src := filepath.Join(kotor.Game, "saves")
+	if _, err := os.Stat(src); err != nil {
+		summary.Tally("saves", report)
+		summary.Note("saves: no saves folder in this build")
+		return
+	}
+
 	out := filepath.Join(kotor.Extract, "saves")
 	kotor.MakeDir(out)
 
-	var report []string
 	written := map[string]bool{}
 	write := func(file string, data []byte) {
 		kotor.WriteFile(filepath.Join(out, file), data)
@@ -1262,7 +1478,7 @@ var stages = []kotor.Stage{
 	{Name: "sounds", Run: func(summary *kotor.Summary) { convertAudio(summary, "sounds", "streamsounds") }},
 	{Name: "waves", Run: func(summary *kotor.Summary) { convertAudio(summary, "waves", "streamwaves") }},
 	{Name: "gui", Run: convertGui},
-	{Name: "patch", Run: convertPatch},
+	{Name: "erfs", Run: convertErfs},
 	{Name: "lips", Run: convertLips},
 	{Name: "modules", Run: convertModules},
 	{Name: "rims", Run: convertRims},

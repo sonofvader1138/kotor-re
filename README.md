@@ -1,6 +1,6 @@
 # File formats of Star Wars: Knights of the Old Republic
 
-This document describes the game's file formats as determined from the files of the PC build in `dump/pc`. Each field lists the evidence for it and a confidence level. Fields that have not been verified are marked UNKNOWN.
+This document describes the game's file formats as determined from the files of the PC build in `dump/pc`. The section "Xbox build" describes how the North American Xbox build, revision 1, in `dump/xbox` differs. Each field lists the evidence for it and a confidence level. Fields that have not been verified are marked UNKNOWN.
 
 Some fields were also settled from the code of the two executables, `dump/pc/swkotor.exe` and `dump/xbox/default.xbe`. Both builds run the same engine on the same formats. The code of the PC executable is encrypted by a Steam copy protection wrapper, which Steamless removes. Evidence of this kind is marked "PC code" or "Xbox code" and gives the address of the routine, so that it can be checked again. PC code is the stronger evidence for the PC files, because it is the program that reads them. Where a statement rests only on the Xbox code, the text says so. Where the PC files could test it, the result is given as well. The sections "PC executable: swkotor.exe" and "Xbox executable: default.xbe" describe the executables and the tools that prepare them for disassembly.
 
@@ -134,6 +134,18 @@ All integers and floats are little-endian. Offsets are in hexadecimal and count 
   - [Save summary: savenfo.res](#save-summary-savenfores)
   - [Screenshot: Screen.tga](#screenshot-screentga)
   - [Conversion and verification](#conversion-and-verification-11)
+- [Xbox build](#xbox-build)
+  - [Files of the dump](#files-of-the-dump)
+  - [Area archives](#area-archives)
+  - [Textures: TXB](#textures-txb)
+  - [Xbox models](#xbox-models)
+  - [Walkmeshes in the area archives](#walkmeshes-in-the-area-archives)
+  - [Sounds: Xbox ADPCM](#sounds-xbox-adpcm)
+  - [Stream audio](#stream-audio)
+  - [Movies: XMV](#movies-xmv)
+  - [Files of the Xbox system libraries](#files-of-the-xbox-system-libraries)
+  - [Character vault: localvault/Test.bic](#character-vault-localvaulttestbic)
+  - [Conversion and verification](#conversion-and-verification-12)
 - [PC executable: swkotor.exe](#pc-executable-swkotorexe)
   - [Stub header](#stub-header)
   - [Payload](#payload)
@@ -2083,7 +2095,7 @@ The `tga` stage of `cmd/verify` reads each JSON file with jq, reports in `temp/r
 
 # User interface layouts: GUI
 
-A GUI file (resource type 2047) describes one screen or panel of the user interface. It lists the screen's controls, such as buttons, labels and list boxes, with their position, size, textures, font and text. The game contains 91 GUI resources. 84 are in `data/gui.bif`, which holds nothing else, and 7 are in `patch.erf`. No other archive holds one. The key file `chitin.key` lists type 2047 only for `gui.bif`, the 246 RIM files hold none, and the signature "GUI V3.2" occurs in no other file. The reader is `ReadGff` in `kotor/gff.go`. The `gui` stage of `cmd/extract` writes one JSON file per resource of `gui.bif` to `extract/pc/data/gui/`, and the `patch` stage writes those of `patch.erf` to `extract/pc/patch/`.
+A GUI file (resource type 2047) describes one screen or panel of the user interface. It lists the screen's controls, such as buttons, labels and list boxes, with their position, size, textures, font and text. The game contains 91 GUI resources. 84 are in `data/gui.bif`, which holds nothing else, and 7 are in `patch.erf`. No other archive holds one. The key file `chitin.key` lists type 2047 only for `gui.bif`, the 246 RIM files hold none, and the signature "GUI V3.2" occurs in no other file. The reader is `ReadGff` in `kotor/gff.go`. The `gui` stage of `cmd/extract` writes one JSON file per resource of `gui.bif` to `extract/pc/data/gui/`, and the `erfs` stage writes those of `patch.erf` to `extract/pc/patch/`.
 
 A GUI file is a GFF file of file type "GUI " (see "Generic file format: GFF"). All 91 files parse under the strict rules of the reader. In addition, every byte of their three data regions is referenced, and every label is used. In the 84 `gui.bif` files, every struct has between 4 and 14 fields, and nine field types occur: 0, 4, 5, 8, 10, 11, 14, 15 and 17. The only list (type 15) is CONTROLS, the only u32 (type 4) is STRREF, and the only vector (type 17) is COLOR.
 
@@ -2159,7 +2171,7 @@ ROTATESTYLE is a choice of angle. The values 0, 1, 2 and 3 give 0, 90, 180 and 2
 
 # Patch archive: patch.erf
 
-`patch.erf` is an ERF archive (see "ERF archive") in the game folder. It holds 97 resources that replace or add to resources stored elsewhere. Its header holds the build date day 47 of 2004, which is later than that of any other archive of the installation, so it is probably an update made after the game's release. Only the archives of the saved game, which the game writes when it saves, are later. Whether the game prefers these copies to the copies of the same name in other archives has not been observed. The `patch` stage of `cmd/extract` converts every resource to `extract/pc/patch/`, and the `patch` stage of `cmd/verify` checks the output.
+`patch.erf` is an ERF archive (see "ERF archive") in the game folder. It holds 97 resources that replace or add to resources stored elsewhere. Its header holds the build date day 47 of 2004, which is later than that of any other archive of the installation, so it is probably an update made after the game's release. Only the archives of the saved game, which the game writes when it saves, are later. Whether the game prefers these copies to the copies of the same name in other archives has not been observed. The `erfs` stage of `cmd/extract` converts every resource to `extract/pc/patch/`, and the `erfs` stage of `cmd/verify` checks the output.
 
 The table below lists the contents by resource type.
 
@@ -2218,9 +2230,9 @@ Most differing bytes lie in unused bytes or in regions that the MDL section did 
 
 ## Conversion and verification
 
-The `patch` stage of `cmd/extract` passes every resource to the converter that the BIF and RIM stages use. Textures become 8-bit RGBA PNG files, as in the texture packs, and a TXI file is written when the trailer holds text. Tables become CSV files, layouts become JSON files, and the model becomes a glTF file with its binary buffer. The glTF file refers to the PNG files in `extract/pc/TexturePacks/swpc_tex_tpa/` by relative paths, and both textures exist there. All 97 resources pass: 84 textures, 7 layouts, 4 tables, the model, and the MDX resource, whose report line only confirms that a model of the same name exists.
+The `erfs` stage of `cmd/extract` passes every resource to the converter that the BIF and RIM stages use. Textures become 8-bit RGBA PNG files, as in the texture packs, and a TXI file is written when the trailer holds text. Tables become CSV files, layouts become JSON files, and the model becomes a glTF file with its binary buffer. The glTF file refers to the PNG files in `extract/pc/TexturePacks/swpc_tex_tpa/` by relative paths, and both textures exist there. All 97 resources pass: 84 textures, 7 layouts, 4 tables, the model, and the MDX resource, whose report line only confirms that a model of the same name exists.
 
-The `patch` stage of `cmd/verify` checks the output with independent tools. All checks pass:
+The `erfs` stage of `cmd/verify` checks the output with independent tools. All checks pass:
 
 - ImageMagick decodes each of the 84 PNG files to exactly the pixels of the decoded TPC texture, and pngcheck accepts each of them.
 - Each of the 9 TXI files equals the texture's trailer.
@@ -2671,6 +2683,163 @@ The stage writes 13 report lines to `temp/reports/pc/saves.txt`, and all 13 pass
 
 The `saves` stage of `cmd/verify` checks the outputs with independent tools. jq parses all nine GFF JSON files. ImageMagick's decoding of `Screen.png` equals its decoding of `Screen.tga`, and pngcheck accepts the PNG. The decoded variables, read with jq, are packed again into `ValBoolean` and `ValNumber`, and these bytes, the names and the strings must equal the fields of the source file. All four checks pass. A test in which one number in `GLOBALVARS.variables.json` was changed made the last check fail. This check confirms only that the JSON file holds every bit of the source; it cannot confirm the bit order of `ValBoolean`, because the same order is used to pack the bits again.
 
+# Xbox build
+
+The Xbox build is the North American disc, revision 1, of which `dump/xbox` holds the files extracted with extract-xiso. Its KEY file and `players.erf` carry the build date of day 174 of 2003, and the PC build carries day 309 of 2003. Both builds run the same engine, and most formats are identical. This section lists the formats and folders in which the Xbox build differs. The `-platform xbox` flag of `cmd/extract` and `cmd/verify` converts and checks the Xbox files with the same stages as the PC files, and the outputs go to `extract/xbox`.
+
+The PC parsers read every Xbox file of the shared formats without a change. They accept all 60 GUI layouts, all 10,388 compiled scripts and all 9,557 other GFF files of the modules, the string table, all 18,186 lip sync resources, and every table, sound set, letter table, script source, template, room layout and visibility list in the BIF and RIM archives. Their reports are in `temp/reports/xbox`, and every line passes except those named in "Conversion and verification" below.
+
+## Files of the dump
+
+The Xbox dump keeps the same kinds of resources as the PC dump, in folders and archives with other names. The table below pairs each part of the Xbox dump with its PC counterpart.
+
+| Xbox                                   | Count | PC counterpart                                 | Content |
+| -------------------------------------- | ----- | ---------------------------------------------- | ------- |
+| `chitin.key`, `dataxbox/*.bif`         | 11    | `chitin.key`, `data/*.bif` (26)                | Models, textures, sounds, scripts, templates and GUI layouts. The 2DA tables, lightmaps, room layouts and visibility lists are not in BIF archives. |
+| `rimsxbox/<module>_a.rim`, `_adx.rim`  | 116 pairs | Area models in `data/models.bif`, lightmaps in `data/lightmaps*.bif`, layouts in `data/layouts.bif` | The rooms of one area: models, walkmeshes, room layout, visibility list and lightmaps (see "Area archives"). |
+| `rimsxbox/<name>.rim`, `<name>dx.rim`  | 6 pairs | `rims/<name>.rim`, `<name>dx.rim`            | The same six global archives. The "dx" archives also hold textures. `global.rim` also holds the 2DA tables, which the PC build keeps in `data/2da.bif`. |
+| `modules/*.rim`                        | 230   | `modules/*.rim` (234)                          | The same module archives, except `liv_m99aa` and `tar_m10ab`, which the Xbox dump lacks. |
+| `Lips/*.mod`                           | 117   | `lips/*.mod` (123)                             | The lip sync archives of the modules and `localization.mod`. The PC archives of the global archives and of `liv_m99aa` are absent. |
+| `players.erf`                          | 1     | `data/party.bif`, part of `data/player.bif`    | The 25 party models, the six player body models `pfbb*` and `pmbb*`, 74 textures and 32 conversations. |
+| `streammusic/`                         | 169   | `streammusic/*.wav`                            | 51 WAV and 118 WMA files (see "Stream audio"). |
+| `streamsounds/`                        | 960   | `streamsounds/*.wav`                           | WAV files. |
+| `streamwaves/`                         | 13,728 | `streamwaves/**/*.wav`                        | WMA files, 492 of them with the extension in upper case. |
+| `movies/*.xmv`                         | 61    | `movies/*.bik`                                 | XMV movies (see "Movies: XMV"). |
+| `localvault/Test.bic`                  | 1     | none                                           | A GFF file of type BIC, a saved player character. |
+| `errortex/lbl_warning.tga`             | 1     | none                                           | A 512x512 TGA image. |
+| `media/`                               | 4     | none                                           | Files of `downloader.xbe` (see "Files of the Xbox system libraries"). |
+| `AutoSaveImage.xbx`, `PlaySaveImage.xbx` | 2   | none                                           | Saved game icons (see "Files of the Xbox system libraries"). |
+| `dsstdfx.bin`                          | 1     | none                                           | Loaded by `default.xbe` as `d:\dsstdfx.bin` (see "Files of the Xbox system libraries"). |
+| `*.ini`                                | 9     | `swkotor.ini`                                  | Plain text settings. They are not converted. |
+| `*.xbe`                                | 4     | `swkotor.exe`                                  | Programs (see "Xbox executable: default.xbe"). |
+
+The module `tar_m10ab` has area archives in `rimsxbox` but no module archive. The 32 conversations of `players.erf` have the names of the 32 conversations in the Xbox `templates.bif`. The two pairs that were compared, `banter` and `k_hbas_dialog`, differ, and which copy the game uses is UNKNOWN. The Xbox build has no `patch.erf`, no `TexturePacks` folder and no `saves` folder.
+
+The resource type table of `default.xbe` pairs each type number with an extension, like that of the PC executable (Xbox code, 0x136BC7 for type 3006). Every type that the Xbox files use has the PC extension, except that the Xbox textures have type 3006, "txb".
+
+## Area archives
+
+Each area of the Xbox build has two RIM archives in `rimsxbox`. `<module>_a.rim` holds the area's room models, walkmeshes, room layout and visibility list, and also models, conversations, scripts, templates and sounds that the area uses. `<module>_adx.rim` holds the MDX vertex data of those models and the area's textures, including the lightmaps. The flag at 0x14 of the RIM header is 0 in all 116 `_a` archives and 1 in all 116 `_adx` archives, as in the PC pairs of `rims`.
+
+The table below counts the resources of all 116 pairs.
+
+| Archive | Resources |
+| ------- | --------- |
+| `_a`    | 5,810 MDL, 1,277 WOK, 1,104 PWK, 465 DWK, 116 LYT, 115 VIS, 3,074 NCS, 2,883 WAV, 30 TGA, 38 TXI, 140 DLG and 2,897 templates (UTC, UTD, UTE, UTI, UTP, UTT, UTW, SSF) |
+| `_adx`  | 5,783 MDX and 13,305 TXB |
+
+Every MDL of an `_a` archive has its MDX in the `_adx` archive of the same area, except 27 copies of the effect models `fxc_droid01`, `fxc_droid02` and `fxc_droid15`. Their MDX data is only in `globaldx.rim`. The game probably finds it there because it keeps `global.rim` loaded, so the converter takes the MDX data from `globaldx.rim` when the partner archive lacks it. This assumption is not verified in the engine code. Ten MDX resources of `globaldx.rim` and `mainmenudx.rim` belong to no model.
+
+## Textures: TXB
+
+An Xbox texture is a resource of type 3006, which the engine names "txb". It has the 128-byte header, the layouts and the TXI trailer of a TPC texture (see "Textures: TPC"), and differs in two ways. Its uncompressed pixels use other encodings and byte orders, and its cube faces and flipbook frames are padded to multiples of 128 bytes. The parser is `ParseTpc` in `kotor/tpc.go` with its `xbox` flag set.
+
+The Xbox build holds 19,747 textures: 3,495 in `textures.bif` and `temptextures.bif`, 791 in the model archives `items.bif`, `player.bif` and `models2.bif`, 15,387 in the "dx" archives of `rimsxbox` and 74 in `players.erf`. All of them parse completely. In each file, the header, the pixel data and the TXI trailer together account for every byte. 13,052 textures have a trailer.
+
+The table below lists the encodings that occur.
+
+| Encoding | Size at 0x00 | Pixel format                                    | Layouts                                | Textures |
+| -------- | ------------ | ----------------------------------------------- | -------------------------------------- | -------- |
+| 1        | 0            | 8-bit grayscale                                 | plain                                  | 5        |
+| 4        | 0            | 32-bit B, G, R, A, in rows                      | plain                                  | 11       |
+| 12       | 0            | 32-bit B, G, R, A, in swizzled order            | plain                                  | 6,286    |
+| 2        | nonzero      | DXT1                                            | 7,629 plain, 133 cube, 109 flipbook    | 7,871    |
+| 4        | nonzero      | DXT5                                            | 5,385 plain, 180 cube, 9 flipbook      | 5,574    |
+
+The engine's TXB header reader tests bits 0, 1 and 2 of the encoding as the PC reader does (Xbox code, 0x303AD0). Encoding 12 sets bit 3 in addition to bit 2. The routine that tests bit 3 was not found. Bit 3 marks the swizzled order, because decoding the 6,286 textures of encoding 12 in that order gives coherent images and decoding them in rows does not, and because the 11 textures of encoding 4 are coherent in rows. Confidence is high for the pixel order and medium for the meaning of the bit.
+
+The swizzled order is the texture layout of the Xbox GPU. Pixel (x, y) of a level of width w and height h, both powers of 2, lies at the index whose bits interleave the bits of x and y, starting with the lowest bit of x, for as long as both have bits left. The remaining bits of the larger coordinate follow. All 6,286 swizzled textures have power-of-2 sizes. Each mipmap level is swizzled on its own.
+
+The 32-bit pixels are stored with blue in the first byte and alpha in the last, which is the A8R8G8B8 format of the Xbox GPU, whereas the PC TPC files store red first. Rows are stored bottom row first, as in TPC files. The DXT blocks are stored as on PC, in rows.
+
+Cube faces and flipbook frames each start on a multiple of 128 bytes. The engine's reader rounds the size of one face up to a multiple of 128 bytes and multiplies it by 6 (Xbox code, 0x303C70 and 0x303D43). It adds 128 bytes even to a size that is already a multiple of 128, but none of the 313 cube textures has a face of such a size, so the rule is the same in every file. The size field at 0x00 of a flipbook texture equals the padded size of all frames in all 118 flipbooks. For example, `fx_tex_02` is 256x256 DXT1 with 2 by 2 frames. Each 128x128 frame with 8 mipmap levels takes 10,936 bytes, padded to 11,008, and the four frames total 44,032 bytes, which equals its size field. The padding bytes hold arbitrary values, often parts of other data, so they are probably uninitialized memory of the tool. A plain texture has no padding.
+
+The float at 0x04 is the alpha mean, as on PC. In 6,024 of the 6,027 swizzled textures of the "dx" archives, it equals the mean of the alpha bytes of the top mipmap level divided by 255 within 0.0001, and in the other 3 within 0.01. Most of these are lightmaps. Their alpha means range from about 0.27 to 1.
+
+The converter writes each texture as an 8-bit RGBA PNG file with the top row first, in the folder of its archive, and its trailer as a TXI file, as for TPC textures. The decoding was compared with the PC build. Of the Xbox textures that have a PC texture or a PC lightmap of the same name and size, the PNG files of 12,729 are pixel for pixel identical to the PC PNG files. These are 10,081 of the 12,634 compared in the "dx" archives, 2,251 of 2,761 in `textures.bif` and `temptextures.bif`, and 397 of 665 in the model archives. These identical files include lightmaps, which the PC build stores as TGA images, so they confirm the swizzled order, the byte order and the row order independently of the PC TPC decoder. The others differ in content. Many are textures that the Xbox build replaces with other artwork, such as `comm_w_f02`, and some are small lightmaps whose lower rows hold arbitrary bytes in both builds. A further 3,625 textures exist in both builds at different sizes.
+
+Model materials refer to the PNG file of the same name. Textures of the "dx" archive of the same area come first, then those of `textures.bif`, `temptextures.bif` and the model archives, and then those of `players.erf`. Only `dor_ukn01` and `dor_ukn02` occur in two BIF archives, `models2.bif` and `textures.bif`. Which copy the game uses is UNKNOWN.
+
+## Xbox models
+
+The Xbox models have the layout of the PC models (see "3D models: MDL and MDX") with the differences listed below. The converter is `ConvertMdl` with the option `Xbox`, which selects the Xbox values of `mdlFormat` in `kotor/mdl.go`. All 1,246 models of the four Xbox model archives, all 6,049 models of `rimsxbox` and all 31 models of `players.erf` pass the converter's checks. In all of them, every byte of the model data belongs to exactly one decoded structure, and every byte of the MDX data belongs to a vertex record, a terminator record or padding by the rule of "MDX file".
+
+| Structure | PC | Xbox | Evidence | Confidence |
+| --------- | -- | ---- | -------- | ---------- |
+| Class addresses of the model header | 0x00413670, 0x00405520 | 0x0040ED10, 0x0040ED20 | All Xbox models. | high |
+| Class addresses of the animation header | 0x004134F0, 0x0043ECE0 | 0x0040E760, 0x0045C8B0 | All Xbox animations. | high |
+| Class addresses of a plain, AABB or lightsaber mesh | 0x00405750, 0x00405760 | 0x00411D70, 0x00411070 | All Xbox meshes of these kinds. | high |
+| Class addresses of a dangly mesh | 0x00405740, 0x00405730 | 0x00411AF0, 0x00411AE0 | All Xbox dangly meshes. | high |
+| Class addresses of a skinned mesh | 0x00405710, 0x00405720 | 0x00411060, 0x00411070 | All Xbox skinned meshes. | high |
+| Mesh header size | 0x14C | 0x148 | The class headers parse at 0x148 in all Xbox models. The engine's model parser also places them there (see "Dangly mesh header"). | high |
+| Mesh header field at 0x148 | Offset of the vertex positions in the MDL | Absent | 0x140 is 0 in all 22,672 meshes of the Xbox model archives, and 0x144 is the MDX offset. The Xbox MDL files hold no position array. For example, `i_trapkit_001` is 1,516 bytes shorter on Xbox, 126 positions of 12 bytes plus 4 bytes of the header. | high |
+| Normal in a vertex record | f32[3], 12 bytes | One packed u32 | See below. | high |
+| Tangent space in a vertex record | f32[9], 36 bytes | Three packed u32 | See below. | high |
+| Bone indices in a skinned vertex record | f32[4] | i16[4], -1 for an unused slot | The four weights are f32[4] in both builds, so a skinned record is 24 bytes longer than a plain one instead of 32. The weights and indices match the bone map in all skinned meshes. | high |
+| Entries of the skin's bone map | f32 | i16, -1 for no bone | The local bones are numbered from 0 without gaps in all Xbox skins, and the u16[16] list at 0x40 of the skin header agrees. | high |
+| Positions of a lightsaber mesh | MDL position array and lightsaber header | Lightsaber header only | The 44 lightsaber meshes have no vertex records. Their positions come from the array at 0x00 of the lightsaber header. | high |
+
+The normal is packed in the NORMPACKED3 vertex format of the Xbox GPU. Bits 0 to 10 hold x and bits 11 to 21 hold y, each as a signed 11-bit integer divided by 1,023, and bits 22 to 31 hold z as a signed 10-bit integer divided by 511. 299 models of `items.bif` exist in both builds, and 266 of them have meshes of the same vertex counts. In those, all 87,749 Xbox positions equal the PC positions, and 87,696 of the 87,740 unpacked normals agree with the PC unit normals within 0.003 in every component. The others differ by up to 0.29, which suggests normals that were computed again. The rounding loses up to about 0.0012 of a normal's length, so the converter normalizes each unpacked normal whose length is within 0.005 of 1, and replaces zero normals as on PC. The three vectors of the tangent space are packed in the same way. In the first vertex records of `c_embmcube`, they unpack to the nine floats of the PC records within the same rounding. The converter does not write the tangent space.
+
+The node header, the face, the controllers, the animation header after its class addresses, and the light, emitter, reference, dangly, AABB and lightsaber headers are the same in both builds. The MDX padding rule and the terminator records also hold for the Xbox files.
+
+Most models of the PC archive `models.bif` are area rooms. In the Xbox build these lie in the `_a` archives of `rimsxbox`, so `models.bif` holds 645 models instead of 2,445. The Xbox archive `models2.bif` holds 239 more models, and `players.erf` holds the party models.
+
+The converter writes the Xbox models like the PC models. The models of the BIF archives go to `extract/xbox/dataxbox/<archive>/`, those of `rimsxbox` to `extract/xbox/rimsxbox/<archive>/` and those of `players.erf` to `extract/xbox/players/`. 37 models of the BIF archives and 418 models of `rimsxbox` have no rendered geometry and no animations and are not written. 33 texture names of the BIF models and 5 of the RIM models are found in no archive. Most of them are also missing on PC, such as `a_jedirobe_001` and `pmblv`.
+
+## Walkmeshes in the area archives
+
+The area walkmeshes (WOK) are in the `_a` archives together with placeable (PWK) and door (DWK) walkmeshes. All 2,846 walkmeshes of `rimsxbox` and all 349 of the BIF archives have the PC layout (see "Walkmeshes: BWM") and pass the parser's checks. The converter writes the 2,018 of `rimsxbox` and the 275 of the BIF archives that have faces. The surface materials come from `surfacemat.2da` in `global.rim`.
+
+## Sounds: Xbox ADPCM
+
+All 1,925 WAV files of `sounds.bif` and all 3,258 WAV files of `rimsxbox` use format tag 0x69, Xbox ADPCM. Their fmt chunk is 20 bytes long and gives a block size of 36 bytes per channel and 64 samples per block. A block is an IMA ADPCM block (see "IMA ADPCM encoding") with a 4-byte header per channel and 32 bytes of nibbles. It yields the header sample and the first 63 decoded nibbles. The last nibble is decoded and dropped.
+
+This rule was found by comparing the Xbox and PC copies of `al_ot_shiprise`, which the PC build stores as 16-bit PCM. The Xbox file has 7,529 blocks. Decoded with 64 samples per block, it yields 481,856 samples for the 481,830 PC samples, and the samples differ from the PC samples by a root mean square of 67.6. The decoding that drops the header sample and keeps all 64 nibbles differs by 95.5 at its best alignment, and every decoding with 65 samples per block drifts out of alignment. `as_an_dantext_01` gives the same result. The format is also declared with 64 samples per block in Microsoft's Xbox development kit.
+
+`DecodeAdpcm` in `kotor/adpcm.go` converts these files to 16-bit PCM. ffmpeg decodes format 0x69 as IMA ADPCM with 65 samples per block, so `cmd/verify` drops ffmpeg's 65th sample of each block before it compares the samples.
+
+## Stream audio
+
+The stream folders hold plain RIFF WAV files and WMA files. No Xbox WAV file has the MP3 stub or the fake header of the PC stream files. The table below counts the files.
+
+| Folder         | Files | Content |
+| -------------- | ----- | ------- |
+| `streammusic`  | 169   | 47 WAV files of IMA ADPCM, 4 WAV files of 16-bit PCM and 118 WMA files |
+| `streamsounds` | 960   | WAV files of 16-bit PCM, 942 mono and 18 stereo |
+| `streamwaves`  | 13,728 | WMA files in 649 folders and the top folder |
+
+WMA (Windows Media Audio) is a standard format in an ASF container, which ffmpeg decodes. All 13,846 WMA files are WMA version 2 at 44,100 Hz. The voice files are mono and the music files stereo. The converter writes each WMA file as 16-bit PCM, decoded by ffmpeg, to `<name>.wma.wav`. The extension of the source stays in the name, because 50 music tracks exist both as a WAV file and as a WMA file, for example `al_el_comproom`. The two copies of that track last 38.44 s and 38.33 s. Which copy the game plays is UNKNOWN.
+
+## Movies: XMV
+
+The 61 movies are XMV files, the movie format of Microsoft's Xbox development kit, with Windows Media Video 8 video, 640 pixels wide and 272 to 480 pixels high, and stereo IMA ADPCM audio at 44,100 Hz. ffmpeg decodes them. Each file is a chain of packets. A packet begins with the u32 size of the next packet, and the first packet holds the file header with the signature "xobX" at 0x0C. In all 61 files the chain ends exactly at the end of the file with a next size of 0, and every file size is a multiple of 4,096 bytes.
+
+ffmpeg's XMV demuxer ends every movie of more than one packet with an input/output error after its last packet. The converted movies nonetheless hold every frame. For example, the MP4 file of `01c` holds 499 video frames for the 499 video packets of the source. The converter therefore ignores this one message. ffprobe overestimates the duration of the XMV files, for example 349 s for the 120 s movie `01a`, so `cmd/verify` takes the audio duration from the samples that ffmpeg decodes.
+
+## Files of the Xbox system libraries
+
+Some files of the Xbox dump belong to Microsoft's Xbox development kit (XDK) rather than to the game. They are not converted, because no installed tool decodes them and they are not specific to this game.
+
+| File | Format | Used by |
+| ---- | ------ | ------- |
+| `media/dlcustom.xpr`, `AutoSaveImage.xbx`, `PlaySaveImage.xbx` | XPR, an XDK resource bundle with the signature "XPR0". An XBX file is an XPR file that holds a saved game icon. | `downloader.xbe` names `dlcustom.xpr`, and `default.xbe` names the two save images and `SaveImage.xbx`. |
+| `media/Wave.xwb`, `media/Sound.xsb` | XACT wave bank ("WBND") and sound bank ("SDBK"), the audio formats of the XDK's audio tool. | `downloader.xbe` |
+| `media/ArialUni.Ttf` | TrueType font | `downloader.xbe` |
+| `dsstdfx.bin` | Probably the DirectSound effects image of the XDK, which loads digital signal processor code. Its content was not examined. | `default.xbe`, as `d:\dsstdfx.bin` |
+
+`downloader.xbe` is probably the program that downloads additional content. Its use was not examined.
+
+## Character vault: localvault/Test.bic
+
+`localvault/Test.bic` is a GFF file of type "BIC", the type of the player template in `templates.bif`. The converter writes it as JSON in the form of the GFF conversion (see "Conversion to JSON") to `extract/xbox/localvault/Test.bic.json`. What the game uses it for is UNKNOWN.
+
+## Conversion and verification
+
+`go run ./cmd/extract -platform xbox` converts the Xbox build to `extract/xbox`, and `go run ./cmd/verify -platform xbox` checks the outputs as for the PC build. The table below lists the results.
+
+VERIFY_TABLE_PLACEHOLDER
+
 # PC executable: swkotor.exe
 
 `dump/pc/swkotor.exe` is the program of the PC build. It is a 32-bit PE (Portable Executable) file with the image base 0x400000 and five sections: `.text` (code), `.rdata` (constants and strings), `.data` (variables), `.rsrc` (Windows resources) and `.bind`. The `.bind` section holds a copy protection wrapper of Steam, which is called SteamStub. The entry point of the file, 0x86D2ED, lies in `.bind`. Steamless, the installed tool that removes this wrapper, identifies it as SteamStub variant 2.1. This section describes the wrapper as its code shows it.
@@ -2803,4 +2972,4 @@ objdump -D -b binary -m i386 -M intel --adjust-vma=0x10000 --start-address=0x110
 
 The routines of the game were found through the strings they use, such as the field labels of a GFF file, the keywords of the model text parser and the signatures of the archives. The addresses given as "Xbox code" in this document are addresses in this image. The disassembly is coherent, because string references resolve, calls land on routine entries, and the control flow of each routine that was read is consistent. No other disassembler is installed, so the output of objdump was not compared with an independent tool.
 
-The Xbox build shares the formats of the PC build, but a few structures differ. The mesh header of a model is 0x148 bytes in the Xbox engine instead of 0x14C (see "Mesh header"). Both executables name up to six additional string tables for downloadable content (`LIVE%d`), and neither dump contains such a table. A statement that rests only on the Xbox code may therefore differ in the PC build. Each such statement says so.
+The Xbox build shares the formats of the PC build, but a few structures differ. The mesh header of a model is 0x148 bytes in the Xbox engine instead of 0x14C (see "Mesh header" and "Xbox models"). Both executables name up to six additional string tables for downloadable content (`LIVE%d`), and neither dump contains such a table. A statement that rests only on the Xbox code may therefore differ in the PC build. Each such statement says so.

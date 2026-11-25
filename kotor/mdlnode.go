@@ -24,7 +24,6 @@ const (
 	lightHeaderSize      = 0x5c
 	emitterHeaderSize    = 0xe0
 	referenceHeaderSize  = 0x24
-	meshHeaderSize       = 0x14c
 	skinHeaderSize       = 0x64
 	danglyHeaderSize     = 0x1c
 	aabbHeaderSize       = 4
@@ -227,8 +226,9 @@ type mdlSkin struct {
 	bones        []int
 }
 
-// readSkin decodes the skin header at offset and claims its arrays.
-func readSkin(r *mdlReader, offset int, name string) mdlSkin {
+// readSkin decodes the skin header at offset and claims its arrays. The entries of the bone map are f32 on
+// PC and i16 on Xbox, as format gives.
+func readSkin(r *mdlReader, offset int, name string, format mdlFormat) mdlSkin {
 	const (
 		quaternionSize   = 16
 		boneSlots        = 16
@@ -247,7 +247,7 @@ func readSkin(r *mdlReader, offset int, name string) mdlSkin {
 	skin.indexOffset, _ = r.u32(offset + 0x10)
 	mapOffset, _ := r.u32(offset + 0x14)
 	mapCount, _ := r.u32(offset + 0x18)
-	r.claim(mapOffset, 4*mapCount, "bone map")
+	r.claim(mapOffset, format.skinIndexSize*mapCount, "bone map")
 	rotations, rotationCount := r.array(offset+rotationArray, quaternionSize, "bone rotations")
 	translations, translationCount := r.array(offset+translationArray, vertexSize, "bone translations")
 	_, thirdCount := r.array(offset+thirdArray, 4, "skin array at 0x34")
@@ -258,7 +258,11 @@ func readSkin(r *mdlReader, offset int, name string) mdlSkin {
 
 	for i := range mapCount {
 		bone := -1
-		if values, ok := r.f32(mapOffset+4*i, 1); ok && values[0] >= 0 {
+		if format.skinIndexSize == 2 {
+			if value, ok := r.u16(mapOffset + 2*i); ok && int16(value) >= 0 {
+				bone = int(int16(value))
+			}
+		} else if values, ok := r.f32(mapOffset+4*i, 1); ok && values[0] >= 0 {
 			bone = int(values[0])
 		}
 		skin.boneMap = append(skin.boneMap, bone)

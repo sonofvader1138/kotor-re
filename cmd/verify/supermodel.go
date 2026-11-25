@@ -26,13 +26,13 @@ type supermodelSource struct {
 	mdl     []byte
 }
 
-// supermodelSources reads the models of the BIF archives in kotor.ModelBifs once, by lowercase resref.
+// supermodelSources reads the models of the BIF archives in kotor.Build.ModelBifs once, by lowercase resref.
 // Supermodel names are resolved against these archives only.
 var supermodelSources = sync.OnceValue(func() map[string]supermodelSource {
 	key := kotor.ReadKey()
 	sources := map[string]supermodelSource{}
-	for _, name := range kotor.ModelBifs {
-		for _, resource := range kotor.BifResources("data/"+name+".bif", key) {
+	for _, name := range kotor.Build.ModelBifs {
+		for _, resource := range kotor.BifResources(kotor.BifPath(name), key) {
 			if resource.Ext == "mdl" {
 				sources[strings.ToLower(resource.Resref)] = supermodelSource{archive: name, resref: resource.Resref, mdl: resource.Data}
 			}
@@ -156,7 +156,7 @@ func checkSupermodelLinks(path string, mdl []byte) string {
 
 		source := supermodelSources()[strings.ToLower(link.Model)]
 		file := filepath.Join(filepath.Dir(path), filepath.FromSlash(link.Uri))
-		target := filepath.Join(kotor.Extract, "data", source.archive, source.resref+".anim.gltf")
+		target := filepath.Join(kotor.Extract, kotor.Build.Data, source.archive, source.resref+".anim.gltf")
 		if filepath.Clean(file) != target {
 			return fmt.Sprintf("link %s points to %s, expected %s", link.Model, link.Uri, target)
 		}

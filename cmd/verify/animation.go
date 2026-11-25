@@ -31,7 +31,6 @@ const (
 	sourceKeyArray      = 0x38
 	sourceDataArray     = 0x44
 	sourceNodeSize      = 80
-	sourceMeshSize      = 0x14c
 	sourceKeySize       = 16
 	sourceEventSize     = 36
 	sourceStringLength  = 32
@@ -45,6 +44,14 @@ const (
 	sourceFlagAabb      = 0x200
 	unsetIndex          = 0xffffffff
 )
+
+// sourceMeshSize returns the size of the mesh header, which is 4 bytes shorter in the Xbox build.
+func sourceMeshSize() int {
+	if kotor.Build.Xbox {
+		return 0x148
+	}
+	return 0x14c
+}
 
 // The controller types of position, orientation and scale, and the layout of the controller columns.
 const (
@@ -474,7 +481,8 @@ const skinProgram = gltfLocation + ` . as $d | .nodes[] | select(.extras.skin) |
 // checkSkins compares the skins of a model glTF file with the source. Every rendered skinned mesh with faces
 // and vertex records must have a skin, in source order. Its joints must be the nodes named by the name table
 // entries of its local bones, in local bone order. With the MDX data, its joints must equal the stored bone
-// indices, with 0 for -1, and its weights the stored weights divided by their sum.
+// indices, with 0 for -1, and its weights the stored weights divided by their sum. The bone map entries and
+// the bone indices are f32 on PC and i16 on Xbox.
 func checkSkins(path string, mdl, mdx []byte) string {
 	const (
 		weightOffset = 0x0c
@@ -500,7 +508,7 @@ func checkSkins(path string, mdl, mdx []byte) string {
 	model := newSourceModel(mdl)
 	for _, node := range model.tree(model.u32(sourceRootNode)) {
 		mesh := node + sourceNodeSize
-		skin := mesh + sourceMeshSize
+		skin := mesh + sourceMeshSize()
 		vertices := model.u16(mesh + vertexCount)
 		stride := model.u32(mesh + strideField)
 		if model.u16(node)&sourceFlagSkin == 0 || model.data[min(mesh+renderByte, len(model.data)-1)] == 0 ||
@@ -513,10 +521,16 @@ func checkSkins(path string, mdl, mdx []byte) string {
 
 		var bones []string
 		mapStart, mapCount := model.u32(skin+boneMap), model.u32(skin+boneMap+4)
+		boneIndex := func(data []byte, start, i int) float64 {
+			if kotor.Build.Xbox {
+				return float64(int16(readUint(data, start+2*i, 2)))
+			}
+			return float64(math.Float32frombits(uint32(readUint(data, start+4*i, 4))))
+		}
 		for bone := 0; ; bone++ {
 			found := ""
 			for entry := range mapCount {
-				if model.f32(mapStart+4*entry) == float64(bone) && entry < len(model.names) {
+				if boneIndex(model.data, mapStart, entry) == float64(bone) && entry < len(model.names) {
 					found = model.names[entry]
 				}
 			}
@@ -541,7 +555,7 @@ func checkSkins(path string, mdl, mdx []byte) string {
 			stored := floatsAt(mdx, record+weights, slots)
 			sum := stored[0] + stored[1] + stored[2] + stored[3]
 			for slot := range slots {
-				bone := float64(math.Float32frombits(uint32(readUint(mdx, record+indices+4*slot, 4))))
+				bone := boneIndex(mdx, record+indices, slot)
 				joint := readUint(bin, jointStart+2*(slots*v+slot), 2)
 				weight := floatsAt(bin, weightStart+4*(slots*v+slot), 1)[0]
 				if joint != int(max(bone, 0)) || math.Abs(weight-stored[slot]/sum) > valueTolerance {
@@ -600,7 +614,7 @@ func checkNodeExtras(path string, mdl []byte) string {
 	for _, node := range model.tree(model.u32(sourceRootNode)) {
 		flags := model.u16(node)
 		header := node + sourceNodeSize
-		subclass := header + sourceMeshSize
+		subclass := header + sourceMeshSize()
 		var statics []sourceTrack
 		for _, track := range sourceControllers(model, node) {
 			if track.kind != keyPosition && track.kind != keyOrientation {

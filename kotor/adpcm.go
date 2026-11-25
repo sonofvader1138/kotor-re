@@ -1,5 +1,5 @@
-// This file converts IMA ADPCM WAV files (format 0x11) and 8-bit PCM WAV files to 16-bit PCM WAV. Other
-// formats are copied unchanged. As a check, it compares the predictor in each block header with the last
+// This file converts IMA ADPCM WAV files (format 0x11), Xbox ADPCM WAV files (format 0x69) and 8-bit PCM
+// WAV files to 16-bit PCM WAV. Other formats are copied unchanged. As a check, it compares the predictor in each block header with the last
 // decoded sample of the previous block.
 
 package kotor
@@ -11,9 +11,12 @@ import (
 )
 
 // WAVE format tags from the fmt chunk.
+// Xbox ADPCM is IMA ADPCM with 36-byte blocks per channel, but a block yields one sample fewer: the sample
+// in its header and the first 63 of its 64 nibbles. The last nibble is decoded and dropped.
 const (
-	formatPcm      = 1
-	formatImaAdpcm = 0x11
+	formatPcm       = 1
+	formatImaAdpcm  = 0x11
+	formatXboxAdpcm = 0x69
 )
 
 const (
@@ -114,13 +117,17 @@ func DecodeAdpcm(file []byte) AdpcmDecoded {
 	if tag == formatPcm && binary.LittleEndian.Uint16(format[14:]) == pcm8BitsPerSample {
 		return widenPcm8(data, channels, rate)
 	}
-	if tag != formatImaAdpcm {
+	if tag != formatImaAdpcm && tag != formatXboxAdpcm {
 		return AdpcmDecoded{file, fmt.Sprintf("copied (fmt=%d)", tag), ""}
 	}
 
 	samplesPerBlock := int(binary.LittleEndian.Uint16(format[18:]))
 	groupBytes := blockAlign - blockHeaderSize*channels
-	if float64(samplesPerBlock) != float64(groupBytes*(groupSamples/groupSize))/float64(channels)+1 {
+	headerSamples := 1
+	if tag == formatXboxAdpcm {
+		headerSamples = 0
+	}
+	if float64(samplesPerBlock) != float64(groupBytes*(groupSamples/groupSize))/float64(channels)+float64(headerSamples) {
 		return AdpcmDecoded{nil, "", fmt.Sprintf("samples/block %d vs blockalign %d", samplesPerBlock, blockAlign)}
 	}
 
@@ -134,7 +141,9 @@ func DecodeAdpcm(file []byte) AdpcmDecoded {
 		}
 	}
 
-	pcm := make([]int16, total*channels)
+	// The dropped last nibble of an Xbox block is written one sample past the block, where the next block's
+	// header sample overwrites it, so the buffer holds one sample more.
+	pcm := make([]int16, (total+1)*channels)
 	errSum, errCount, maxErr, clips := 0, 0, 0, 0
 	last := make([]int, channels)
 	hasLast := false
@@ -218,7 +227,7 @@ func DecodeAdpcm(file []byte) AdpcmDecoded {
 	if partial != 0 {
 		err = "partial block"
 	}
-	info := fmt.Sprintf("blocks=%d partial=%d samples=%d boundary_err avg=%.2f max=%d clips=%d",
-		blocks, partial, sampleCount, float64(errSum)/float64(errCount), maxErr, clips)
+	info := fmt.Sprintf("fmt=%d blocks=%d partial=%d samples=%d boundary_err avg=%.2f max=%d clips=%d",
+		tag, blocks, partial, sampleCount, float64(errSum)/float64(errCount), maxErr, clips)
 	return AdpcmDecoded{pcmWav(pcm, channels, rate, sampleCount*channels*pcmBytesPerSample), info, err}
 }

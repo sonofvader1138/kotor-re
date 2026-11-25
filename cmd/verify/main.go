@@ -13,31 +13,36 @@
 // accessors that jq reads, must hold the source's vertex positions, face indices and face fields (see
 // checkModelBin and checkWalkmeshBin). Each model glTF file is also checked in two more ways: its animations
 // must equal the controllers of the source's animation trees (see checkAnimations), and its skins the bone
-// maps, bone indices and bone weights of the source (see checkSkins).
+// maps, bone indices and bone weights of the source (see checkSkins). The Xbox textures of the model archives
+// are checked as addResourceChecks describes.
 // textures: ImageMagick's decoding of each PNG must equal the decoded TPC texture, and pngcheck must accept it.
 // tga: ImageMagick's decoding of each PNG must equal its decoding of the source TGA, and pngcheck must
 // accept the PNG. Each TXI must equal the source bytes. Each room visibility list, read with jq, must build
-// again into its source text in canonical form (see checkVisJson).
+// again into its source text in canonical form (see checkVisJson). The loose Xbox image errortex/*.tga is
+// checked in the same way.
 // music, sounds, waves: ffprobe must read each file without error. The samples are not compared.
-// movies: ffprobe must report the Bink file's size, frame count, sample rate, channel count and audio
+// movies: ffprobe must report the source movie's size, frame count, sample rate, channel count and audio
 // duration (within 0.1 s; ffmpeg's Bink audio decoder emits about 0.03 s more than the packets declare),
-// and every output frame must have a PSNR of at least 40 dB against the decoded Bink frame.
+// and every output frame must have a PSNR of at least 40 dB against the decoded source frame. For a Bink
+// movie these values come from its header, and for an XMV movie from ffprobe and ffmpeg (see sourceMovie).
 // gui: jq must parse each JSON file.
-// patch: the resources of patch.erf, checked as addResourceChecks describes.
+// erfs: the resources of the ERF archives in kotor.Build.Erfs (patch.erf on PC, players.erf on Xbox), checked as
+// addResourceChecks describes.
 // lips: Go's encoding/csv reader must read each CSV file, and its keyframes, packed again as f32 and u8, must
 // equal the source LIP keyframe bytes.
 // modules: jq must parse each JSON file. No independent tool reads NCS, so each script listing is
 // assembled again from its text and must equal the source script byte for byte. The assembler shares only
 // the opcode, type and operand tables with the disassembler.
-// rims: each model is checked as for models. Every other resource is checked as addResourceChecks describes: WAV files with ffprobe and ffmpeg, 2DA CSV files with encoding/csv, SSF and LTR JSON files rebuilt from
+// rims: each model is checked as for models, with the MDX data that extract pairs with it. Every other resource is checked as addResourceChecks describes: WAV files with ffprobe and ffmpeg, 2DA CSV files with encoding/csv, SSF and LTR JSON files rebuilt from
 // jq's output, other JSON files with jq, NSS files with iconv, and script listings by assembling them.
-// bifs: the resources of the BIF archives in kotor.ResourceBifs, checked as addResourceChecks describes.
+// bifs: the resources of the BIF archives in kotor.Build.ResourceBifs, checked as addResourceChecks describes.
 // tlk: the string table JSON, read with jq, must build again into dialog.tlk byte for byte.
 // saves: the GFF files and archive resources of each saved game, checked as addResourceChecks describes;
 // the screenshot PNG against ImageMagick and pngcheck; and the decoded global variables, read with jq,
-// built again into the value fields of GLOBALVARS.res.
+// built again into the value fields of GLOBALVARS.res. The Xbox character vault localvault/*.bic is checked
+// as addResourceChecks describes.
 //
-// usage: go run ./cmd/verify [-platform pc|xbox] [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [patch] [lips] [modules] [rims] [bifs] [tlk] [saves]   (default: all)
+// usage: go run ./cmd/verify [-platform pc|xbox] [models] [textures] [tga] [music] [sounds] [waves] [movies] [gui] [erfs] [lips] [modules] [rims] [bifs] [tlk] [saves]   (default: all)
 package main
 
 import (
@@ -48,6 +53,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -301,16 +307,19 @@ func addGltfChecks(jobs map[string][]job, label, path string) {
 	jobs["validator"] = append(jobs["validator"], func() []string { return line(label + " " + kotor.Verdict(validateGltf(path))) })
 }
 
-// Models: extract/data/<archive>/*.gltf for each archive in kotor.ModelBifs, models and walkmeshes. Each
-// written glTF file is checked against its source resource.
+// Models: extract/<data>/<archive>/*.gltf for each archive in kotor.Build.ModelBifs, models and walkmeshes,
+// where <data> is kotor.Build.Data. Each written glTF file is checked against its source resource. The
+// textures of the Xbox model archives are checked as addResourceChecks describes, in the report
+// model_textures.
 func models(summary *kotor.Summary) {
 	log("models...")
-	data := filepath.Join(kotor.Extract, "data")
+	data := filepath.Join(kotor.Extract, kotor.Build.Data)
 	key := kotor.ReadKey()
 	modelJobs := map[string][]job{}
 	walkmeshJobs := map[string][]job{}
-	for _, name := range kotor.ModelBifs {
-		resources := kotor.BifResources("data/"+name+".bif", key)
+	textureJobs := map[string][]job{}
+	for _, name := range kotor.Build.ModelBifs {
+		resources := kotor.BifResources(kotor.BifPath(name), key)
 		vertexData := map[string][]byte{}
 		for _, resource := range resources {
 			if resource.Ext == "mdx" {
@@ -318,33 +327,39 @@ func models(summary *kotor.Summary) {
 			}
 		}
 		for _, resource := range resources {
-			if resource.Ext == "mdl" {
-				file := filepath.Join(name, resource.Resref)
+			file := filepath.Join(name, resource.Resref)
+			switch resource.Ext {
+			case "mdl":
 				addModelChecks(modelJobs, file, filepath.Join(data, file), resource.Data, vertexData[resource.Resref])
-				continue
+			case "wok", "dwk", "pwk":
+				addWalkmeshChecks(walkmeshJobs, file+"."+resource.Ext, filepath.Join(data, file+"."+resource.Ext), resource.Data)
+			case "txb":
+				addResourceChecks(textureJobs, file, filepath.Join(data, file), resource.Ext, resource.Data)
 			}
-			if resource.Ext != "wok" && resource.Ext != "dwk" && resource.Ext != "pwk" {
-				continue
-			}
-
-			file := filepath.Join(name, resource.Resref+"."+resource.Ext)
-			path := filepath.Join(data, file)
-			if !exists(path + ".gltf") {
-				continue
-			}
-			addGltfChecks(walkmeshJobs, file+".gltf", path+".gltf")
-			walkmeshJobs["jq"] = append(walkmeshJobs["jq"], func() []string {
-				return line(file + ".gltf " + kotor.Verdict(checkWalkmeshExtras(path+".gltf", resource.Data)))
-			})
-			walkmeshJobs["gltf"] = append(walkmeshJobs["gltf"], func() []string {
-				return line(file + ".bin " + kotor.Verdict(checkWalkmeshBin(path, resource.Data)))
-			})
 		}
 	}
 
 	runResourceChecks(summary, "models", modelJobs)
 	log("walkmeshes...")
 	runResourceChecks(summary, "walkmeshes", walkmeshJobs)
+	runResourceChecks(summary, "model_textures", textureJobs)
+}
+
+// addWalkmeshChecks adds the checks of one converted walkmesh to jobs, when it was written: the glTF checks
+// of addGltfChecks, the node extras (see checkWalkmeshExtras) and the binary buffer (see checkWalkmeshBin).
+// path is the converted file without the extensions .gltf and .bin, and label is the same path relative to
+// the report folder.
+func addWalkmeshChecks(jobs map[string][]job, label, path string, source []byte) {
+	if !exists(path + ".gltf") {
+		return
+	}
+	addGltfChecks(jobs, label+".gltf", path+".gltf")
+	jobs["jq"] = append(jobs["jq"], func() []string {
+		return line(label + ".gltf " + kotor.Verdict(checkWalkmeshExtras(path+".gltf", source)))
+	})
+	jobs["gltf"] = append(jobs["gltf"], func() []string {
+		return line(label + ".bin " + kotor.Verdict(checkWalkmeshBin(path, source)))
+	})
 }
 
 // walkmeshProgram prints the numbers of the mesh node extras of a walkmesh glTF file, one per line, in source
@@ -701,8 +716,10 @@ const modelBinProgram = gltfLocation + ` . as $d | .buffers[0].uri, (.nodes[] | 
 // file without the extensions .gltf and .bin. Every mesh whose render byte is set and that has faces must
 // have a node with a mesh, in source order. Its positions must equal the MDL vertex array byte for byte, its
 // u32 indices the u16 vertex indices of the faces, its face materials the u32 at 0x10 of each face and its
-// adjacent faces the u16[3] at 0x14, byte for byte.
-func checkModelBin(path string, mdl []byte) string {
+// adjacent faces the u16[3] at 0x14, byte for byte. The Xbox model has no MDL vertex array, so its positions
+// must equal the positions of the MDX vertex records, or for a lightsaber mesh the position array that its
+// lightsaber header names.
+func checkModelBin(path string, mdl, mdx []byte) string {
 	const (
 		faceSize      = 32
 		materialField = 0x10
@@ -713,6 +730,10 @@ func checkModelBin(path string, mdl []byte) string {
 		countOffset   = 0x0c
 		vertexCount   = 0x130
 		vertexOffset  = 0x148
+		strideOffset  = 0xfc
+		positionField = 0x104
+		mdxOffset     = 0x144
+		saberFlag     = 0x800
 		vertexSize    = 12
 		corners       = 3
 		fieldsPerMesh = 5
@@ -760,9 +781,22 @@ func checkModelBin(path string, mdl []byte) string {
 		field += fieldsPerMesh
 
 		vertices := u32(mesh.header+vertexCount) & 0xffff
-		vertexStart := u32(mesh.header + vertexOffset)
-		if counts[0] != vertices || !bytes.Equal(kotor.Slice(bin, starts[0], starts[0]+vertexSize*vertices),
-			kotor.Slice(data, vertexStart, vertexStart+vertexSize*vertices)) {
+		var positions []byte
+		switch {
+		case !kotor.Build.Xbox:
+			vertexStart := u32(mesh.header + vertexOffset)
+			positions = kotor.Slice(data, vertexStart, vertexStart+vertexSize*vertices)
+		case mesh.flags&saberFlag != 0:
+			vertexStart := u32(mesh.header + sourceMeshSize())
+			positions = kotor.Slice(data, vertexStart, vertexStart+vertexSize*vertices)
+		default:
+			stride, records, position := u32(mesh.header+strideOffset), u32(mesh.header+mdxOffset), u32(mesh.header+positionField)
+			for i := range vertices {
+				record := records + stride*i + position
+				positions = append(positions, kotor.Slice(mdx, record, record+vertexSize)...)
+			}
+		}
+		if counts[0] != vertices || !bytes.Equal(kotor.Slice(bin, starts[0], starts[0]+vertexSize*vertices), positions) {
 			return mesh.name + ": positions differ from the source"
 		}
 
@@ -812,7 +846,7 @@ func addModelChecks(jobs map[string][]job, label, path string, mdl, mdx []byte) 
 		return line(label + ".gltf " + kotor.Verdict(checkSkins(path, mdl, mdx)))
 	})
 	jobs["gltf"] = append(jobs["gltf"], func() []string {
-		return line(label + ".bin " + kotor.Verdict(checkModelBin(path, mdl)))
+		return line(label + ".bin " + kotor.Verdict(checkModelBin(path, mdl, mdx)))
 	})
 	jobs["supermodel"] = append(jobs["supermodel"], func() []string {
 		return line(label + ".gltf " + kotor.Verdict(checkSupermodelLinks(path, mdl)))
@@ -831,7 +865,7 @@ func addModelChecks(jobs map[string][]job, label, path string, mdl, mdx []byte) 
 // Textures: extract/TexturePacks/<pack>/*.png against the TPC textures in TexturePacks/<pack>.erf.
 // Each job decodes its TPC texture when it starts, so only one texture per job slot is held in memory.
 func textures(summary *kotor.Summary) {
-	for _, pack := range kotor.TexturePacks {
+	for _, pack := range kotor.Build.TexturePacks {
 		log("textures " + pack + "...")
 		dir := filepath.Join(kotor.Extract, "TexturePacks", pack)
 		entries := kotor.ReadErf(filepath.Join(kotor.Game, "TexturePacks", pack+".erf"))
@@ -844,7 +878,7 @@ func textures(summary *kotor.Summary) {
 
 			jobs = append(jobs, func() []string {
 				data := entry.Data()
-				image := kotor.DecodeTpc(data, kotor.ParseTpc(data))
+				image := kotor.DecodeTpc(data, kotor.ParseTpc(data, false))
 				name := entry.Resref + ".png"
 				if image == nil {
 					return line(name + " FAIL: source texture does not decode")
@@ -857,12 +891,21 @@ func textures(summary *kotor.Summary) {
 	}
 }
 
-// TGA images: extract/data/<group>/*.png and *.txi against the BIF archives they came from
+// TGA images: extract/data/<group>/*.png and *.txi against the BIF archives they came from, and on Xbox
+// extract/errortex/*.png against errortex/*.tga.
 func tgaImages(summary *kotor.Summary) {
+	looseJobs := map[string][]job{}
+	errortex := filepath.Join(kotor.Game, "errortex")
+	for _, file := range kotor.ListFiles(errortex, ".tga", false) {
+		label := filepath.Join("errortex", strings.TrimSuffix(file, filepath.Ext(file)))
+		addResourceChecks(looseJobs, label, filepath.Join(kotor.Extract, label), "tga", kotor.ReadFile(filepath.Join(errortex, file)))
+	}
+	runResourceChecks(summary, "errortex", looseJobs)
+
 	key := kotor.ReadKey()
-	for _, group := range kotor.TgaGroups {
+	for _, group := range kotor.Build.TgaGroups {
 		log("tga " + group.Name + "...")
-		dir := filepath.Join(kotor.Extract, "data", group.Name)
+		dir := filepath.Join(kotor.Extract, kotor.Build.Data, group.Name)
 
 		var txiJobs, visJobs, jobs []job
 		seen := map[string]bool{}
@@ -957,8 +1000,8 @@ func streamAudio(summary *kotor.Summary, stage, folder string) {
 	summary.Tally("ffprobe_"+stage, pool(jobs))
 }
 
-// Movies: extract/movies/*.mp4 against movies/*.bik. The probe and the PSNR comparison of one movie run
-// at the same time.
+// Movies: extract/movies/*.mp4 against movies/*.bik (PC) or movies/*.xmv (Xbox). The probe and the PSNR
+// comparison of one movie run at the same time.
 const minPsnr = 40
 
 // ffmpeg's Bink audio decoder emits about 0.03 s more than the packets declare.
@@ -1002,6 +1045,95 @@ var (
 	psnrPattern = regexp.MustCompile(`PSNR [^\n\r]*average:(\S+) min:(\S+)`)
 )
 
+// movieFacts are the values of a source movie that the converted movie must keep. channels is 0 for a
+// movie without audio.
+type movieFacts struct {
+	width      int
+	height     int
+	frames     int
+	sampleRate int
+	channels   int
+	durationS  float64
+}
+
+// probeMovie runs ffprobe on a movie and counts its frames.
+func probeMovie(path string) kotor.ExecResult {
+	return kotor.Exec("ffprobe", []string{
+		"-v", "error", "-count_frames", "-of", "json", "-show_entries",
+		"stream=codec_type,codec_name,width,height,nb_read_frames,sample_rate,channels,duration",
+		path,
+	}, nil)
+}
+
+// movieStreams returns the first video and the first audio stream of ffprobe's output.
+func movieStreams(probe kotor.ExecResult) (*probeStream, *probeStream, string) {
+	var parsed struct {
+		Streams []probeStream `json:"streams"`
+	}
+	if probe.Status != 0 {
+		return nil, nil, "ffprobe: " + kotor.FirstLine(probe.Stderr)
+	}
+	if json.Unmarshal(probe.Stdout, &parsed) != nil {
+		return nil, nil, "ffprobe output is not JSON"
+	}
+
+	var video, sound *probeStream
+	for i := range parsed.Streams {
+		stream := &parsed.Streams[i]
+		if stream.CodecType == "video" && video == nil {
+			video = stream
+		}
+		if stream.CodecType == "audio" && sound == nil {
+			sound = stream
+		}
+	}
+	return video, sound, ""
+}
+
+// sourceMovie returns the facts of a source movie. A Bink movie gives them in its header, and its audio
+// duration follows from the decoded sample bytes that the header declares. For an XMV movie, ffprobe reads
+// them from the source, counting the decoded video frames, and the audio duration follows from the samples
+// that ffmpeg decodes.
+func sourceMovie(path string) (movieFacts, string) {
+	if kotor.Build.Movie == ".bik" {
+		movie := kotor.ParseBink(kotor.ReadFile(path))
+		if len(movie.Errors) > 0 {
+			return movieFacts{}, "source does not parse"
+		}
+
+		header := movie.Header
+		facts := movieFacts{width: header.Width, height: header.Height, frames: header.Frames}
+		if header.AudioTracks > 0 {
+			track := header.Tracks[0]
+			facts.channels = 1
+			if track.Flags&kotor.BinkTrackStereo != 0 {
+				facts.channels = 2
+			}
+			facts.sampleRate = track.SampleRate
+			facts.durationS = float64(movie.DecodedBytes[0]) / float64(binkBytesPerSample*facts.channels*track.SampleRate)
+		}
+		return facts, ""
+	}
+
+	video, sound, problem := movieStreams(probeMovie(path))
+	if problem != "" || video == nil || video.Width == nil || video.Height == nil {
+		return movieFacts{}, "source does not probe " + problem
+	}
+	facts := movieFacts{width: *video.Width, height: *video.Height, frames: int(optionalNumber(video.NbReadFrames))}
+	if sound != nil && sound.Channels != nil {
+		// ffprobe estimates the stream duration of an XMV movie from its bit rate, so the audio is decoded and
+		// its samples are counted instead.
+		facts.sampleRate = int(optionalNumber(sound.SampleRate))
+		facts.channels = *sound.Channels
+		decoded := kotor.Exec("ffmpeg", []string{"-v", "quiet", "-i", path, "-map", "0:a", "-f", "s16le", "-"}, nil)
+		if facts.sampleRate == 0 || facts.channels == 0 || len(decoded.Stdout) == 0 {
+			return movieFacts{}, "source audio does not decode"
+		}
+		facts.durationS = float64(len(decoded.Stdout)) / float64(sampleBytes*facts.channels*facts.sampleRate)
+	}
+	return facts, ""
+}
+
 func movies(summary *kotor.Summary) {
 	if !ffprobe || !kotor.Has("ffmpeg") {
 		summary.Note("ffmpeg or ffprobe missing: movies UNVERIFIED")
@@ -1012,28 +1144,23 @@ func movies(summary *kotor.Summary) {
 	src := filepath.Join(kotor.Game, "movies")
 	dir := filepath.Join(kotor.Extract, "movies")
 	var jobs []job
-	for _, file := range kotor.ListFiles(src, ".bik", false) {
+	for _, file := range kotor.ListFiles(src, kotor.Build.Movie, false) {
 		jobs = append(jobs, func() []string {
 			name := strings.TrimSuffix(file, filepath.Ext(file))
 			inFile := filepath.Join(src, file)
 			outFile := filepath.Join(dir, name+".mp4")
-			movie := kotor.ParseBink(kotor.ReadFile(inFile))
-			if len(movie.Errors) > 0 {
-				return line(name + ".mp4 FAIL: source does not parse")
+			want, problem := sourceMovie(inFile)
+			if problem != "" {
+				return line(name + ".mp4 FAIL: " + problem)
 			}
 			if !exists(outFile) {
 				return line(name + ".mp4 FAIL: output missing")
 			}
 
-			header := movie.Header
 			var probe, compare kotor.ExecResult
 			var group sync.WaitGroup
 			group.Go(func() {
-				probe = kotor.Exec("ffprobe", []string{
-					"-v", "error", "-count_frames", "-of", "json", "-show_entries",
-					"stream=codec_type,codec_name,width,height,nb_read_frames,sample_rate,channels,duration",
-					outFile,
-				}, nil)
+				probe = probeMovie(outFile)
 			})
 			group.Go(func() {
 				compare = kotor.Exec("ffmpeg", []string{
@@ -1043,60 +1170,42 @@ func movies(summary *kotor.Summary) {
 			})
 			group.Wait()
 
-			var parsed struct {
-				Streams []probeStream `json:"streams"`
-			}
-			if probe.Status == 0 && json.Unmarshal(probe.Stdout, &parsed) != nil {
-				return line(name + ".mp4 FAIL: ffprobe output is not JSON")
-			}
-			var video, sound *probeStream
-			for i := range parsed.Streams {
-				stream := &parsed.Streams[i]
-				if stream.CodecType == "video" && video == nil {
-					video = stream
-				}
-				if stream.CodecType == "audio" && sound == nil {
-					sound = stream
-				}
+			video, sound, problem := movieStreams(probe)
+			if problem != "" {
+				return line(name + ".mp4 FAIL: " + problem)
 			}
 
 			var errs []string
 			if video == nil || video.CodecName != "h264" {
 				errs = append(errs, "no H.264 video stream")
 			} else {
-				if video.Width == nil || video.Height == nil || *video.Width != header.Width || *video.Height != header.Height {
-					errs = append(errs, fmt.Sprintf("size %sx%s, Bink %dx%d",
-						optional(video.Width), optional(video.Height), header.Width, header.Height))
+				if video.Width == nil || video.Height == nil || *video.Width != want.width || *video.Height != want.height {
+					errs = append(errs, fmt.Sprintf("size %sx%s, source %dx%d",
+						optional(video.Width), optional(video.Height), want.width, want.height))
 				}
-				if optionalNumber(video.NbReadFrames) != float64(header.Frames) {
-					errs = append(errs, fmt.Sprintf("%s frames, Bink %d", optional(video.NbReadFrames), header.Frames))
+				if optionalNumber(video.NbReadFrames) != float64(want.frames) {
+					errs = append(errs, fmt.Sprintf("%s frames, source %d", optional(video.NbReadFrames), want.frames))
 				}
 			}
 
 			audioInfo := "no audio"
-			if header.AudioTracks == 0 && sound != nil {
+			if want.channels == 0 && sound != nil {
 				errs = append(errs, "unexpected audio stream")
 			}
-			if header.AudioTracks > 0 {
-				track := header.Tracks[0]
-				channels := 1
-				if track.Flags&kotor.BinkTrackStereo != 0 {
-					channels = 2
-				}
-				durationS := float64(movie.DecodedBytes[0]) / float64(binkBytesPerSample*channels*track.SampleRate)
+			if want.channels > 0 {
 				if sound == nil || sound.CodecName != "aac" {
 					errs = append(errs, "no AAC audio stream")
 				} else {
-					if optionalNumber(sound.SampleRate) != float64(track.SampleRate) {
-						errs = append(errs, fmt.Sprintf("%s Hz, Bink %d Hz", optional(sound.SampleRate), track.SampleRate))
+					if optionalNumber(sound.SampleRate) != float64(want.sampleRate) {
+						errs = append(errs, fmt.Sprintf("%s Hz, source %d Hz", optional(sound.SampleRate), want.sampleRate))
 					}
-					if sound.Channels == nil || *sound.Channels != channels {
-						errs = append(errs, fmt.Sprintf("%s channels, Bink %d", optional(sound.Channels), channels))
+					if sound.Channels == nil || *sound.Channels != want.channels {
+						errs = append(errs, fmt.Sprintf("%s channels, source %d", optional(sound.Channels), want.channels))
 					}
-					if math.Abs(optionalNumber(sound.Duration)-durationS) > audioDurationToleranceS {
-						errs = append(errs, fmt.Sprintf("audio %s s, Bink %.3f s", optional(sound.Duration), durationS))
+					if math.Abs(optionalNumber(sound.Duration)-want.durationS) > audioDurationToleranceS {
+						errs = append(errs, fmt.Sprintf("audio %s s, source %.3f s", optional(sound.Duration), want.durationS))
 					}
-					audioInfo = fmt.Sprintf("%dHz %dch %.3fs", track.SampleRate, channels, durationS)
+					audioInfo = fmt.Sprintf("%dHz %dch %.3fs", want.sampleRate, want.channels, want.durationS)
 				}
 			}
 
@@ -1114,13 +1223,13 @@ func movies(summary *kotor.Summary) {
 			}
 
 			return line(fmt.Sprintf("%s.mp4 %dx%d %d frames %s PSNR avg %s min %s %s",
-				name, header.Width, header.Height, header.Frames, audioInfo, average, minimum, kotor.Verdict(errs...)))
+				name, want.width, want.height, want.frames, audioInfo, average, minimum, kotor.Verdict(errs...)))
 		})
 	}
 	summary.Tally("ffprobe_movies", pool(jobs))
 }
 
-// GUI: extract/data/gui/*.json. The GUI layouts of patch.erf are checked by the patch stage.
+// GUI: extract/<data>/gui/*.json. The GUI layouts of patch.erf are checked by the erfs stage.
 func gui(summary *kotor.Summary) {
 	if !kotor.Has("jq") {
 		summary.Note("jq missing: gui UNVERIFIED")
@@ -1129,7 +1238,7 @@ func gui(summary *kotor.Summary) {
 
 	log("gui...")
 	var jobs []job
-	dir := "data/gui"
+	dir := kotor.Build.Data + "/gui"
 	for _, file := range kotor.ListFiles(filepath.Join(kotor.Extract, dir), ".json", false) {
 		jobs = append(jobs, func() []string {
 			result := kotor.Exec("jq", []string{"empty", filepath.Join(kotor.Extract, dir, file)}, nil)
@@ -1142,17 +1251,17 @@ func gui(summary *kotor.Summary) {
 	summary.Tally("jq_gui", pool(jobs))
 }
 
-// Lips: extract/lips/<module>/*.csv. Go's encoding/csv reader must read each file, and its keyframes, packed
+// Lips: extract/<lips>/<module>/*.csv, where <lips> is kotor.Build.Lips. Go's encoding/csv reader must read each file, and its keyframes, packed
 // again as f32 and u8, must equal the keyframe bytes of the source LIP resource. This reader shares no
 // code with the converter's writer, but it is not an external tool.
 func lips(summary *kotor.Summary) {
 	log("lips...")
-	src := filepath.Join(kotor.Game, "lips")
+	src := filepath.Join(kotor.Game, kotor.Build.Lips)
 	var report []string
 	for _, archive := range kotor.ListFiles(src, ".mod", false) {
 		module := strings.TrimSuffix(archive, filepath.Ext(archive))
 		for _, entry := range kotor.ReadErf(filepath.Join(src, archive)) {
-			label := filepath.Join("lips", module, entry.Resref+".csv")
+			label := filepath.Join(kotor.Build.Lips, module, entry.Resref+".csv")
 			report = append(report, label+" "+kotor.Verdict(checkLipCsv(filepath.Join(kotor.Extract, label), entry.Data())))
 		}
 	}
@@ -1248,7 +1357,8 @@ var checkTools = []struct{ kind, program string }{
 // to the folder of the report.
 //
 //   - A WAV file must be read by ffprobe as 16-bit PCM, and its samples must match the source (see
-//     compareSamples).
+//     compareSamples). For an Xbox ADPCM source, ffmpeg's extra sample of each block is dropped first (see
+//     dropExtraSamples).
 //   - A 2DA CSV file, read with Go's encoding/csv reader, must build again into the source table.
 //   - A script listing must assemble to the source script.
 //   - The string numbers of an SSF JSON file, read with jq, must build again into the source sound set.
@@ -1262,6 +1372,8 @@ var checkTools = []struct{ kind, program string }{
 //   - A texture PNG, decoded by ImageMagick, must equal the decoded TPC texture, and pngcheck must accept it.
 //     Its TXI file, written when the TPC trailer holds text, must equal the trailer without trailing NUL
 //     bytes.
+//   - A walkmesh is checked as addWalkmeshChecks describes.
+//   - A TGA image PNG must equal ImageMagick's decoding of the source TGA (see pngCheck).
 //   - A GUI layout JSON file, which has no resource extension in its name, must parse with jq.
 //   - Every other JSON file must parse with jq.
 func addResourceChecks(jobs map[string][]job, label, path, ext string, source []byte) {
@@ -1276,6 +1388,29 @@ func addResourceChecks(jobs map[string][]job, label, path, ext string, source []
 		addModelChecks(jobs, label, path, source, nil)
 
 	case "mdx":
+
+	case "wok", "dwk", "pwk":
+		addWalkmeshChecks(jobs, label+"."+ext, path+"."+ext, source)
+
+	case "tga":
+		add("imagemagick", ".png", func(path string) string {
+			decoded := magickDecode("tga", source)
+			if decoded.err != "" {
+				return "source TGA: " + decoded.err
+			}
+			width, height, _ := strings.Cut(decoded.size, " ")
+			if _, failure, failed := strings.Cut(pngCheck("", path, width, height, decoded.rgba)[0], "FAIL: "); failed {
+				return failure
+			}
+			return ""
+		})
+		add("pngcheck", ".png", func(path string) string {
+			result := kotor.Exec("pngcheck", []string{path}, nil)
+			if result.Status != 0 || !strings.HasPrefix(string(result.Stdout), "OK: ") {
+				return "pngcheck: " + kotor.FirstLine(string(result.Stdout))
+			}
+			return ""
+		})
 
 	case "wav":
 		add("ffprobe", ".wav", func(path string) string {
@@ -1297,6 +1432,9 @@ func addResourceChecks(jobs map[string][]job, label, path, ext string, source []
 			got, otherProblem := ffmpegSamples(converted)
 			if problem != "" || otherProblem != "" {
 				return problem + otherProblem
+			}
+			if wavFormatTag(source) == wavFormatXboxAdpcm {
+				want = dropExtraSamples(want, int(binary.LittleEndian.Uint16(source[wavChannelsOffset:])))
 			}
 			return compareSamples(want, got, isImaAdpcm(source))
 		})
@@ -1340,8 +1478,8 @@ func addResourceChecks(jobs map[string][]job, label, path, ext string, source []
 			return ""
 		})
 
-	case "tpc":
-		texture := kotor.ParseTpc(source)
+	case "tpc", "txb":
+		texture := kotor.ParseTpc(source, ext == "txb")
 		add("imagemagick", ".png", func(path string) string {
 			image := kotor.DecodeTpc(source, texture)
 			if image == nil {
@@ -1415,18 +1553,48 @@ func ffmpegSamples(wav []byte) ([]byte, string) {
 	return result.Stdout, ""
 }
 
-// WAV header offsets of the first chunk id and of the format tag, when the fmt chunk comes first, and the
-// IMA ADPCM format tag.
+// WAV header offsets of the first chunk id, of the format tag and of the channel count, when the fmt chunk
+// comes first, and the IMA ADPCM and Xbox ADPCM format tags.
 const (
 	wavFirstChunkOffset = 12
 	wavFormatTagOffset  = 20
+	wavChannelsOffset   = 22
 	wavFormatImaAdpcm   = 0x11
+	wavFormatXboxAdpcm  = 0x69
 )
 
+// wavFormatTag returns the format tag of a WAV file whose fmt chunk comes first, or 0.
+func wavFormatTag(wav []byte) int {
+	if len(wav) < wavChannelsOffset+2 || string(wav[wavFirstChunkOffset:wavFirstChunkOffset+4]) != "fmt " {
+		return 0
+	}
+	return int(binary.LittleEndian.Uint16(wav[wavFormatTagOffset:]))
+}
+
 func isImaAdpcm(wav []byte) bool {
-	return len(wav) > wavFormatTagOffset+2 &&
-		string(wav[wavFirstChunkOffset:wavFirstChunkOffset+4]) == "fmt " &&
-		binary.LittleEndian.Uint16(wav[wavFormatTagOffset:]) == wavFormatImaAdpcm
+	tag := wavFormatTag(wav)
+	return tag == wavFormatImaAdpcm || tag == wavFormatXboxAdpcm
+}
+
+// Xbox ADPCM blocks yield 64 samples per channel, but ffmpeg decodes them as IMA ADPCM blocks of 65 samples,
+// the 65th from the last nibble, which the Xbox format drops.
+const (
+	xboxBlockSamples   = 64
+	ffmpegBlockSamples = xboxBlockSamples + 1
+	sampleBytes        = 2
+)
+
+// dropExtraSamples removes ffmpeg's 65th sample of each block from interleaved 16-bit samples of an Xbox
+// ADPCM file.
+func dropExtraSamples(samples []byte, channels int) []byte {
+	frame := sampleBytes * channels
+	var kept []byte
+	for i := 0; i+frame <= len(samples); i += frame {
+		if (i/frame)%ffmpegBlockSamples != xboxBlockSamples {
+			kept = append(kept, samples[i:i+frame]...)
+		}
+	}
+	return kept
 }
 
 // adpcmToleranceSamples is the largest difference allowed between a sample decoded by kotor.DecodeAdpcm
@@ -1478,24 +1646,44 @@ func runResourceChecks(summary *kotor.Summary, stage string, jobs map[string][]j
 	}
 }
 
-// Rims: extract/rims/<archive>/ against rims/<archive>.rim. Every resource is checked as addResourceChecks
-// describes.
+// Rims: extract/<rims>/<archive>/ against <rims>/<archive>.rim, where <rims> is kotor.Build.Rims. Every
+// resource is checked as addResourceChecks describes. A model is checked with the MDX data of the same name
+// in the archive whose name adds "dx", or else in globaldx.rim, as extract pairs them.
 func rims(summary *kotor.Summary) {
 	log("rims...")
-	src := filepath.Join(kotor.Game, "rims")
-	out := filepath.Join(kotor.Extract, "rims")
+	src := filepath.Join(kotor.Game, kotor.Build.Rims)
+	out := filepath.Join(kotor.Extract, kotor.Build.Rims)
 	jobs := map[string][]job{}
 	var archiveReport []string
+	archives := map[string]*kotor.Rim{}
 	for _, archive := range kotor.ListFiles(src, ".rim", false) {
-		name := strings.TrimSuffix(archive, filepath.Ext(archive))
 		rim, problem := kotor.ReadRim(kotor.ReadFile(filepath.Join(src, archive)))
 		if problem != "" {
 			archiveReport = append(archiveReport, archive+" FAIL: "+problem)
 			continue
 		}
+		archives[strings.TrimSuffix(archive, filepath.Ext(archive))] = rim
+	}
 
-		for _, entry := range rim.Entries {
+	vertexData := func(archive, resref string) []byte {
+		for _, partner := range []string{archive + "dx", "globaldx"} {
+			if rim, ok := archives[partner]; ok {
+				for _, entry := range rim.Entries {
+					if entry.Ext == "mdx" && entry.Resref == resref {
+						return entry.Data
+					}
+				}
+			}
+		}
+		return nil
+	}
+	for _, name := range slices.Sorted(maps.Keys(archives)) {
+		for _, entry := range archives[name].Entries {
 			label := filepath.Join(name, entry.Resref)
+			if entry.Ext == "mdl" {
+				addModelChecks(jobs, label, filepath.Join(out, label), entry.Data, vertexData(name, entry.Resref))
+				continue
+			}
 			addResourceChecks(jobs, label, filepath.Join(out, label), entry.Ext, entry.Data)
 		}
 	}
@@ -1506,27 +1694,41 @@ func rims(summary *kotor.Summary) {
 	runResourceChecks(summary, "rims", jobs)
 }
 
-// Patch: extract/patch/ against patch.erf. Every resource is checked as addResourceChecks describes.
-func patch(summary *kotor.Summary) {
-	log("patch...")
-	dir := filepath.Join(kotor.Extract, "patch")
-	jobs := map[string][]job{}
-	for _, entry := range kotor.ReadErf(filepath.Join(kotor.Game, "patch.erf")) {
-		addResourceChecks(jobs, entry.Resref, filepath.Join(dir, entry.Resref), entry.Ext, entry.Data())
+// Erfs: extract/<name>/ against <name>.erf for each archive in kotor.Build.Erfs. Every resource is checked
+// as addResourceChecks describes, and each model with the MDX data of the same name in the archive.
+func erfs(summary *kotor.Summary) {
+	for _, name := range kotor.Build.Erfs {
+		log(name + "...")
+		dir := filepath.Join(kotor.Extract, name)
+		jobs := map[string][]job{}
+		entries := kotor.ReadErf(filepath.Join(kotor.Game, name+".erf"))
+		mdx := map[string][]byte{}
+		for _, entry := range entries {
+			if entry.Ext == "mdx" {
+				mdx[entry.Resref] = entry.Data()
+			}
+		}
+		for _, entry := range entries {
+			if entry.Ext == "mdl" {
+				addModelChecks(jobs, entry.Resref, filepath.Join(dir, entry.Resref), entry.Data(), mdx[entry.Resref])
+				continue
+			}
+			addResourceChecks(jobs, entry.Resref, filepath.Join(dir, entry.Resref), entry.Ext, entry.Data())
+		}
+		runResourceChecks(summary, name, jobs)
 	}
-	runResourceChecks(summary, "patch", jobs)
 }
 
-// Bifs: extract/data/<archive>/ against data/<archive>.bif for each archive in kotor.ResourceBifs. Each
-// resource is checked as addResourceChecks describes.
+// Bifs: extract/<data>/<archive>/ against <data>/<archive>.bif for each archive in kotor.Build.ResourceBifs,
+// where <data> is kotor.Build.Data. Each resource is checked as addResourceChecks describes.
 func bifs(summary *kotor.Summary) {
 	log("bifs...")
 	key := kotor.ReadKey()
 	jobs := map[string][]job{}
-	for _, name := range kotor.ResourceBifs {
-		for _, resource := range kotor.BifResources("data/"+name+".bif", key) {
+	for _, name := range kotor.Build.ResourceBifs {
+		for _, resource := range kotor.BifResources(kotor.BifPath(name), key) {
 			label := filepath.Join(name, resource.Resref)
-			addResourceChecks(jobs, label, filepath.Join(kotor.Extract, "data", label), resource.Ext, resource.Data)
+			addResourceChecks(jobs, label, filepath.Join(kotor.Extract, kotor.Build.Data, label), resource.Ext, resource.Data)
 		}
 	}
 	runResourceChecks(summary, "bifs", jobs)
@@ -1970,12 +2172,24 @@ func checkTlkJson(path string, source []byte) string {
 // Saves: extract/saves/<save>/ against saves/<save>/. Each GFF file and each resource of the archives is
 // checked as addResourceChecks describes. The screenshot PNG must equal ImageMagick's decoding of the
 // source TGA and pass pngcheck. The decoded variables of GLOBALVARS.res must build again into the source
-// fields (see checkGlobalsJson).
+// fields (see checkGlobalsJson). The characters of the Xbox folder localvault are BIC files, checked as
+// addResourceChecks describes.
 func saves(summary *kotor.Summary) {
 	log("saves...")
+	jobs := map[string][]job{}
+	vault := filepath.Join(kotor.Game, "localvault")
+	for _, file := range kotor.ListFiles(vault, ".bic", false) {
+		label := filepath.Join("localvault", strings.TrimSuffix(file, filepath.Ext(file)))
+		addResourceChecks(jobs, label, filepath.Join(kotor.Extract, label), "bic", kotor.ReadFile(filepath.Join(vault, file)))
+	}
+
 	src := filepath.Join(kotor.Game, "saves")
 	out := filepath.Join(kotor.Extract, "saves")
-	jobs := map[string][]job{}
+	if !exists(src) {
+		summary.Note("saves: no saves folder in this build")
+		runResourceChecks(summary, "saves", jobs)
+		return
+	}
 
 	// checkArchive adds the checks of the resources of an ERF archive whose folder is dir, relative to out.
 	var checkArchive func(dir string, data []byte)
@@ -2138,7 +2352,7 @@ var stages = []kotor.Stage{
 	{Name: "sounds", Run: func(summary *kotor.Summary) { streamAudio(summary, "sounds", "streamsounds") }},
 	{Name: "waves", Run: func(summary *kotor.Summary) { streamAudio(summary, "waves", "streamwaves") }},
 	{Name: "gui", Run: gui},
-	{Name: "patch", Run: patch},
+	{Name: "erfs", Run: erfs},
 	{Name: "lips", Run: lips},
 	{Name: "modules", Run: modules},
 	{Name: "rims", Run: rims},

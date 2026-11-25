@@ -1,6 +1,7 @@
 // Package kotor holds the readers and converters for the game's file formats, a minimal PNG encoder, the project
 // paths, and helpers that every command uses. The formats are the archives (KEY, BIF, ERF and RIM), GFF, TLK, 2DA,
-// SSF, LTR, NCS, TPC, TGA, MDL, BWM, LYT, VIS, LIP, the saved game variables, stream audio, IMA ADPCM and Bink.
+// SSF, LTR, NCS, TPC and its Xbox form TXB, TGA, MDL in its PC and Xbox forms, BWM, LYT, VIS, LIP, the saved game
+// variables, stream audio, IMA ADPCM, Xbox ADPCM and Bink. BuildLayout describes where each build keeps them.
 // README.md describes each layout.
 package kotor
 
@@ -51,6 +52,7 @@ const (
 	TypeTxi = 2022
 	TypeGui = 2047
 	TypeLip = 3004
+	TypeTxb = 3006
 	TypeTpc = 3007
 	TypeMdx = 3008
 )
@@ -77,6 +79,10 @@ var extensions = map[uint32]string{
 	// These types are named after their content: a RIFF WAVE file, the signatures "2DA V2.b" and
 	// "SSF V1.1", and NWScript source text, whose routine declarations nwscript.nss holds.
 	4: "wav", 2017: "2da", 2060: "ssf", TypeNss: "nss",
+
+	// The textures of the Xbox build are named after the resource type table of default.xbe, which pairs
+	// 3006 with "txb" (Xbox code, 0x136BC7).
+	TypeTxb: "txb",
 
 	// The room visibility lists are named after the extension that swkotor.exe appends to an area name.
 	3001: "vis",
@@ -105,35 +111,102 @@ func Ext(resourceType uint32) string {
 	return ext
 }
 
-// TexturePacks lists the texture packs that are converted. tpb and tpc hold the textures of tpa at lower
-// resolution.
-var TexturePacks = []string{"swpc_tex_tpa", "swpc_tex_tpb", "swpc_tex_tpc", "swpc_tex_gui"}
-
-// MaterialPacks lists the texture packs that model materials refer to, in priority order.
-var MaterialPacks = []string{"swpc_tex_tpa", "swpc_tex_gui"}
-
 // TgaGroup is a group of BIF archives that hold TGA images, with the output folder name of the group.
 type TgaGroup struct {
 	Name    string
 	Pattern *regexp.Regexp
 }
 
-// ModelBifs lists the BIF archives that hold models. Each archive becomes the folder extract/data/<name>.
-var ModelBifs = []string{"models", "items", "party", "player"}
+// BuildLayout describes how the dump of one build is laid out. The PC and Xbox builds keep the same kinds of
+// resources in differently named folders and archives.
+type BuildLayout struct {
+	// Xbox is set for the Xbox build, whose models and textures have Xbox forms.
+	Xbox bool
 
-// ResourceBifs lists the BIF archives whose resources are converted one by one, without models: tables,
-// sounds, scripts, templates, the journal and the room layouts. Each archive becomes the folder
-// extract/data/<name>.
-var ResourceBifs = []string{"2da", "sounds", "scripts", "templates", "_newbif", "layouts"}
+	// Data, Rims and Lips are the folders of the BIF archives, of the global and area RIM archives and of
+	// the lip sync archives.
+	Data string
+	Rims string
+	Lips string
 
-var TgaGroups = []TgaGroup{
-	{"lightmaps", regexp.MustCompile(`^data/lightmaps\d*\.bif$`)},
-	{"textures", regexp.MustCompile(`^data/textures\.bif$`)},
-	{"legacy", regexp.MustCompile(`^data/legacy\.bif$`)},
+	// Movie is the extension of the movie files.
+	Movie string
+
+	// TexturePacks lists the ERF texture packs that are converted, and MaterialPacks those that model
+	// materials refer to, in priority order. Only the PC build has texture packs.
+	TexturePacks  []string
+	MaterialPacks []string
+
+	// ModelBifs lists the BIF archives that hold models. Each archive becomes the folder
+	// extract/<platform>/<Data>/<name>.
+	ModelBifs []string
+
+	// ResourceBifs lists the BIF archives whose resources are converted one by one, without models. Each
+	// archive becomes the folder extract/<platform>/<Data>/<name>.
+	ResourceBifs []string
+
+	// Erfs lists the ERF archives in the root folder of the dump, without the extension .erf. Each archive
+	// becomes the folder extract/<platform>/<name>.
+	Erfs []string
+
+	// TgaGroups lists the groups of BIF archives that the tga stage converts.
+	TgaGroups []TgaGroup
+
+	// TableArchive is the archive that holds the 2DA tables: a BIF archive named in the KEY file, or a RIM
+	// archive in the folder Rims.
+	TableArchive string
+}
+
+// builds holds the layout of each build in Platforms.
+//
+// PC: tpb and tpc hold the textures of tpa at lower resolution. ResourceBifs holds the tables, sounds,
+// scripts, templates, the journal and the room layouts.
+//
+// Xbox: the textures are TXB resources in the BIF archives textures, temptextures and the model archives,
+// in the "dx" RIM archives and in players.erf. players.erf also holds the party models and conversations,
+// which the PC build keeps in party.bif and templates.bif. The tables are in rimsxbox/global.rim, and the lightmaps, room layouts and
+// visibility lists of each area are in its RIM archives in rimsxbox.
+var builds = map[string]BuildLayout{
+	"pc": {
+		Data:          "data",
+		Rims:          "rims",
+		Lips:          "lips",
+		Movie:         ".bik",
+		TexturePacks:  []string{"swpc_tex_tpa", "swpc_tex_tpb", "swpc_tex_tpc", "swpc_tex_gui"},
+		MaterialPacks: []string{"swpc_tex_tpa", "swpc_tex_gui"},
+		ModelBifs:     []string{"models", "items", "party", "player"},
+		ResourceBifs:  []string{"2da", "sounds", "scripts", "templates", "_newbif", "layouts"},
+		TgaGroups: []TgaGroup{
+			{"lightmaps", regexp.MustCompile(`^data/lightmaps\d*\.bif$`)},
+			{"textures", regexp.MustCompile(`^data/textures\.bif$`)},
+			{"legacy", regexp.MustCompile(`^data/legacy\.bif$`)},
+		},
+		Erfs:         []string{"patch"},
+		TableArchive: "data/2da.bif",
+	},
+	"xbox": {
+		Xbox:         true,
+		Data:         "dataxbox",
+		Rims:         "rimsxbox",
+		Lips:         "Lips",
+		Movie:        ".xmv",
+		ModelBifs:    []string{"models", "models2", "items", "player"},
+		ResourceBifs: []string{"textures", "temptextures", "sounds", "scripts", "templates", "_newbif"},
+		Erfs:         []string{"players"},
+		TableArchive: "global.rim",
+	},
+}
+
+// Build is the layout of the build being read. RunStages sets it from the -platform flag.
+var Build = builds[DefaultPlatform]
+
+// BifPath returns the name of the BIF archive name in the KEY file of the build being read.
+func BifPath(name string) string {
+	return Build.Data + "/" + name + ".bif"
 }
 
 // reportOrder is the order in which RunStages prints the stage summaries.
-var reportOrder = []string{"models", "textures", "tga", "music", "sounds", "waves", "movies", "gui", "patch", "lips", "modules", "rims", "bifs", "tlk", "saves"}
+var reportOrder = []string{"models", "textures", "tga", "music", "sounds", "waves", "movies", "gui", "erfs", "lips", "modules", "rims", "bifs", "tlk", "saves"}
 
 // A resource reference (resref) is a resource name of at most 16 bytes, padded with NUL bytes.
 const ResrefLength = 16
@@ -684,6 +757,7 @@ func RunStages(stages []Stage, args []string) {
 	}
 
 	Game = filepath.Join(Root, "dump", *platform)
+	Build = builds[*platform]
 	Extract = filepath.Join(Root, "extract", *platform)
 	Reports = filepath.Join(Root, "temp", "reports", *platform)
 
