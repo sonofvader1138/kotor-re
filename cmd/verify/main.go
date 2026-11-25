@@ -794,7 +794,8 @@ func checkModelBin(path string, mdl []byte) string {
 }
 
 // addModelChecks adds the checks of one converted model to jobs, when the model was written: the glTF checks
-// of addGltfChecks, the mesh header extras and the binary buffer. path is the converted file without
+// of addGltfChecks, the mesh header extras, the binary buffer, the supermodel links (see
+// checkSupermodelLinks) and, for a supermodel, its shared animation file. path is the converted file without
 // extensions, and label is the same path relative to the report folder.
 func addModelChecks(jobs map[string][]job, label, path string, mdl, mdx []byte) {
 	if !exists(path + ".gltf") {
@@ -813,6 +814,18 @@ func addModelChecks(jobs map[string][]job, label, path string, mdl, mdx []byte) 
 	jobs["gltf"] = append(jobs["gltf"], func() []string {
 		return line(label + ".bin " + kotor.Verdict(checkModelBin(path, mdl)))
 	})
+	jobs["supermodel"] = append(jobs["supermodel"], func() []string {
+		return line(label + ".gltf " + kotor.Verdict(checkSupermodelLinks(path, mdl)))
+	})
+
+	// The shared animation file of a supermodel holds the same node tree and animations without meshes.
+	shared := path + ".anim"
+	if exists(shared + ".gltf") {
+		addGltfChecks(jobs, label+".anim.gltf", shared+".gltf")
+		jobs["animation"] = append(jobs["animation"], func() []string {
+			return line(label + ".anim.gltf " + kotor.Verdict(checkAnimations(shared, mdl)))
+		})
+	}
 }
 
 // Textures: extract/TexturePacks/<pack>/*.png against the TPC textures in TexturePacks/<pack>.erf.
@@ -1227,6 +1240,7 @@ var checkTools = []struct{ kind, program string }{
 	{"assimp", "assimp"}, {"validator", "gltf_validator"}, {"gltf", "jq"}, {"ffprobe", "ffprobe"}, {"csv", ""},
 	{"ncs", ""}, {"jq", "jq"}, {"iconv", "iconv"}, {"copy", ""}, {"imagemagick", "convert"},
 	{"pngcheck", "pngcheck"}, {"globals", "jq"}, {"animation", "jq"}, {"skin", "jq"},
+	{"supermodel", "jq"},
 }
 
 // addResourceChecks adds the check of one converted resource to jobs, keyed by the kind of check. path is

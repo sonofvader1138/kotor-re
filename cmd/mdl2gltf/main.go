@@ -23,7 +23,7 @@ func main() {
 	vertices, _ := os.ReadFile(os.Args[2])
 	binPath := strings.TrimSuffix(os.Args[3], filepath.Ext(os.Args[3])) + ".bin"
 
-	result := kotor.ConvertMdl(model, vertices, filepath.Base(os.Args[1]), filepath.Base(binPath), nil)
+	result := kotor.ConvertMdl(model, vertices, filepath.Base(os.Args[1]), filepath.Base(binPath), nil, kotor.MdlOptions{})
 	kotor.WriteFile(os.Args[3], result.Gltf)
 	kotor.WriteFile(binPath, result.Bin)
 	fmt.Println(kotor.ReportMdl(os.Args[1], result))

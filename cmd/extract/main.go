@@ -71,10 +71,73 @@ type modelCounts struct {
 	missing         map[string]bool
 }
 
+// supermodelModel is a model of the BIF archives that other models can name as their supermodel.
+type supermodelModel struct {
+	tree    kotor.MdlTree
+	archive string
+	resref  string
+}
+
+// supermodelIndex holds the models of the BIF archives in kotor.ModelBifs by lowercase resref, and the
+// resrefs of those that provide animations to another model of these archives. Each of the latter gets a
+// shared animation file. Supermodel names are resolved only against these archives.
+type supermodelIndex struct {
+	models map[string]supermodelModel
+	shared map[string]bool
+}
+
+// supermodels reads the index once, because the stages run at the same time.
+var supermodels = sync.OnceValue(func() supermodelIndex {
+	key := kotor.ReadKey()
+	index := supermodelIndex{models: map[string]supermodelModel{}, shared: map[string]bool{}}
+	for _, name := range kotor.ModelBifs {
+		for _, resource := range kotor.BifResources("data/"+name+".bif", key) {
+			if resource.Ext != "mdl" {
+				continue
+			}
+
+			if tree, ok := kotor.ReadMdlTree(resource.Data); ok {
+				index.models[strings.ToLower(resource.Resref)] = supermodelModel{tree: tree, archive: name, resref: resource.Resref}
+			}
+		}
+	}
+
+	for _, model := range index.models {
+		for _, link := range kotor.SupermodelLinks(model.tree, index.lookup(kotor.Extract)) {
+			index.shared[strings.ToLower(link.Model)] = true
+		}
+	}
+	return index
+})
+
+// sharedAnimationSuffix ends the name of the shared animation file of a supermodel, <resref>.anim.gltf, and of
+// its buffer, <resref>.anim.bin.
+const sharedAnimationSuffix = ".anim"
+
+// lookup returns the lookup function of kotor.SupermodelLinks for a glTF file in the folder out. The URI of
+// a shared animation file is relative to out.
+func (index supermodelIndex) lookup(out string) func(string) (kotor.MdlTree, string, bool) {
+	return func(name string) (kotor.MdlTree, string, bool) {
+		model, known := index.models[strings.ToLower(name)]
+		if !known {
+			return kotor.MdlTree{}, "", false
+		}
+
+		target := filepath.Join(kotor.Extract, "data", model.archive, model.resref+sharedAnimationSuffix+".gltf")
+		relative, err := filepath.Rel(out, target)
+		if err != nil {
+			kotor.Fatal(err.Error())
+		}
+		return model.tree, filepath.ToSlash(relative), true
+	}
+}
+
 // writeModel converts one MDL resource and its MDX data to <resref>.gltf and <resref>.bin in out. The glTF
-// file refers to each texture by the path of its PNG file relative to out. It returns its report line and the
-// names of the files it wrote. A model without rendered geometry and without animations is counted and not
-// written.
+// file refers to each texture by the path of its PNG file relative to out, and its scene extras list the
+// animations that it inherits from its supermodel chain (see kotor.SupermodelLinks). It returns its report
+// line and the names of the files it wrote. A model without rendered geometry and without animations of its
+// own is counted and not written, even when it inherits animations. When the model provides animations to another model, its node
+// tree and animations are also written to the shared animation file <resref>.anim.gltf and .anim.bin.
 func writeModel(out, label, resref string, mdl, mdx []byte, texturePath map[string]string,
 	counts *modelCounts) (string, []string) {
 	imageUri := func(texture string) string {
@@ -90,7 +153,13 @@ func writeModel(out, label, resref string, mdl, mdx []byte, texturePath map[stri
 		return filepath.ToSlash(relative)
 	}
 
-	model := kotor.ConvertMdl(mdl, mdx, resref, resref+".bin", imageUri)
+	index := supermodels()
+	var links []kotor.MdlSupermodelLink
+	if tree, ok := kotor.ReadMdlTree(mdl); ok {
+		links = kotor.SupermodelLinks(tree, index.lookup(out))
+	}
+
+	model := kotor.ConvertMdl(mdl, mdx, resref, resref+".bin", imageUri, kotor.MdlOptions{Supermodels: links})
 	counts.hidden += model.Stats.Hidden
 	counts.normalsReplaced += model.Stats.NormalsReplaced
 	counts.normalsOmitted += model.Stats.NormalsOmitted
@@ -110,7 +179,22 @@ func writeModel(out, label, resref string, mdl, mdx []byte, texturePath map[stri
 
 	kotor.WriteFile(filepath.Join(out, resref+".gltf"), model.Gltf)
 	kotor.WriteFile(filepath.Join(out, resref+".bin"), model.Bin)
-	return kotor.ReportMdl(label, model), []string{resref + ".gltf", resref + ".bin"}
+	files := []string{resref + ".gltf", resref + ".bin"}
+
+	// Only the BIF stage writes shared animation files, into the folder that the URIs of the links name.
+	shared := resref + sharedAnimationSuffix
+	owner, known := index.models[strings.ToLower(resref)]
+	if known && index.shared[strings.ToLower(resref)] && filepath.Clean(out) == filepath.Join(kotor.Extract, "data", owner.archive) {
+		animations := kotor.ConvertMdl(mdl, mdx, shared, shared+".bin", nil, kotor.MdlOptions{AnimationsOnly: true})
+		if len(animations.Errors) > 0 {
+			return label + " FAIL: shared animation file: " + animations.Errors[0], files
+		}
+
+		kotor.WriteFile(filepath.Join(out, shared+".gltf"), animations.Gltf)
+		kotor.WriteFile(filepath.Join(out, shared+".bin"), animations.Bin)
+		files = append(files, shared+".gltf", shared+".bin")
+	}
+	return kotor.ReportMdl(label, model), files
 }
 
 func noteModels(summary *kotor.Summary, stage string, counts *modelCounts) {

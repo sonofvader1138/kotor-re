@@ -277,9 +277,18 @@ type MdlMesh struct {
 
 // MdlModel holds the decoded fields of the model header, which become the extras of the glTF scene.
 type MdlModel struct {
-	Classification int     `json:"classification"`
-	Supermodel     string  `json:"supermodel"`
-	AnimationScale float32 `json:"animation_scale"`
+	Classification       int                 `json:"classification"`
+	Supermodel           string              `json:"supermodel"`
+	AnimationScale       float32             `json:"animation_scale"`
+	SupermodelAnimations []MdlSupermodelLink `json:"supermodel_animations,omitempty"`
+}
+
+// MdlOptions changes what ConvertMdl writes. Supermodels lists the animations that the model inherits (see
+// SupermodelLinks). AnimationsOnly writes only the node tree and the animations, without meshes, for the
+// shared animation file of a supermodel.
+type MdlOptions struct {
+	Supermodels    []MdlSupermodelLink
+	AnimationsOnly bool
 }
 
 type MdlResult struct {
@@ -427,8 +436,8 @@ func (r *mdlReader) unclaimed() (int, int) {
 // known; it may be nil. Every node of the tree becomes a glTF node in depth-first order, with its position
 // and rotation relative to its parent. Meshes whose render byte is 0 get no geometry, because the game does
 // not appear to draw them, but their headers are decoded. The model's animations become glTF animations, and
-// its skinned meshes glTF skins.
-func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) string) MdlResult {
+// its skinned meshes glTF skins. options adds inherited animations or leaves out the meshes.
+func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) string, options MdlOptions) MdlResult {
 	reader := newMdlReader(mdl[min(fileHeaderSize, len(mdl)):])
 	mdxReader := newMdlReader(mdx)
 	var stats MdlStats
@@ -470,9 +479,10 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 	doc := newGltf(label)
 	classification, _ := u8(0x50)
 	doc.Scenes[0].Extras = MdlModel{
-		Classification: classification,
-		Supermodel:     readString(0x88, modelNameLength),
-		AnimationScale: single(0x84),
+		Classification:       classification,
+		Supermodel:           readString(0x88, modelNameLength),
+		AnimationScale:       single(0x84),
+		SupermodelAnimations: options.Supermodels,
 	}
 	materials := map[string]int{}
 	textures := map[string]bool{}
@@ -1126,7 +1136,7 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 		if flags&nodeFlagReference != 0 {
 			extras.Reference = readReference(reader, classHeader)
 		}
-		if flags&nodeFlagMesh != 0 {
+		if flags&nodeFlagMesh != 0 && !options.AnimationsOnly {
 			doc.Nodes[index].Mesh = mesh(classHeader, name, flags, index, extras)
 		}
 		if extras.Controllers != nil || extras.Light != nil || extras.Emitter != nil || extras.Reference != nil || extras.Mesh != nil {
