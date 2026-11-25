@@ -619,7 +619,7 @@ func checkNodeExtras(path string, mdl []byte) string {
 				reader.expectFloat("emitter float", model.f32(header+field))
 			}
 			number("branch count", header+0x0c, 4)
-			reader.expectFloat("control point smoothing", model.f32(header+0x10))
+			number("control point smoothing", header+0x10, 4)
 			for _, field := range []int{0x14, 0x18, 0x1c} {
 				number("emitter grid or spawn", header+field, 4)
 			}

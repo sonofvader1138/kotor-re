@@ -2,6 +2,8 @@
 
 This document describes the game's file formats as determined from the files of the PC build in `dump/pc`. Each field lists the evidence for it and a confidence level. Fields that have not been verified are marked UNKNOWN.
 
+Some fields were also settled from the code of the Xbox executable `dump/xbox/default.xbe`. The code of the PC executable is encrypted, but the Xbox code is not, and both builds run the same engine on the same formats. Evidence of this kind is marked "Xbox code" and gives the address of the routine in the Xbox image, so that it can be checked again. Where a statement rests only on the Xbox code, the text says so. Where the PC files could test it, the result is given as well. The section "Xbox executable: default.xbe" describes the executable and the tool that prepares it for disassembly.
+
 All integers and floats are little-endian. Offsets are in hexadecimal and count from the start of the structure they belong to, unless a section states otherwise.
 
 ## Contents
@@ -129,6 +131,10 @@ All integers and floats are little-endian. Offsets are in hexadecimal and count 
   - [Save summary: savenfo.res](#save-summary-savenfores)
   - [Screenshot: Screen.tga](#screenshot-screentga)
   - [Conversion and verification](#conversion-and-verification-11)
+- [Xbox executable: default.xbe](#xbox-executable-defaultxbe)
+  - [XBE header](#xbe-header)
+  - [Sections](#sections)
+  - [Disassembly](#disassembly)
 
 # Archives: KEY, BIF, ERF and RIM
 
@@ -147,9 +153,11 @@ The KEY file begins with a 64-byte header.
 | 0x0C   | u32     | Number of resources (25,836)           | Equals the total number of entries in all 26 archives.          | high       |
 | 0x10   | u32     | Offset of the BIF table (64)           | The table parses consistently from this offset.                 | high       |
 | 0x14   | u32     | Offset of the resource table (847)     | The table ends exactly at the end of the file.                  | high       |
-| 0x18   | u32     | Build year minus 1900 (103, i.e. 2003) | The ERF texture packs hold the same value (see the ERF header). | medium     |
-| 0x1C   | u32     | Build day of the year (309)            | The ERF texture packs hold the same value (see the ERF header). | medium     |
-| 0x20   | u8[32]  | Reserved                               | All bytes are zero.                                             | medium     |
+| 0x18   | u32     | Build year minus 1900 (103, i.e. 2003) | The ERF texture packs hold the same value (see the ERF header). The engine does not read it (Xbox code). | medium     |
+| 0x1C   | u32     | Build day of the year (309)            | The ERF texture packs hold the same value (see the ERF header). The engine does not read it (Xbox code). | medium     |
+| 0x20   | u8[32]  | Reserved                               | All bytes are zero. The engine does not read them (Xbox code).  | medium     |
+
+The engine's KEY loader (Xbox code, 0x14E100) reads only the first 24 bytes of the header. It requires the signature "KEY " and the version "V1  " and uses the two counts and the two table offsets. It sizes the BIF table as the distance between the two table offsets.
 
 The BIF table has one 12-byte entry per archive.
 
@@ -158,7 +166,7 @@ The BIF table has one 12-byte entry per archive.
 | 0x00   | u32  | Size of the archive file in bytes               | Matches the size on disk for all 26 archives.               | high       |
 | 0x04   | u32  | Offset of the archive's file name               | The names fill bytes 376 to 847 without gaps.               | high       |
 | 0x08   | u16  | Length of the file name, including the NUL byte | Every name ends in a NUL byte at this length.               | high       |
-| 0x0A   | u16  | UNKNOWN                                         | The value is 1 in all 26 entries. Its meaning is not known. | low        |
+| 0x0A   | u16  | UNKNOWN                                         | The value is 1 in all 26 entries, and also in the KEY file of the Xbox build. The KEY loader copies it into the record of the archive (Xbox code, 0x14E333), but no code that reads it again was found. Other descriptions of the format call it a drive mask. | low        |
 
 File names are relative paths that use backslashes, for example `data\models.bif`.
 
@@ -172,6 +180,8 @@ The resource table has one 22-byte entry per resource.
 
 No two resources share both a resref and a type.
 
+The KEY loader clears bits 30 and 31 of each resource ID before it stores it (Xbox code, 0x14E6C4). When the engine reads a resource from a BIF archive, it takes only bits 0 to 13 of the ID as the entry index (Xbox code, 0x14BECD). An archive can therefore hold at most 16,384 entries that the engine can reach. The largest archive, `models.bif`, holds 6,444.
+
 ## BIF archive
 
 A BIF archive begins with a 20-byte header.
@@ -183,7 +193,9 @@ A BIF archive begins with a 20-byte header.
 | 0x0C   | u32     | Number of fixed resources      | The value is 0 in all 26 archives.                      | medium     |
 | 0x10   | u32     | Offset of the entry table (20) | The value is 20 in all 26 archives.                     | high       |
 
-No archive contains fixed resources, so the layout of a fixed resource entry is UNKNOWN.
+No archive contains fixed resources, so the layout of a fixed resource entry is UNKNOWN. The engine's BIF loader (Xbox code, 0x14BDA0) never reads the count of fixed resources. It checks the signature "BIFF" and the version "V1  ", allocates 16 bytes per variable resource, and reads that many entries from the offset at 0x10. Fixed resources are therefore not supported by this engine.
+
+To read a resource, the engine uses the data offset and the size of the entry (Xbox code, 0x14BEB0). It does not compare the resource ID or the type of the entry with the KEY file.
 
 The entry table has one 16-byte entry per resource.
 
@@ -252,6 +264,8 @@ An ERF archive begins with a 160-byte header. The evidence below covers 128 arch
 | 0x24   | u32     | Build day of the year                      | The value is 309 in the texture packs, 47 in `patch.erf`, and 309 or 145 in `lips/`. The KEY file also holds 309. | medium     |
 | 0x28   | u32     | UNKNOWN, probably uninitialized            | The value is 0 in the texture packs, 0x45207A6C in `patch.erf`, and takes 56 different values in `lips/`.         | low        |
 | 0x2C   | u8[116] | Padding                                    | All bytes are 0 in all 128 archives.                                                                              | medium     |
+
+The engine's ERF loader (Xbox code, 0x14DC47) reads the 160-byte header in one piece. Depending on what it is asked to open, it requires the signature "ERF ", "MOD " or "HAK ", and in every case the version "V1.0". It then uses only the number of resources at 0x10 and the key table offset at 0x18. It never reads the localized string fields, the build date or the field at 0x28. These fields therefore have no effect on the game, which fits the varying values at 0x28. The format of the localized strings remains UNKNOWN. The loader reads 24 bytes per key entry and keeps the low 20 bits of the resource ID.
 
 The build date fields agree between the KEY file and the archives built with it, and `patch.erf`, which was presumably built later, holds a later date. The two archives of the saved game hold year 126 (2026) and day 324, which is 20 November 2026 when 1 January is day 1. The save files were copied on 22 November 2026, so the fields are the date when the archive was written. Whether the day count starts at 0 or 1 is UNKNOWN. The field at 0x28 is 0 in both archives of the saved game. Because the game wrote them itself, a value other than 0 probably comes from the tool that built the other archives.
 
@@ -378,11 +392,11 @@ A struct is a group of fields. Struct 0 is the root of the tree. Each entry of t
 
 | Offset | Type | Meaning                                                                                                                                                               | Evidence                                                                                                                | Confidence |
 | ------ | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 0x00   | u32  | Struct type                                                                                                                                                           | 0xFFFFFFFF on the root of all 11,152 files. See below.                                                                  | low        |
+| 0x00   | u32  | Struct type, a number chosen by the code that writes the struct                                                                                                       | 0xFFFFFFFF on the root of all 11,152 files. See below.                                                                  | high       |
 | 0x04   | u32  | For a struct with one field, the index of that field. Otherwise a byte offset into the field index region, where the struct's field indices are stored as u32 values. | Under this reading, every field is used exactly once in all files. The module files hold 40,631 structs with one field. | high       |
 | 0x08   | u32  | Number of fields                                                                                                                                                      | Every field index that a struct reads is valid.                                                                         | high       |
 
-No struct in any file has zero fields, so the encoding of an empty struct is UNKNOWN.
+No struct in any file has zero fields. The engine's GFF writer (Xbox code, 0x146740) creates every struct with the type it is given, the data value 0xFFFFFFFF and a field count of 0. An empty struct is therefore stored with 0xFFFFFFFF at 0x04 and 0 at 0x08. The field lookup (Xbox code, 0x146370) confirms the other two cases. With a count of 1 the value at 0x04 is a field index, and otherwise it is a byte offset into the field index region.
 
 Each entry of the field table is 12 bytes.
 
@@ -394,7 +408,7 @@ Each entry of the field table is 12 bytes.
 
 Each entry of the label table is a 16-byte name, padded with NUL bytes, for example "EXTENT". A label does not determine the field type. In the GUI files, "TEXT" is a string in 1,631 fields and a struct in 2,016 fields.
 
-The meaning of the struct type is UNKNOWN, but its values follow patterns. The root has 0xFFFFFFFF in every file. In the GUI files, all other structs have 0, except 17 structs in `debug.gui` with 14. In the module files, the struct type of a list item follows one of three patterns. In 30 list labels it is the same for every item of a list, and in 11 it equals the item's index in the list. In `Equip_ItemList` of the UTC files it takes values that are single bits, such as 2, 16 and 131,072, which suggests flags for equipment slots. The GIT lists of the modules use a fixed struct type per list (see "Contents of the module files").
+The struct type has no fixed meaning in the GFF format. The engine's writer takes it as an argument from the code that adds the struct, and the GFF code stores it without interpreting it. The root is created with 0xFFFFFFFF (Xbox code, 0x146D43). Of the 96 calls that add a list item (Xbox code, routine 0x147F10), most pass 0 or the item's index. Some pass fixed marker values, such as 0xBAAD for the items of `IntList`, 0xDAEE for `DamageList` and 0xAAEE for `AttackList`. The values in the files follow the same patterns. The root has 0xFFFFFFFF in every file. In the GUI files, all other structs have 0, except 17 structs in `debug.gui` with 14. In the module files, the struct type of a list item follows one of three patterns. In 30 list labels it is the same for every item of a list, and in 11 it equals the item's index in the list. In `Equip_ItemList` of the UTC files it takes values that are single bits, such as 2, 16 and 131,072, which suggests flags for equipment slots. The GIT lists of the modules use a fixed struct type per list (see "Contents of the module files").
 
 ## Field types
 
@@ -409,9 +423,9 @@ The table below lists the 18 field types. The count is the number of fields of t
 | 4    | 282,652 | u32 stored in the field entry                                                                      | In the GUI files it is used only by STRREF, where 0xFFFFFFFF marks no string.                                                                                                                                                                                      | medium     |
 | 5    | 110,836 | i32 stored in the field entry                                                                      | GUI coordinates such as LEFT and WIDTH are plausible, and Obj_ParentID uses -1.                                                                                                                                                                                    | high       |
 | 6    | 128     | u64: offset into field data, where 8 bytes are stored                                              | Occurs only in the saved game: in `Id` of effect lists (127 fields) and in `Mod_Effect_NxtId`. The 127 `Id` values are distinct and at most 504, the value of `Mod_Effect_NxtId`. Whether the type is signed is UNKNOWN, because no value is large enough to tell. | medium     |
-| 7    | 0       | UNKNOWN, probably i64 in 8 bytes of field data                                                     | Occurs in no file. `ReadGff` reads it by analogy with types 0 to 6.                                                                                                                                                                                                | low        |
+| 7    | 0       | Not used by the engine. Probably i64 in 8 bytes of field data                                      | Occurs in no file. The engine has no reader and no writer for it (see below). `ReadGff` reads it by analogy with types 0 to 6.                                                                                                                                      | low        |
 | 8    | 161,273 | f32 stored in the field entry                                                                      | In the GUI files ALPHA is always 1.0 and ROTATE is always 0.0.                                                                                                                                                                                                     | medium     |
-| 9    | 0       | UNKNOWN, probably f64 in 8 bytes of field data                                                     | Occurs in no file. `ReadGff` reads it by analogy with type 8.                                                                                                                                                                                                      | low        |
+| 9    | 0       | Not used by the engine. Probably f64 in 8 bytes of field data                                      | Occurs in no file. The engine has no reader and no writer for it (see below). `ReadGff` reads it by analogy with type 8.                                                                                                                                            | low        |
 | 10   | 256,816 | String: offset into field data, where a u32 length is followed by that many characters             | Decodes to tags and text such as "LBL_BARKTEXT".                                                                                                                                                                                                                   | high       |
 | 11   | 360,371 | Resref: offset into field data, where a u8 length (at most 16) is followed by that many characters | Decodes to names of resources that exist in the game files (see "Links to other files" and "GUI layout content").                                                                                                                                                  | high       |
 | 12   | 88,225  | Localized string: offset into field data (layout below)                                            | The size field matches the content in all fields. Labels include Text, Description and LocalizedName.                                                                                                                                                              | high       |
@@ -421,6 +435,8 @@ The table below lists the 18 field types. The count is the number of fields of t
 | 16   | 1,177   | Orientation: offset into field data, where four f32 values are stored                              | Used only by Orientation in the GIT camera lists. The squared length of all 1,137 module values lies between 0.99999 and 1.00001, so the four values are probably a unit quaternion. Their order is UNKNOWN.                                                       | medium     |
 | 17   | 7,869   | Vector: offset into field data, where three f32 values are stored                                  | In the GUI files it is used only by COLOR, whose components lie between 0 and 1, except the value (-1, -1, -1).                                                                                                                                                    | high       |
 
+The engine's GFF code has one reader routine per field type, and each checks the type of the field before it reads the value (Xbox code, 0x147400 to 0x147DA0). These routines check the types 0 to 6, 8 and 10 to 17. The routine that adds a field (Xbox code, 0x147120) is called with the same types. No routine reads or writes type 7 or type 9, so the engine neither produces nor accepts them.
+
 A localized string stores a string number and any number of literal substrings. Its layout in the field data is described below.
 
 | Offset | Type   | Meaning                                         | Evidence                                                                                                                                                                                                 | Confidence |
@@ -428,9 +444,11 @@ A localized string stores a string number and any number of literal substrings. 
 | 0x00   | u32    | Number of bytes that follow this field          | Equals the length of the rest of the value in all 88,225 fields.                                                                                                                                         | high       |
 | 0x04   | u32    | String number in `dialog.tlk`, or 0xFFFFFFFF    | Every number other than 0xFFFFFFFF names an entry with text, such as 35,782, "Taris - South Apartments", for the area name of `tar_m02aa`. 0xFFFFFFFF occurs where a literal substring is given instead. | high       |
 | 0x08   | u32    | Number of substrings                            | The value is 0 in 77,091 and 1 in 170 of the 77,261 module fields.                                                                                                                                       | high       |
-| 0x0C   | varies | Substrings: u32 ID, u32 length, then characters | All 170 substrings of the module files have ID 0. Their text is plausible, for example the IFO Mod_Name "tar_m02aa".                                                                                     | medium     |
+| 0x0C   | varies | Substrings: u32 ID, u32 length, then characters | All 170 substrings of the module files have ID 0. Their text is plausible, for example the IFO Mod_Name "tar_m02aa". The engine reads them in this order (Xbox code, 0x1479C0).                         | high       |
 
-The meaning of the substring ID is UNKNOWN, because only the value 0 occurs in the module files. It may encode a language.
+The substring ID combines a language and a gender. The engine's reader (Xbox code, 0x147AD9) splits each ID into ID / 2 and ID mod 2 and passes both to the routine that stores the substring. Other games of the same engine family define the ID as language × 2 + gender, with 0 for masculine and 1 for feminine text, and the string table supports this split (see "String table: dialog.tlk"). The language numbers themselves are not confirmed. The ID 0 of all module substrings means language 0 and masculine text.
+
+The reader also checks the size at 0x00. If the substrings do not use exactly the number of bytes that it gives, the reader reports a failure.
 
 In 34 files, some bytes of the field index or list index region are not referenced by any struct or list. These are 2 DLG, 11 GIT and 16 UTM files in the modules, with between 32 and 476 unreferenced bytes each, and the BIC file (44 bytes) and four ITP files (8 to 252 bytes) in `templates.bif`. The field data region never has unreferenced bytes. The unreferenced bytes are probably left over from editing, but this has not been confirmed. `ReadGff` therefore counts unreferenced bytes instead of rejecting the file. The GUI conversion still rejects them, and all 91 GUI files have none.
 
@@ -585,7 +603,7 @@ The table below lists the opcodes. The operand letters stand for i32, u32, i16, 
 | 0x06   | LOGAND     | II               | none                  | 64,611    | Logical and                                                               | Decodes exactly. Medium.                                                                                       |
 | 0x07   | LOGOR      | II               | none                  | 47,941    | Logical or                                                                | Decodes exactly. Medium.                                                                                       |
 | 0x08   | INCOR      | II               | none                  | 26        | Bitwise or                                                                | Decodes exactly. Medium.                                                                                       |
-| 0x09   | EXCOR      | II               | none                  | 0         | Bitwise exclusive or                                                      | Never occurs. UNKNOWN.                                                                                         |
+| 0x09   | EXCOR      | II               | none                  | 0         | Bitwise exclusive or                                                      | Never occurs. The VM computes the bitwise exclusive or of two integers (Xbox code, 0x159F53). Medium.                                                                                         |
 | 0x0A   | BOOLAND    | II               | none                  | 12        | Bitwise and                                                               | Decodes exactly. Medium.                                                                                       |
 | 0x0B   | EQUAL      | pairs            | none; u16 size for TT | 169,313   | Compare for equality                                                      | Decodes exactly. Medium.                                                                                       |
 | 0x0C   | NEQUAL     | pairs            | none; u16 size for TT | 13,136    | Compare for inequality                                                    | One NEQUALTT with size 12 decodes exactly. Medium.                                                             |
@@ -594,15 +612,15 @@ The table below lists the opcodes. The operand letters stand for i32, u32, i16, 
 | 0x0F   | LT         | II FF            | none                  | 12,130    | Less than                                                                 | Decodes exactly. Medium.                                                                                       |
 | 0x10   | LEQ        | II FF            | none                  | 5,928     | Less than or equal                                                        | Decodes exactly. Medium.                                                                                       |
 | 0x11   | SHLEFT     | II               | none                  | 1         | Shift left                                                                | One occurrence. Low.                                                                                           |
-| 0x12   | SHRIGHT    | II               | none                  | 0         | Shift right                                                               | Never occurs. UNKNOWN.                                                                                         |
-| 0x13   | USHRIGHT   | II               | none                  | 0         | Unsigned shift right                                                      | Never occurs. UNKNOWN.                                                                                         |
+| 0x12   | SHRIGHT    | II               | none                  | 0         | Shift right                                                               | Never occurs. The VM shifts the magnitude and keeps the sign, so the result is rounded towards zero (Xbox code, 0x15A351). Medium.                                                                                         |
+| 0x13   | USHRIGHT   | II               | none                  | 0         | Unsigned shift right                                                      | Never occurs. Despite the name, the VM uses an arithmetic shift that keeps the sign (Xbox code, 0x15A3BC). Medium.                                                                                         |
 | 0x14   | ADD        | arithmetic pairs | none                  | 38,938    | Add; SS concatenates strings                                              | Decodes exactly. Medium.                                                                                       |
 | 0x15   | SUB        | arithmetic pairs | none                  | 2,223     | Subtract                                                                  | Decodes exactly. Medium.                                                                                       |
 | 0x16   | MUL        | arithmetic pairs | none                  | 3,090     | Multiply                                                                  | Decodes exactly. Medium.                                                                                       |
 | 0x17   | DIV        | arithmetic pairs | none                  | 1,974     | Divide                                                                    | Decodes exactly. Medium.                                                                                       |
 | 0x18   | MOD        | II               | none                  | 1         | Remainder                                                                 | One occurrence. Low.                                                                                           |
 | 0x19   | NEG        | I F              | none                  | 23,848    | Negate                                                                    | Decodes exactly. Medium.                                                                                       |
-| 0x1A   | COMP       | I                | none                  | 0         | Bitwise complement                                                        | Never occurs. UNKNOWN.                                                                                         |
+| 0x1A   | COMP       | I                | none                  | 0         | Bitwise complement                                                        | Never occurs. The VM inverts all bits of an integer (Xbox code, 0x15AA1A). Medium.                                                                                         |
 | 0x1B   | MOVSP      | 0                | i32                   | 849,059   | Move the stack pointer, which removes values                              | All values are negative multiples of 4. High.                                                                  |
 | 0x1D   | JMP        | 0                | jump                  | 301,917   | Jump                                                                      | All targets are instructions. High.                                                                            |
 | 0x1E   | JSR        | 0                | jump                  | 142,691   | Call a subroutine of the script                                           | All targets are instructions. High.                                                                            |
@@ -615,15 +633,17 @@ The table below lists the opcodes. The operand letters stand for i32, u32, i16, 
 | 0x25   | JNZ        | 0                | jump                  | 22,243    | Jump if the top of the stack is not zero                                  | All targets are instructions. High.                                                                            |
 | 0x26   | CPDOWNBP   | 1                | i32 offset, u16 size  | 2,471     | Copy down relative to the base pointer (global variables)                 | Decodes exactly. Medium.                                                                                       |
 | 0x27   | CPTOPBP    | 1                | i32 offset, u16 size  | 75,275    | Copy up relative to the base pointer                                      | Decodes exactly. Medium.                                                                                       |
-| 0x28   | DECIBP     | I                | i32 offset            | 0         | Decrement a global integer                                                | Never occurs. UNKNOWN.                                                                                         |
-| 0x29   | INCIBP     | I                | i32 offset            | 0         | Increment a global integer                                                | Never occurs. UNKNOWN.                                                                                         |
+| 0x28   | DECIBP     | I                | i32 offset            | 0         | Decrement a global integer                                                | Never occurs. The VM handles it with the DECISP routine, which reads the same i32 offset (Xbox code, 0x15ADB7). Medium.                                                                                         |
+| 0x29   | INCIBP     | I                | i32 offset            | 0         | Increment a global integer                                                | Never occurs. The VM handles it with the INCISP routine, which reads the same i32 offset (Xbox code, 0x15ADB7). Medium.                                                                                         |
 | 0x2A   | SAVEBP     | 0                | none                  | 4,497     | Set the base pointer for global variables                                 | Occurs exactly as often as RESTOREBP. Medium.                                                                  |
 | 0x2B   | RESTOREBP  | 0                | none                  | 4,497     | Restore the base pointer                                                  | Occurs exactly as often as SAVEBP. Medium.                                                                     |
 | 0x2C   | STORESTATE | 0x10             | u32, u32              | 17,796    | Save the state for a deferred action, such as an argument of DelayCommand | Each one is followed by a forward JMP. Medium.                                                                 |
-| 0x2D   | NOP        | 0                | none                  | 0         | No operation                                                              | Never occurs. UNKNOWN.                                                                                         |
+| 0x2D   | NOP        | 0                | none                  | 0         | No operation                                                              | Never occurs. The VM does not implement it and stops the script with an error (Xbox code, 0x15AF21). High.                                                                                         |
 | 0x42   | T          | none             | u32 size              | 12,647    | Program size                                                              | Only at offset 0x08. High.                                                                                     |
 
-Opcode 0x1C does not occur and is not accepted by the decoder. Opcodes with a count of 0 are accepted with the published layout, but this layout is unverified.
+Opcode 0x1C does not occur and is not accepted by the decoder. The engine does implement it. Its VM, the virtual machine that runs the scripts, dispatches the opcodes 0x01 to 0x2C through one jump table (Xbox code, 0x159982, table at 0x15AF44), and opcode 0x1C has its own routine there (0x15AAE1). The published description calls it STORESTATEALL. It is two bytes long, an opcode and a type byte. It saves the resume address like STORESTATE (see below), with both stack sizes 0. Every opcode outside 0x01 to 0x2C, including NOP (0x2D), stops the script with error code -101. A script also stops after 131,072 instructions (0x15994D).
+
+Opcodes with a count of 0 are accepted with the published layout. The VM confirms the meanings given in the table for EXCOR, SHRIGHT, USHRIGHT, COMP, DECIBP and INCIBP. Each of these routines accepts only integer operands, which is type I for COMP, DECIBP and INCIBP and type II for the others. DECIBP and INCIBP share the routine of DECISP and INCISP, which selects the stack or the base pointer by the opcode.
 
 The type byte takes the values in the table below. The names are those of the listing. Types 0 and 1 carry no meaning. Each opcode always uses the same one of the two, and no opcode uses both. The binary operations use a pair type, whose two letters name the types of the two operands. The decoder accepts some pairs that do not occur, such as VV for ADD. These are part of the published description and are unverified. In particular, no vector operation occurs in any of the 12,647 scripts.
 
@@ -631,12 +651,12 @@ The type byte takes the values in the table below. The names are those of the li
 | ---------- | -------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | 0x00, 0x01 | none                 | No value type                                                                     | See above.                                                                                                                  |
 | 0x03–0x06  | I F S O              | Integer, float, string, object                                                    | CONST reads an i32, an f32, a u16-prefixed string and an i32 for them. The strings are plausible text, for example "Carth". |
-| 0x10–0x13  | E0–E3                | Engine structures 0 to 3: effect, event, location and talent                      | `nwscript.nss` defines ENGINE_STRUCTURE_0 to 3 with these names. The order of the type codes is assumed to follow it.       |
+| 0x10–0x13  | E0–E3                | Engine structures 0 to 3: effect, event, location and talent                      | `nwscript.nss` defines ENGINE_STRUCTURE_0 to 3 with these names. The engine routines `Location` and `SetGlobalLocation` push and pop a location as engine structure 2 (Xbox code, 0x26461A and 0x267B9E), which confirms the order for E2. RSADD accepts the types 0x10 to 0x19 (Xbox code, 0x159A5E). |
 | 0x20–0x26  | II FF OO SS TT IF FI | Pairs of the types above. TT is a structure, whose size in bytes follows as a u16 | Decode exactly. The meaning of each pair is taken from the published description.                                           |
 | 0x30–0x33  | E0E0–E3E3            | Pairs of engine structures                                                        | One NEQUALE2E2 occurs.                                                                                                      |
-| 0x3A–0x3C  | VV VF FV             | Pairs with vectors                                                                | Never occurs. UNKNOWN.                                                                                                      |
+| 0x3A–0x3C  | VV VF FV             | Pairs with vectors                                                                | Never occurs. The arithmetic routine of the VM (Xbox code, 0x15A410) adds and subtracts VV component by component, and multiplies and divides each component of a vector by the float for VF and FV. It does nothing for the other combinations. |
 
-STORESTATE always has type 0x10, and its two operands are probably the stack sizes to save. The most common values are 472 and 4, 472 and 52, and 108 and 28.
+STORESTATE always has type 0x10, and its two operands are probably the stack sizes to save. The most common values are 472 and 4, 472 and 52, and 108 and 28. The type byte is in fact an offset. The VM stores the address of the instruction plus the type byte as the place where the deferred action resumes (Xbox code, 0x15AAFF). With 0x10, this is 16 bytes on, directly after the 10-byte STORESTATE and the 6-byte JMP that always follows it. The VM keeps the first operand and the second operand in two separate slots of its state. The code that uses them was not traced, so their roles remain probable.
 
 ### Program structure
 
@@ -939,7 +959,7 @@ The file begins with a 20-byte header, described in the table below.
 | Offset | Type    | Meaning                   | Evidence                                                                           | Confidence |
 | ------ | ------- | ------------------------- | ---------------------------------------------------------------------------------- | ---------- |
 | 0x00   | char[8] | Signature "TLK V3.0"      | Present in the only file.                                                          | high       |
-| 0x08   | u32     | UNKNOWN, 0                | The value is 0. It may be a language number, but no other language file exists.    | low        |
+| 0x08   | u32     | UNKNOWN, 0                | The value is 0. It may be a language number, but no other language file exists. The engine does not read it (Xbox code, 0x143170 and 0x143AD0). | low        |
 | 0x0C   | u32     | Number of entries         | The entry table, 40 bytes per entry, ends exactly at the offset in the next field. | high       |
 | 0x10   | u32     | Offset of the string data | The value is 0x1E11BC, which equals 20 + 40 × 49,265.                              | high       |
 
@@ -949,11 +969,11 @@ Each entry is 40 bytes long and is laid out as described in the table below.
 | ------ | -------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
 | 0x00   | u32      | Flags                                    | The values are 7 (48,560 entries), 6 (398) and 0x8000 (307). Bit 0 is set exactly in the 48,560 entries that have text.                     | medium     |
 | 0x04   | char[16] | Sound resref, padded with NUL bytes      | 32,853 entries name a sound. Every byte after the name is NUL. The names use only digits, letters and the underscore.                       | high       |
-| 0x14   | u32      | UNKNOWN, always 0                        | The value is 0 in all entries. It may be a volume variance.                                                                                 | low        |
-| 0x18   | u32      | UNKNOWN, always 0                        | The value is 0 in all entries. It may be a pitch variance.                                                                                  | low        |
+| 0x14   | u32      | UNKNOWN, always 0                        | The value is 0 in all entries. The engine does not read it (Xbox code, 0x143AD0). Other descriptions call it a volume variance.                | low      |
+| 0x18   | u32      | UNKNOWN, always 0                        | The value is 0 in all entries. The engine does not read it (Xbox code, 0x143AD0). Other descriptions call it a pitch variance.                 | low      |
 | 0x1C   | u32      | Offset of the text, from the string data | The texts lie in entry order with no gap or overlap, and the last ends exactly at the end of the file. All 705 entries without text hold 0. | high       |
 | 0x20   | u32      | Length of the text in bytes              | See above. The length is 0 exactly when bit 0 of the flags is clear.                                                                        | high       |
-| 0x24   | f32      | UNKNOWN, always 0.0                      | The bits are 0 in all entries. It may be the length of the sound.                                                                           | low        |
+| 0x24   | f32      | Length of the sound in seconds, used only when flag bit 2 is set | The bits are 0 in all entries. The engine copies this value into the fetched entry when bit 2 is set and uses 0.0 otherwise (Xbox code, 0x143C71). That it is a length in seconds follows other descriptions and is not confirmed. | medium   |
 
 The text is not terminated by a NUL byte. All bytes of the texts are below 0x80, and the only control character is the line feed (5,191 times), so the code page does not matter. Entry 0 is "Bad StrRef", and entry 35,782 is "Taris - South Apartments", the area name of `tar_m02aa`.
 
@@ -969,7 +989,15 @@ The flag values combine with text and sound as shown in the table below. A refer
 | 6      | no   | no    | 39      | 1          |
 | 0x8000 | no   | no    | 307     | 1          |
 
-Bit 0 means that the entry has text. Bits 1 and 2 are set together in every entry except the 307 with flag 0x8000, even when the entry has no sound, so their meaning is UNKNOWN. The one referenced entry with flags 6 and neither text nor sound, 31,855, is the field DescIdentified of the item template `g_w_flashgren001.uti` in `templates.bif`. The item therefore has an empty description. The meaning of flag 0x8000 is UNKNOWN. These entries are scattered from entry 369 to entry 49,248, and they include the 100 consecutive entries 49,145 to 49,244. The one referenced entry, 42,058, is a slot of the sound set `p_trask.ssf` in `rims/global.rim` and `rims/miniglobal.rim`. The flag may mark removed entries, but this has not been confirmed.
+The engine routine that fetches an entry (Xbox code, 0x143AD0) gives each bit a meaning. Bit 0 means that the entry has text, and only then is the text read. Bit 1 means that the sound resref is valid, and otherwise the sound is empty. Bit 2 means that the sound length at 0x24 is valid, and otherwise the length is 0.0. Bits 1 and 2 are set together in every entry except the 307 with flag 0x8000, even when the entry has no sound. Such an entry therefore declares an empty sound name as valid, which has the same effect as no sound. The one referenced entry with flags 6 and neither text nor sound, 31,855, is the field DescIdentified of the item template `g_w_flashgren001.uti` in `templates.bif`. The item therefore has an empty description. Flag 0x8000 marks an entry as absent. The fetch routine skips an entry with this flag and looks up the same number in the next string table, as described below. If no table holds the entry without the flag, the engine returns an empty text and no sound. These entries are scattered from entry 369 to entry 49,248, and they include the 100 consecutive entries 49,145 to 49,244. The one referenced entry, 42,058, is a slot of the sound set `p_trask.ssf` in `rims/global.rim` and `rims/miniglobal.rim`. The flag therefore marks placeholder entries, which another string table can supply. The block of 100 consecutive entries was probably reserved for additional content.
+
+## How the engine reads the string table
+
+This section rests on the Xbox code. The engine holds up to seven string tables, and each of them can have a masculine and a feminine version (Xbox code, 0x143220). Table 0 is `dialog.tlk`. On the Xbox, tables 1 to 6 are named `live1` to `live6` (format string "LIVE%d:live%d" at 0x22409), which are probably downloadable content. The feminine version of a table has the same name followed by "F", for example `dialogF.tlk`. The PC build contains only `dialog.tlk`.
+
+The loader reads the 20-byte header and accepts the file if it begins with "TLK " (Xbox code, 0x143170). It does not check the version. The fetch routine does, because the entry size depends on it. An entry is 40 bytes long if the version is "V3.0" and 36 bytes long otherwise, which leaves out the sound length at 0x24 (Xbox code, 0x143B62). Entry n lies at 20 + n × size.
+
+A string number holds the entry number in its low 24 bits (Xbox code, 0x143B88). The fetch routine tries the tables in order, starting with table 0. It uses the first table that has the entry without flag 0x8000. If the feminine text is wanted and no feminine table has the entry, it repeats the search in the masculine tables. The feminine choice matches the gender bit of localized string substrings (see "Field types" under "Generic file format: GFF").
 
 ## Sound names
 
@@ -1103,18 +1131,18 @@ The model header is at the start of the model data.
 | 0x2C   | u32      | Number of nodes                                                | Equals the number of nodes in the tree in 2,187 of 2,445 models. See below.                                                                                                                      | medium     |
 | 0x30   | u32[6]   | UNKNOWN, always 0                                              | 0 in all 2,832 models of the four archives. Other descriptions of the format name two runtime array descriptors here.                                                                            | low        |
 | 0x48   | u32      | UNKNOWN, always 0                                              | 0 in all 2,832 models. Other descriptions of the format name a reference count here.                                                                                                             | low        |
-| 0x4C   | u8       | Geometry type: 2 for a model                                   | 2 in all 2,832 models. The animation headers hold 5 at the same offset (see "Animations").                                                                                                      | high       |
+| 0x4C   | u8       | Geometry type: 2 for a model                                   | 2 in all 2,832 models. The animation headers hold 5 at the same offset (see "Animations"). The engine tests these two values to tell a model from an animation (Xbox code, 0x294900 and 0x294910). | high       |
 | 0x4D   | u8[3]    | UNKNOWN, probably padding                                      | The values vary without a pattern, and 608 models hold zeros.                                                                                                                                    | low        |
-| 0x50   | u8       | Classification                                                 | See below.                                                                                                                                                                                       | medium     |
-| 0x51   | u8       | UNKNOWN                                                        | 0 in 2,548 models, 4 in 214 and 2 in 70.                                                                                                                                                         | low        |
+| 0x50   | u8       | Classification                                                 | See below. The names come from the engine's model text parser (Xbox code, 0x2C12A0). | high |
+| 0x51   | u8       | Secondary classification flags: 2 for "sensitive", 4 for a placeable | 0 in 2,548 models, 4 in 214 and 2 in 70. The parser sets 4 together with classification 32 for "placeable" and sets 2 for the keyword `secondaryclassification sensitive` (Xbox code, 0x2C13C7 and 0x2C13F6). What "sensitive" changes in the game is UNKNOWN. | medium |
 | 0x52   | u8       | UNKNOWN, always 0                                              | 0 in all 2,832 models.                                                                                                                                                                           | low        |
-| 0x53   | u8       | UNKNOWN                                                        | 1 in 2,743 models and 0 in 89. Other descriptions of the format call it a fog flag.                                                                                                              | low        |
-| 0x54   | u32      | UNKNOWN, always 0                                              | 0 in all 2,832 models.                                                                                                                                                                           | low        |
+| 0x53   | u8       | Fog flag: 1 if fog affects the model, 0 if not                 | 1 in 2,743 models and 0 in 89. The parser sets it to 0 for the keyword `ignorefog 1` (Xbox code, 0x2C1400). | high |
+| 0x54   | u32      | Reference count, used only while the game runs                 | 0 in all 2,832 models. The engine increments and decrements it as other models take and release this model as their supermodel, and frees the model when it reaches 0 (Xbox code, 0x294930 and 0x294960). | high |
 | 0x58   | u32[3]   | Array descriptor of the animations: the offset of an array of u32 animation header offsets, the count and the capacity | Every animation decodes, as "Animations" describes. 1,027 models hold 6,213 animations. | high |
-| 0x64   | u32      | UNKNOWN, probably a pointer left from the game's tools         | 0 in 2,464 models. The others hold large values such as 293,195,784 that point nowhere in the file.                                                                                             | low        |
+| 0x64   | u32      | Pointer to the loaded supermodel, used only while the game runs | 0 in 2,464 models. The others hold large values such as 293,195,784 that point nowhere in the file. The parser looks up the supermodel by the name at 0x88 and stores the address of the loaded model here (Xbox code, 0x2C16D7). The values in the files are therefore left over from the tools. | high |
 | 0x68   | f32[6]   | Probably a bounding box: minimum x, y, z, then maximum x, y, z | The minimum is at most the maximum on every axis in all 2,445 models. The converted geometry lies inside the box in only 709 of the 1,972 models with rendered geometry, so what the box encloses is UNKNOWN. | low        |
 | 0x80   | f32      | Probably a radius                                              | Positive in all 2,832 models. What it encloses is not verified.                                                                                                                                  | low        |
-| 0x84   | f32      | Animation scale                                                | 1 in 2,671 models. The others hold values from 0.278 to 1.6, such as 1.06 in 81 models. The name follows the property `animscale` of other descriptions of the format, and the effect is not tested. | low        |
+| 0x84   | f32      | Animation scale                                                | 1 in 2,671 models. The others hold values from 0.278 to 1.6, such as 1.06 in 81 models. The parser stores the value of `setanimationscale` here (Xbox code, 0x2C094E). | high |
 | 0x88   | char[32] | Name of the supermodel, or "NULL"                              | Contains model names such as S_Female02.                                                                                                                                                         | high       |
 | 0xA8   | u32      | Probably the offset of the root node (repeated)                | Equals the value at 0x28 in 2,374 of 2,445 models. The other 71 hold other values between 2,138 and 45,068.                                                                                      | low        |
 | 0xAC   | u32      | UNKNOWN, always 0                                              | 0 in all 2,832 models.                                                                                                                                                                           | low        |
@@ -1126,18 +1154,18 @@ The model header is at the start of the model data.
 
 The model header ends at 0xC4. The first 0x50 bytes form a geometry header that the animation headers share: two class addresses, a name, a root node offset, a node count, the zeros at 0x30 to 0x4B and the geometry type.
 
-The classification at 0x50 is a single bit or 0. The names follow other descriptions of the format, and the model names agree with them where the table says so. The table below counts the values in the four archives.
+The classification at 0x50 is a single bit or 0. The names are the keywords of `classification` in the engine's model text parser, which sets one bit per keyword (Xbox code, 0x2C12A0). The parser maps "effect", "effects" and "track" to 1 and both "item" and "placeable" to 32. It also knows 128, "heatdistortion", which no file uses. The table below counts the values in the four archives.
 
-| Value | Models | Name in other descriptions | Examples and agreement |
+| Value | Models | Name in the engine         | Examples and agreement |
 | ----- | ------ | -------------------------- | ---------------------- |
-| 0     | 1,304  | Other                      | Rooms and many placeables, such as `crossgob`. |
-| 1     | 387    | Effect                     | `w_laserfire` and other effects. |
-| 2     | 13     | Tile                       | Effects such as `v_fpush_cas` and the room `m17ab_00f`. The name does not fit. |
-| 4     | 630    | Character                  | Creatures and also items such as `i_belt_001`. |
-| 8     | 56     | Door                       | All are door models `dor_*`. |
-| 16    | 22     | Lightsaber                 | All are lightsaber models. |
-| 32    | 417    | Placeable                  | Placeables and items such as `a_jedirobe_001`. |
-| 64    | 3      | Flyer                      | `c_brith` and two cutscene cameras. |
+| 0     | 1,304  | any other keyword          | Rooms and many placeables, such as `crossgob`. |
+| 1     | 387    | effect, effects, track     | `w_laserfire` and other effects. |
+| 2     | 13     | forcedistortion            | Effects such as `v_fpush_cas`, a Force push, and the room `m17ab_00f`. Other descriptions call it Tile, which does not fit. |
+| 4     | 630    | character                  | Creatures and also items such as `i_belt_001`. |
+| 8     | 56     | door                       | All are door models `dor_*`. |
+| 16    | 22     | lightsaber                 | All are lightsaber models. |
+| 32    | 417    | item or placeable          | Placeables and items such as `a_jedirobe_001`. A placeable also has bit 4 at 0x51. |
+| 64    | 3      | ambient                    | `c_brith` and two cutscene cameras. Other descriptions call it Flyer. |
 
 A supermodel is another model whose nodes this model appears to inherit. In 258 models the node count does not match the number of nodes in the tree. All 258 have a supermodel, and in all of them the count exceeds the number of nodes in the tree, so the count probably includes nodes of the supermodel. It is not the sum of the model's nodes and the supermodel's count in any of the 258 models, so how the count is formed is UNKNOWN. The other three archives agree. In 110 of their 387 models, the count exceeds the number of nodes in the tree, and all 110 have a supermodel. This holds for 62 of the 63 models in `player.bif` and 16 of the 19 in `party.bif`.
 
@@ -1204,7 +1232,7 @@ The first two words identify the class of the mesh. They take one of three pairs
 | 0x00405740, 0x00405730   | 0x121                           | 2,619  | Dangly mesh             |
 | 0x00405710, 0x00405720   | 0x061                           | 968    | Skinned mesh            |
 
-The table below lists the fields of the mesh header.
+The table below lists the fields of the mesh header. The names in backquotes are the keywords of the engine's model text parser, which stores each of them at that offset (Xbox code, 0x2C66E0). The parser builds in memory the structure that the binary files hold, starting 0x50 bytes into the node, and its offsets agree with every field that the files could test. In the Xbox build the mesh header is 4 bytes shorter, 0x148 bytes, so the class headers that follow it start 4 bytes earlier there. Up to 0x139 the two layouts agree.
 
 | Offset | Type     | Meaning | Evidence | Confidence |
 | ------ | -------- | ------- | -------- | ---------- |
@@ -1214,12 +1242,13 @@ The table below lists the fields of the mesh header.
 | 0x20   | f32[3]   | Bounding box maximum | See below. | high |
 | 0x2C   | f32      | Radius of a bounding sphere around the average point | Equals the largest distance of a vertex from the point at 0x30 within 0.001 in 76,692 of the 76,767 meshes with vertices. | high |
 | 0x30   | f32[3]   | Average point, probably the centre of the bounding sphere | Lies inside the bounding box in 76,765 of 76,767 meshes. It equals the mean of the vertices in 31,096 meshes and the area-weighted centroid of the faces in 14,880, so how it is computed is UNKNOWN. | medium |
-| 0x3C   | f32[3]   | Probably the diffuse colour, as red, green and blue | Every component lies from 0 to 1 in all 76,767 meshes with vertices. Only 78 distinct colours occur. The most common are (1, 1, 1) in 56,909 meshes and (0.8, 0.8, 0.8) in 8,815. | low |
-| 0x48   | f32[3]   | Probably the ambient colour, as red, green and blue | Every component lies from 0 to 1 in all 76,767 meshes with vertices. The value (0.2, 0.2, 0.2) occurs in exactly the 8,815 meshes whose diffuse colour is (0.8, 0.8, 0.8). | low |
-| 0x54   | u32      | Probably a transparency hint | 0 in 76,110 meshes. The value 1 occurs in 483 meshes, whose textures are mostly named after leaves, plants, nets and grates, such as `lka_leaf03`, `lka_plant02` and `lts_grate01`. The value 7 occurs in 111 meshes, all with the texture `lkofx_clouds`. The values 2, 3, 4, 5, 8 and 13 occur in 78 meshes in total. | low |
+| 0x3C   | f32[3]   | Diffuse colour (`diffuse`), as red, green and blue | Every component lies from 0 to 1 in all 76,767 meshes with vertices. Only 78 distinct colours occur. The most common are (1, 1, 1) in 56,909 meshes and (0.8, 0.8, 0.8) in 8,815. | low |
+| 0x48   | f32[3]   | Ambient colour (`ambient`), as red, green and blue | Every component lies from 0 to 1 in all 76,767 meshes with vertices. The value (0.2, 0.2, 0.2) occurs in exactly the 8,815 meshes whose diffuse colour is (0.8, 0.8, 0.8). | low |
+| 0x54   | u32      | Transparency hint (`transparencyhint`) | 0 in 76,110 meshes. The value 1 occurs in 483 meshes, whose textures are mostly named after leaves, plants, nets and grates, such as `lka_leaf03`, `lka_plant02` and `lts_grate01`. The value 7 occurs in 111 meshes, all with the texture `lkofx_clouds`. The values 2, 3, 4, 5, 8 and 13 occur in 78 meshes in total. | low |
 | 0x58   | char[32] | Texture name, or "NULL" or empty for none | Contains texture names such as PLC_SithFlag. In 72,862 meshes the bytes after the terminating NUL byte are not zero, so a reader must stop at the first NUL byte. | high |
 | 0x78   | char[32] | Lightmap texture name, or empty for none | Set in 41,554 meshes. 39,243 of these names contain `_lm`, and 39,198 name an image that was converted to `extract/pc`. It is set exactly when the second set of texture coordinates is present. | high |
-| 0x98   | bytes[24] | UNKNOWN, always 0 | 0 in all meshes. These bytes may hold two further texture names of 12 bytes each, but no file uses them. | low |
+| 0x98   | u32[3]   | Array descriptor of the vertex indices of the text format, always empty | 0 in all meshes. The model text parser stores the keyword `vertexindices` here (Xbox code, 0x2C66E0). The binary files use the descriptors at 0xB0 and 0xBC instead. | medium |
+| 0xA4   | u32[3]   | Array descriptor of the "left-over faces" of the text format, always empty | 0 in all meshes. The parser stores the keyword `leftoverfaces` here. | medium |
 | 0xB0   | u32[3]   | Descriptor of the index count array | The count is 1 in 76,703 meshes and 0 in the 79 meshes without an index list. The offset points to one u32, which equals 3 × the face count in all 76,703 meshes. | high |
 | 0xBC   | u32[3]   | Descriptor of the index offset array | The offset points to one u32, which is the offset of a u16 list of vertex indices in the MDL. The list equals the vertex indices of the faces, in face order, in all 76,703 meshes. | high |
 | 0xC8   | u32[3]   | Descriptor of an array that holds a counter | See below. | medium |
@@ -1227,10 +1256,10 @@ The table below lists the fields of the mesh header.
 | 0xDC   | u32      | UNKNOWN, always 0 | 0 in all meshes. | low |
 | 0xE0   | u32      | UNKNOWN, usually 3 | 3 in 76,704 meshes. | low |
 | 0xE4   | u32      | UNKNOWN, usually 0 | 0 in 76,718 meshes. | low |
-| 0xE8   | u32      | Texture scroll flag | 1 in 191 meshes of 108 models and 0 in the others. The textures of these meshes are mostly named after clouds, water and waterfalls, such as `lkofx_clouds`, `lma_sea04` and `lma_waterfall`, which fits scrolling textures. | medium |
-| 0xEC   | f32[2]   | Texture scroll direction in u and v | In the meshes with the scroll flag, u lies from -0.006 to 0.03 and v from -0.05 to 0.1. Not tested in the game. | low |
-| 0xF4   | f32      | Probably the amount of jitter of the scrolling | Lies from 0.01 to 4 in the meshes with the scroll flag. Not tested in the game. | low |
-| 0xF8   | f32      | Probably the speed of the jitter | Lies from 0 to 1 in the meshes with the scroll flag. Not tested in the game. | low |
+| 0xE8   | u32      | Texture scroll flag (`animateuv`) | 1 in 191 meshes of 108 models and 0 in the others. The textures of these meshes are mostly named after clouds, water and waterfalls, such as `lkofx_clouds`, `lma_sea04` and `lma_waterfall`, which fits scrolling textures. | medium |
+| 0xEC   | f32[2]   | Texture scroll direction in u and v (`uvdirectionx`, `uvdirectiony`) | In the meshes with the scroll flag, u lies from -0.006 to 0.03 and v from -0.05 to 0.1. Not tested in the game. | low |
+| 0xF4   | f32      | Jitter of the scrolling (`uvjitter`) | Lies from 0.01 to 4 in the meshes with the scroll flag. Not tested in the game. | low |
+| 0xF8   | f32      | Speed of the jitter (`uvjitterspeed`) | Lies from 0 to 1 in the meshes with the scroll flag. Not tested in the game. | low |
 | 0xFC   | u32      | Size of one vertex record in the MDX file | Equals the sum of the component sizes in all meshes with vertex components (see "MDX file"). | high |
 | 0x100  | u32      | Vertex component flags | Each bit goes with one of the component offsets that follow, as the table in "MDX file" shows. A bit is set exactly when its offset is not 0xFFFFFFFF, in all meshes. | high |
 | 0x104  | u32      | Offset of the position within a vertex record | MDX positions match MDL positions for every vertex. | high |
@@ -1244,9 +1273,10 @@ The table below lists the fields of the mesh header.
 | 0x130  | u16      | Number of vertices | Every face index is below this value. | high |
 | 0x132  | u16      | Number of texture coordinate sets | Equals the number of present texture coordinate offsets in all meshes except the 64 lightsaber meshes, which hold 1 without any. | high |
 | 0x134  | u8       | Lightmap flag | 1 in 41,555 meshes. All of them have a lightmap name except one. | high |
-| 0x135  | u8[2]    | UNKNOWN, always 0 | 0 in all meshes. | low |
-| 0x137  | u8       | Probably the shadow flag | 1 in 11,373 meshes. Of these, 7,942 are not rendered, and 7,668 of those also have no texture. Most of the meshes that are not rendered are body-part helper meshes such as `head_g`, `pelvis_g` and `neck_g`. These may be the geometry that casts the shadow of a creature. Not tested in the game. | low |
-| 0x138  | u8       | UNKNOWN, always 0 | 0 in all meshes. | low |
+| 0x135  | u8       | Texture rotation flag (`rotatetexture`), always 0 | 0 in all meshes. The model text parser stores the keyword here (Xbox code, 0x2C66E0). | medium |
+| 0x136  | u8       | Background geometry flag (`m_bIsBackgroundGeometry`), always 0 | 0 in all meshes. The parser stores the keyword here. | medium |
+| 0x137  | u8       | Shadow flag (`shadow`) | 1 in 11,373 meshes. Of these, 7,942 are not rendered, and 7,668 of those also have no texture. Most of the meshes that are not rendered are body-part helper meshes such as `head_g`, `pelvis_g` and `neck_g`. These may be the geometry that casts the shadow of a creature. Not tested in the game. | low |
+| 0x138  | u8       | Beaming flag (`beaming`), always 0 | 0 in all meshes. The model text parser stores the keyword here (Xbox code, 0x2C66E0). | medium |
 | 0x139  | u8       | Render flag: 1 if the game draws the mesh, 0 if not | See below. | medium |
 | 0x13A  | u8[2]    | UNKNOWN, probably padding | The values vary without a pattern. The value 0 occurs in 31,206 meshes at 0x13A and in 48,213 meshes at 0x13B. | low |
 | 0x13C  | f32      | Surface area | Equals the sum of the face areas in all 73,131 plain and AABB meshes, within 0.1% or, for areas below 1, within 0.001. It is 0 in all 3,651 lightsaber, dangly and skinned meshes. | high |
@@ -1306,14 +1336,14 @@ A skinned mesh is deformed by several bones, which are other nodes of the model 
 
 | Offset | Type     | Meaning | Evidence | Confidence |
 | ------ | -------- | ------- | -------- | ---------- |
-| 0x00   | u32[3]   | UNKNOWN array descriptor, always empty | The count is 0 in all 968 skins. | low |
+| 0x00   | u32[3]   | Array descriptor of the bone weights of the text format (`weights`), always empty | The count is 0 in all 968 skins. The model text parser stores the keyword here (Xbox code, 0x2C66E0). The binary files keep the weights in the MDX records instead. | medium |
 | 0x0C   | u32      | Offset of the four bone weights within a vertex record | 32 in the 892 meshes with 64-byte records and 68 in the 76 meshes with 100-byte records, which have a tangent space. It always points to the first of the 32 extra bytes. | high |
 | 0x10   | u32      | Offset of the four bone indices within a vertex record | Always 16 more than the weight offset. | high |
 | 0x14   | u32      | Offset of the bone map, an array of f32 | See below. | high |
 | 0x18   | u32      | Number of entries of the bone map | Equals the number of entries of the name table in 967 of 968 skins. In `plc_firixa01` it is 20 for 23 names. | high |
-| 0x1C   | u32[3]   | Array descriptor of the inverse bind rotations, one f32[4] quaternion in w, x, y, z order per bone map entry | See below. | high |
-| 0x28   | u32[3]   | Array descriptor of the inverse bind translations, one f32[3] per bone map entry | See below. | high |
-| 0x34   | u32[3]   | Array descriptor of an UNKNOWN array with one u32 per bone map entry | Of the 58,872 values, 16,191 are 0 and 1,776 are 1 as f32. The others vary without a pattern, and many are tiny or huge as floats, which suggests uninitialized memory. The executable names a property `boneconstantindices`, which may belong here. | low |
+| 0x1C   | u32[3]   | Array descriptor of the inverse bind rotations, one f32[4] quaternion in w, x, y, z order per bone map entry | See below. The parser stores `qbone_ref_inv` here. | high |
+| 0x28   | u32[3]   | Array descriptor of the inverse bind translations, one f32[3] per bone map entry | See below. The parser stores `tbone_ref_inv` here. | high |
+| 0x34   | u32[3]   | Array descriptor of the bone constant indices (`boneconstantindices`), one u32 per bone map entry | The parser stores the keyword here (Xbox code, 0x2C66E0). Of the 58,872 values, 16,191 are 0 and 1,776 are 1 as f32. The others vary without a pattern, and many are tiny or huge as floats, which suggests uninitialized memory. What the engine does with them is UNKNOWN. | medium |
 | 0x40   | u16[16]  | Name table index of each of the first 16 local bones | Equals the inverse of the bone map for every local bone below 16 in all 968 skins. Unused entries hold varying values. | high |
 | 0x60   | u32      | UNKNOWN, probably padding | 0 in 292 skins. The other values vary without a pattern. | low |
 
@@ -1325,14 +1355,14 @@ In all 386,120 vertices of the skinned meshes, the four weights sum to 1 within 
 
 ## Dangly mesh header
 
-A dangly mesh is a mesh whose vertices may swing, such as hair, cloth and branches. Its 28-byte header follows the mesh header at 0x14C. The names come from the property names `constraints`, `displacement`, `tightness` and `period` in the game executable. Which field holds which property is taken from other descriptions of the format and is not tested in the game. The statistics cover the 2,619 dangly meshes of the four archives.
+A dangly mesh is a mesh whose vertices may swing, such as hair, cloth and branches. Its 28-byte header follows the mesh header at 0x14C. The names are the keywords `constraints`, `displacement`, `tightness` and `period` of the engine's model text parser, which stores each of them at the offset given in the table (Xbox code, 0x2C66E0). The parser places the dangly header directly after its 0x148-byte Xbox mesh header, and the offsets below are relative to the start of the dangly header. The statistics cover the 2,619 dangly meshes of the four archives.
 
 | Offset | Type   | Meaning | Evidence | Confidence |
 | ------ | ------ | ------- | -------- | ---------- |
-| 0x00   | u32[3] | Array descriptor of the constraints, one f32 per vertex | The count equals the vertex count in all 2,619 meshes. Every value lies from 0 to 255. | high |
-| 0x0C   | f32    | Probably the displacement | 0.1 in 2,444 meshes. Values range from 0.025 to 0.253. | low |
-| 0x10   | f32    | Probably the tightness | 0.5 in 2,444 meshes. Values range from 0.1 to 3. | low |
-| 0x14   | f32    | Probably the period | 0.3 in 2,444 meshes. Values range from 0.11 to 8. | low |
+| 0x00   | u32[3] | Array descriptor of the constraints, one f32 per vertex | The count equals the vertex count in all 2,619 meshes. Every value lies from 0 to 255. The parser stores `constraints` here. | high |
+| 0x0C   | f32    | Displacement | 0.1 in 2,444 meshes. Values range from 0.025 to 0.253. The parser stores `displacement` here (Xbox code, 0x2C66E0). | high |
+| 0x10   | f32    | Tightness | 0.5 in 2,444 meshes. Values range from 0.1 to 3. The parser stores `tightness` here (Xbox code, 0x2C66E0). | high |
+| 0x14   | f32    | Period | 0.3 in 2,444 meshes. Values range from 0.11 to 8. The parser stores `period` here (Xbox code, 0x2C66E0). | high |
 | 0x18   | u32    | Offset of a copy of the vertex positions, f32[3] per vertex | The copy equals the vertex array of the mesh header in all 2,619 meshes. Its purpose is UNKNOWN. | high |
 
 ## AABB tree of a mesh
@@ -1368,54 +1398,66 @@ The purpose of the 142 vertices that no face uses is UNKNOWN.
 
 ## Light header
 
-A light node holds a 92-byte light header after the node header. The statistics cover the 5,563 lights of the four archives. The names of the seven u32 fields come from the light property names in the game executable, such as `lightpriority`, `ambientonly`, `nDynamicType`, `affectdynamic`, `shadow`, `generateflare` and `fadingLight`. Their order is taken from other descriptions of the format and is not tested in the game.
+A light node holds a 92-byte light header after the node header. The statistics cover the 5,563 lights of the four archives. The names of the fields are the keywords of the engine's model text parser, which stores each of them at the offset given in the table (Xbox code, 0x2C6130). The parser also stores `flaresizes`, `flarepositions`, `flarecolorshifts` and `texturenames` at the four array descriptors from 0x10 to 0x34, in this order. Whether the game draws the lights as these names suggest is not tested.
 
 | Offset | Type   | Meaning | Evidence | Confidence |
 | ------ | ------ | ------- | -------- | ---------- |
-| 0x00   | f32    | Flare radius | 0 in 5,504 lights. 5,000 in 30 lights. | medium |
-| 0x04   | u32[3] | UNKNOWN array descriptor, always empty | The count is 0 in all lights. | low |
+| 0x00   | f32    | Flare radius | 0 in 5,504 lights. 5,000 in 30 lights. | high |
+| 0x04   | u32[3] | UNKNOWN array descriptor, always empty | The count is 0 in all lights. The model text parser stores no keyword here (Xbox code, 0x2C6130). | low |
 | 0x10   | u32[3] | Array descriptor of the flare sizes, f32 each | See below. | high |
 | 0x1C   | u32[3] | Array descriptor of the flare positions, f32 each | See below. | high |
 | 0x28   | u32[3] | Array descriptor of the flare colour shifts, f32[3] each | See below. | high |
 | 0x34   | u32[3] | Array descriptor of the flare textures, a u32 offset of a NUL-terminated name each | Names such as `fxpa_flare` and `FX_flare08`. | high |
-| 0x40   | u32    | Probably the priority | 1 to 5. | low |
-| 0x44   | u32    | Probably the ambient-only flag | 1 in 173 lights and 0 in the others. | low |
-| 0x48   | u32    | Probably the dynamic type | 2 in 5,373 lights, 1 in 187 and 0 in 3. | low |
-| 0x4C   | u32    | Probably the affect-dynamic flag | 1 in 29 lights and 0 in the others. | low |
-| 0x50   | u32    | Probably the shadow flag | 1 in 3,017 lights and 0 in 2,546. | low |
-| 0x54   | u32    | Probably the generate-flare flag | 0 in all lights, also in the 59 lights that have flares. | low |
-| 0x58   | u32    | Probably the fading flag | 1 in 5,429 lights and 0 in 134. | low |
+| 0x40   | u32    | Priority (`lightpriority`) | 1 to 5. | high |
+| 0x44   | u32    | Ambient-only flag (`ambientonly`) | 1 in 173 lights and 0 in the others. | high |
+| 0x48   | u32    | Dynamic type (`nDynamicType`, also set by `isdynamic`) | 2 in 5,373 lights, 1 in 187 and 0 in 3. | high |
+| 0x4C   | u32    | Affect-dynamic flag (`affectdynamic`) | 1 in 29 lights and 0 in the others. | high |
+| 0x50   | u32    | Shadow flag (`shadow`) | 1 in 3,017 lights and 0 in 2,546. | high |
+| 0x54   | u32    | Generate-flare flag (`generateflare`) | 0 in all lights, also in the 59 lights that have flares. | high |
+| 0x58   | u32    | Fading flag (`fadingLight`) | 1 in 5,429 lights and 0 in 134. | high |
 
 The four flare arrays have the same length in every light. 5,504 lights have no flares, 48 have one, 8 have two, one has four and two have six. The flare data and names follow the header.
 
 ## Emitter header
 
-An emitter node holds a 224-byte emitter header after the node header. An emitter spawns particles. The statistics cover the 8,870 emitters of the four archives. The names come from the emitter property names in the game executable, and their order from other descriptions of the format. The text fields are evidence for the layout, because they hold readable names at exactly these offsets.
+An emitter node holds a 224-byte emitter header after the node header. An emitter spawns particles. The statistics cover the 8,870 emitters of the four archives. The names are the keywords of the engine's model text parser, which stores each of them at the offset given in the table (Xbox code, 0x2C2A90). The text fields are further evidence for the layout, because they hold readable names at exactly these offsets.
 
 | Offset | Type     | Meaning | Evidence | Confidence |
 | ------ | -------- | ------- | -------- | ---------- |
-| 0x00   | f32      | Dead space | 0 in 8,788 emitters. | low |
-| 0x04   | f32      | Blast radius | 0 in 8,862 emitters. | low |
-| 0x08   | f32      | Blast length | 0 in 8,865 emitters. | low |
-| 0x0C   | u32      | Number of branches | 0 in 8,844 emitters and 1 to 5 in the others. | low |
-| 0x10   | f32      | Control point smoothing | 0 in 8,845 emitters. | low |
-| 0x14   | u32      | Grid size in x | 16 in 4,926 emitters. Values are 0, 1, 2, 4, 5, 8 and 16. | medium |
-| 0x18   | u32      | Grid size in y | Values are 0, 1, 2, 4, 5, 8 and 16. | medium |
-| 0x1C   | u32      | Spawn type | 0 in 8,841 emitters and 1 in 29. | low |
-| 0x20   | char[32] | Update method | `Single`, `Fountain`, `Explosion` or `Lightning`. | high |
-| 0x40   | char[32] | Render method | Names such as `Normal`, `Billboard_to_Local_Z`, `Motion_Blur` and `Linked`. | high |
-| 0x60   | char[32] | Blend mode | `Normal`, `Lighten`, `Punch-Through` or `PunchThrough`. | high |
-| 0x80   | char[32] | Texture name | Names such as `fx_Smoke` and `LKA_bird02`. | high |
-| 0xA0   | char[16] | Chunk name | Empty in 8,663 emitters. | medium |
-| 0xB0   | u32      | Two-sided texture flag | 1 in 230 emitters and 0 in the others. | low |
-| 0xB4   | u32      | Loop flag | 1 in 8 emitters and 0 in the others. | low |
-| 0xB8   | u16      | Render order | 0 to 8. | low |
-| 0xBA   | u8       | Frame blending flag | 0 in all emitters. | low |
-| 0xBB   | char[32] | Depth texture name | Empty or `NULL`, except `fx_depth` in one emitter. | medium |
+| 0x00   | f32      | Dead space (`deadspace`) | 0 in 8,788 emitters. | high |
+| 0x04   | f32      | Blast radius (`blastRadius`) | 0 in 8,862 emitters. | high |
+| 0x08   | f32      | Blast length (`blastLength`) | 0 in 8,865 emitters. | high |
+| 0x0C   | u32      | Number of branches (`numBranches`) | 0 in 8,844 emitters and 1 to 5 in the others. | high |
+| 0x10   | u32      | Control point smoothing (`controlptsmoothing`) | 0 in 8,845 emitters and 1 in the others. The parser reads it as an integer (Xbox code, 0x2C05B0), and the stored values are the integers 0 and 1. They were earlier read as f32, which gave 1e-45 for the value 1. | high |
+| 0x14   | u32      | Grid size in x (`xgrid`) | 16 in 4,926 emitters. Values are 0, 1, 2, 4, 5, 8 and 16. | high |
+| 0x18   | u32      | Grid size in y (`ygrid`) | Values are 0, 1, 2, 4, 5, 8 and 16. | high |
+| 0x1C   | u32      | Spawn type (`spawntype`) | 0 in 8,841 emitters and 1 in 29. | high |
+| 0x20   | char[32] | Update method (`update`) | `Single`, `Fountain`, `Explosion` or `Lightning`. | high |
+| 0x40   | char[32] | Render method (`render`) | Names such as `Normal`, `Billboard_to_Local_Z`, `Motion_Blur` and `Linked`. | high |
+| 0x60   | char[32] | Blend mode (`blend`) | `Normal`, `Lighten`, `Punch-Through` or `PunchThrough`. | high |
+| 0x80   | char[32] | Texture name (`texture`) | Names such as `fx_Smoke` and `LKA_bird02`. | high |
+| 0xA0   | char[16] | Chunk name (`chunkName`) | Empty in 8,663 emitters. | high |
+| 0xB0   | u32      | Two-sided texture flag (`twosidedtex`) | 1 in 230 emitters and 0 in the others. | high |
+| 0xB4   | u32      | Loop flag (`loop`) | 1 in 8 emitters and 0 in the others. | high |
+| 0xB8   | u16      | Render order (`renderorder`) | 0 to 8. | high |
+| 0xBA   | u8       | Frame blending flag (`m_bFrameBlending`) | 0 in all emitters. | high |
+| 0xBB   | char[32] | Depth texture name (`m_sDepthTextureName`) | Empty or `NULL`, except `fx_depth` in one emitter. | high |
 | 0xDB   | u8       | UNKNOWN, probably padding | The values vary without a pattern. | low |
-| 0xDC   | u32      | Flags | See below. | low |
+| 0xDC   | u32      | Flags | See below. | high |
 
-The flags take 47 distinct values, and the bits 0x2, 0x20 and 0x100 are the most common. Other descriptions of the format name the bits, from 0x1 upwards, `p2p`, `p2p_sel`, `affectedByWind`, `m_isTinted`, `bounce`, `random`, `inherit`, `inheritvel`, `inherit_local`, `splat`, `inherit_part` and `depth_texture`. The executable holds these names, except `random`, in the reverse of this order. The bit meanings are not tested.
+The flags take 47 distinct values, and the bits 0x2, 0x20 and 0x100 are the most common. The parser collects one keyword per bit and sets the bits through one small routine each (Xbox code, 0x2C2CC7 and 0x2E1830 to 0x2E18F0). The table below lists the bits.
+
+| Bit    | Keyword          | Bit    | Keyword                       |
+| ------ | ---------------- | ------ | ----------------------------- |
+| 0x1    | `p2p`            | 0x80   | `inheritvel`                  |
+| 0x2    | `p2p_sel`        | 0x100  | `inherit_local`               |
+| 0x4    | `affectedByWind` | 0x200  | `splat`                       |
+| 0x8    | `m_isTinted`     | 0x400  | `inherit_part`                |
+| 0x10   | `bounce`         | 0x800  | `depth_texture`               |
+| 0x20   | `random`, bit 0  | 0x1000 | `random`, bit 1               |
+| 0x40   | `inherit`        |        |                               |
+
+The keyword `random` takes a number, and its two low bits become the flags 0x20 and 0x1000. The order of the other names agrees with other descriptions of the format. What each flag does in the game is not tested.
 
 ## Reference header
 
@@ -1424,7 +1466,7 @@ A reference node holds a 36-byte reference header after the node header. It atta
 | Offset | Type     | Meaning | Evidence | Confidence |
 | ------ | -------- | ------- | -------- | ---------- |
 | 0x00   | char[32] | Name of the referenced model | Model names such as `M24_Vine1`, `OR_SmallShrub01` and `fx_ref`. | high |
-| 0x20   | u32      | Probably a reattachable flag | 1 in 36 references and 0 in 1,918. The executable names a property `reattachable`. | low |
+| 0x20   | u32      | Reattachable flag (`reattachable`) | 1 in 36 references and 0 in 1,918. The executable names a property `reattachable`. The model text parser stores `refModel` at 0x00 and `reattachable` here (Xbox code, 0x2C52A0). | high |
 
 ## Controllers
 
@@ -1444,7 +1486,7 @@ A controller with k keys and c columns stores k f32 times and then k rows of c v
 
 The controllers of a model tree hold the node's static values. Each of them has exactly one key, at time 0, in all 801,554 such controllers. The position and orientation controllers repeat the values of the node header, as the node table states. The orientation controllers of the model trees always have four columns, x, y, z and w, which is a different order from the node header's w, x, y, z.
 
-The meaning of a controller type depends on the class of the node. The names below are the property names of the game executable, and the numbers come from other descriptions of the format. The code that maps them could not be read, because the code section of `swkotor.exe` is encrypted by a copy protection wrapper (it has a `.bind` section) and the names in its data section have no visible references. The value ranges of the files agree with the names, for example colours from 0 to 1, a `spread` of 6.283 (2π) and `lightningSubDiv` values that are whole numbers. The table below lists the types that occur.
+The meaning of a controller type depends on the class of the node. The names and numbers below are confirmed by the engine's model text parser. For each keyword it calls the controller reader with the type number (Xbox code, 0x2C2760 for all nodes, 0x2C66E0 for meshes, 0x2C6130 for lights and 0x2C2A90 for emitters). It accepts each name in three forms: the name alone for a single value, the name followed by `key` for keys and the name followed by `bezierkey` for Bezier keys. The PC executable could not be read for this, because its code section is encrypted by a copy protection wrapper (it has a `.bind` section). The value ranges of the files agree with the names, for example colours from 0 to 1, a `spread` of 6.283 (2π) and `lightningSubDiv` values that are whole numbers. The table below lists the types that occur. The emitter parser also maps `detonate` to type 502, which no file uses.
 
 | Node class | Types and names |
 | ---------- | --------------- |
@@ -1453,7 +1495,7 @@ The meaning of a controller type depends on the class of the node. The names bel
 | Light      | 76 `color` (3), 88 `radius` (1), 96 `shadowradius` (1), 100 `verticaldisplacement` (1), 140 `multiplier` (1) |
 | Emitter    | 80 `alphaEnd`, 84 `alphaStart`, 88 `birthrate`, 92 `bounce_co`, 96 `combinetime`, 100 `drag`, 104 `fps`, 108 `frameEnd`, 112 `frameStart`, 116 `grav`, 120 `lifeExp`, 124 `mass`, 128 `p2p_bezier2`, 132 `p2p_bezier3`, 136 `particleRot`, 140 `randvel`, 144 `sizeStart`, 148 `sizeEnd`, 152 `sizeStart_y`, 156 `sizeEnd_y`, 160 `spread`, 164 `threshold`, 168 `velocity`, 172 `xsize`, 176 `ysize`, 180 `blurlength`, 184 `lightningDelay`, 188 `lightningRadius`, 192 `lightningScale`, 196 `lightningSubDiv`, 200 `lightningZigzag`, 216 `alphaMid`, 220 `percentStart`, 224 `percentMid`, 228 `percentEnd`, 232 `sizeMid`, 236 `sizeMid_y`, 240 `m_fRandomBirthRate`, 252 `targetsize`, 256 `numcontrolpts`, 260 `controlptradius`, 264 `controlptdelay`, 268 `tangentspread`, 272 `tangentlength`, 284 `colorMid`, 380 `colorEnd`, 392 `colorStart` (the last three with 3 columns, the others with 1) |
 
-The value range of type 256 does not fit its name `numcontrolpts`, because it holds fractions such as 0.2 and 0.3. The names of the emitter types therefore have low confidence, and those of the other classes medium confidence. A type that a class does not list is written as `controller_<type>`.
+The value range of type 256 does not fit its name `numcontrolpts`, because it holds fractions such as 0.2 and 0.3. The parser nevertheless maps this name to 256, so the name is the engine's own. A type that a class does not list is written as `controller_<type>`.
 
 A packed orientation is one u32. Bits 0 to 10 hold x and bits 11 to 21 hold y, each mapped from 0..2046 to 1..-1 as 1 - value / 1023. Bits 22 to 31 hold z, mapped as 1 - value / 511. When x² + y² + z² is below 1, w is -sqrt(1 - x² - y² - z²). Otherwise w is 0 and x, y and z are divided by their length. Unpacked this way, the angle between consecutive keys has a median of 2.8° and a 99th percentile of 80°, close to the 3.2° and 64° of the 363,951 keys stored with four columns. With the bit fields swapped as a control, the 90th percentile is 133°, and the first key of a track lies a median 179° from the rest rotation, against 5° with the correct unpacking. 580,545 animation keys are packed.
 
@@ -2403,7 +2445,7 @@ The saved game is the only source of two GFF field types: type 1, a signed 8-bit
 
 ## Global variables: GLOBALVARS.res
 
-`GLOBALVARS.res` stores the values of the global script variables, which scripts read and write with routines such as `GetGlobalBoolean` and `SetGlobalNumber`. The table `globalcat.2da` declares them: 809 booleans, 369 numbers, 5 locations and 2 strings. The file holds exactly these names, with the same counts. The names are in the same order as in `globalcat.2da` only for the strings; the order of the others is UNKNOWN.
+`GLOBALVARS.res` stores the values of the global script variables, which scripts read and write with routines such as `GetGlobalBoolean` and `SetGlobalNumber`. The table `globalcat.2da` declares them: 809 booleans, 369 numbers, 5 locations and 2 strings. The file holds exactly these names, with the same counts. The names are in the order of the engine's variable catalogue, which is a hash table (see below).
 
 The root struct holds eight fields. Four lists hold the names, and four fields hold the values.
 
@@ -2413,16 +2455,25 @@ The root struct holds eight fields. Four lists hold the names, and four fields h
 | `CatNumber`   | list (15)   | One struct per number with a string field `Name`                                | 369 items, the same names as the numbers of `globalcat.2da`.                                           | high       |
 | `CatLocation` | list (15)   | One struct per location with a string field `Name`                              | 5 items, the same names as the locations of `globalcat.2da`.                                           | high       |
 | `CatString`   | list (15)   | One struct per string with a string field `Name`                                | 2 items, the same names as the strings of `globalcat.2da`.                                             | high       |
-| `ValBoolean`  | binary (13) | One bit per boolean, in the order of `CatBoolean`                               | 102 bytes, which is 809 bits rounded up to whole bytes. Every byte is 0.                               | medium     |
-| `ValNumber`   | binary (13) | One signed byte per number, in the order of `CatNumber`                         | 369 bytes. `nwscript.nss` limits global numbers to -128 to +127. The values are plausible (see below). | high       |
-| `ValLocation` | binary (13) | The location values                                                             | 2,400 bytes, all 0. The layout is UNKNOWN.                                                             | low        |
+| `ValBoolean`  | binary (13) | One bit per boolean, in the order of `CatBoolean`, high bit first | 102 bytes, which is 809 / 8 + 1 whole bytes (see below). Every byte is 0. | high |
+| `ValNumber`   | binary (13) | One signed byte per number, in the order of `CatNumber`        | 369 bytes. `nwscript.nss` limits global numbers to -128 to +127, and the engine stores one byte per number (Xbox code, 0x16324B). The values are plausible (see below). | high |
+| `ValLocation` | binary (13) | 100 location slots of 24 bytes, in the order of `CatLocation`, then zeros | 2,400 bytes, all 0. The layout comes from the Xbox code (see below). | high |
 | `ValString`   | list (15)   | One struct per string with a string field `String`, in the order of `CatString` | 2 items, both empty.                                                                                   | medium     |
 
 Four numbers are not 0. `K_CURRENT_PLANET` is 5, `END_TRASK_DLG` is 11, and `END_CARTH_DLG` and `End_TraskTalk` are 1. All four belong to the Endar Spire, where the game was saved. This supports one byte per number in the order of `CatNumber`.
 
-The order of the bits within a byte of `ValBoolean` is UNKNOWN. Every boolean is false, so this save cannot tell the two orders apart, and the engine code that packs them is encrypted. `ReadGlobals` takes the high bit of each byte first and rejects a set bit beyond the last boolean. A save in which a known boolean is true would settle the order.
+The engine keeps the variables in a catalogue of 1,775 slots (Xbox code, 0x1625C0). The slot of a name is the CRC-32 of the name in upper case, modulo 1,775 (Xbox code, 0x1623D0). The CRC uses the reflected polynomial 0xEDB88320, starts at 0 and is not inverted at the end. When a slot is taken, the next free slot is used. The save routine (Xbox code, 0x163130) walks the slots in order and writes each name and value to the lists of its type. If the names of `globalcat.2da` are inserted in row order with this rule, the slot order reproduces all four lists of the PC save exactly. This holds for the 809 booleans, the 369 numbers, the 5 locations and the 2 strings.
 
-The layout of `ValLocation` is UNKNOWN. A location in NWScript holds an area, a position and an orientation. The 2,400 bytes are 480 bytes per location, or 100 entries of 24 bytes (six f32 values), but no reading can be tested while every byte is 0.
+Boolean k of `CatBoolean` is bit 7 - (k mod 8) of byte k / 8, so the high bit of each byte comes first (Xbox code, 0x162650). The engine writes (count / 8) + 1 bytes, rounded down before the addition, so a whole extra byte follows when the count is a multiple of 8. `ReadGlobals` uses this bit order and rejects a set bit beyond the last boolean. Every boolean in this save is false, so the PC files cannot test the order.
+
+`ValLocation` always holds 100 slots of 24 bytes (Xbox code, 0x1633A1). Location k of `CatLocation` is slot k, and unused slots hold zeros. The table below describes one slot. It is the engine's location structure, copied as it is (Xbox code, 0x16326B). The script routine `Location` fills it (Xbox code, 0x264530), and `GetFacingFromLocation` reads it (Xbox code, 0x264680).
+
+| Offset | Type   | Meaning                                                             | Evidence | Confidence |
+| ------ | ------ | ------------------------------------------------------------------- | -------- | ---------- |
+| 0x00   | f32[3] | Position x, y, z                                                    | `Location` copies its vector argument here, and `GetPositionFromLocation` returns it. | high |
+| 0x0C   | f32[3] | Facing as a unit direction vector x, y, z                           | `Location` stores (cos a, sin a, 0), normalized, for a facing of a degrees. `GetFacingFromLocation` returns atan2(y, x) in degrees. | high |
+
+A location holds no area. The PC save cannot test this layout, because every byte is 0. The extract stage still writes `location_data` as hexadecimal.
 
 ## Party table: PARTYTABLE.res
 
@@ -2441,16 +2492,18 @@ The layout of `ValLocation` is UNKNOWN. A location in NWScript holds an area, a 
 | `GlxyMap`                      | struct    |                   | Galaxy map: 16 points, a planet mask of 0 and no selected point                             |
 | `PT_PAZAAKCARDS`               | list      | 19 items          | Count per pazaak card                                                                       |
 | `PT_PAZSIDELIST`               | list      | 10 items          | Pazaak side deck, -1 for an empty slot                                                      |
-| `PT_TUT_WND_SHOWN`             | binary    | 6 bytes           | Tutorial windows already shown, probably one bit each. The layout is UNKNOWN.               |
+| `PT_TUT_WND_SHOWN`             | binary    | 6 bytes           | Tutorial windows already shown, one bit each (see below)                                   |
 | `PT_LAST_GUI_PNL`              | s32       | 7                 | Last menu panel opened                                                                      |
 | `PT_FB_MSG_LIST`               | list      | 10 items          | Feedback messages, with text, type and colour                                               |
 | `PT_DLG_MSG_LIST`              | list      | 34 items          | Dialog history, with speaker and text                                                       |
 | `PT_COST_MULT_LIS`             | list      | 92 items          | Price multipliers, all 1.0                                                                  |
 | `JNL_SortOrder`, `JNL_Entries` | s32, list | 1 entry           | Journal: plot `end_attack` at state 20, with the date and time of the entry\*               |
 
+`PT_TUT_WND_SHOWN` holds one bit per row of `tutorial.2da`, which lists the tutorial windows. Window n is bit n mod 8 of byte n / 8, so the low bit of each byte comes first. This is the opposite of the order in `ValBoolean`. The engine tests and sets the bits in this way and copies the 6 bytes to the save as they are (Xbox code, 0x5A9B0, 0x5AA20 and 0x16653A). The Xbox code ignores window numbers from 42 upwards, while the PC table has 43 rows. The save holds 80 49 10 00 00 06, which names the windows 7 `Press_Start`, 8 `Use_Triggers_To_Cycle_Through_Targets`, 11 `Press_A_On_Equip_Screen`, 14 `Receive_Journal_Entry`, 20 `Enter_Inventory_Screen`, 41 `Party_Selection` and 42 `Movement_Keys`. These fit the start of the game, where the save was made.
+
 ## Save summary: savenfo.res
 
-`savenfo.res` (file type "NFO ") is a single struct with 16 fields. `AREANAME` is the area's display name, `LASTMODULE` is the module resref in uppercase, `TIMEPLAYED` is the time played in seconds, and `SAVEGAMENAME` is the name typed by the player. `PORTRAIT0` and `PORTRAIT1` are the portraits of the party (`po_pmhc4` for the player and `po_ptrask` for Trask). `CHEATUSED`, `GAMEPLAYHINT` and `STORYHINT` are bytes. The six strings `LIVE1` to `LIVE6` and the byte `LIVECONTENT` are empty or 0; they probably refer to downloadable content of the Xbox version, but this has not been confirmed.
+`savenfo.res` (file type "NFO ") is a single struct with 16 fields. `AREANAME` is the area's display name, `LASTMODULE` is the module resref in uppercase, `TIMEPLAYED` is the time played in seconds, and `SAVEGAMENAME` is the name typed by the player. `PORTRAIT0` and `PORTRAIT1` are the portraits of the party (`po_pmhc4` for the player and `po_ptrask` for Trask). `CHEATUSED`, `GAMEPLAYHINT` and `STORYHINT` are bytes. The six strings `LIVE1` to `LIVE6` and the byte `LIVECONTENT` are empty or 0. They probably refer to downloadable content of the Xbox version. The Xbox engine loads up to six additional string tables `live1` to `live6` (see "How the engine reads the string table"), which supports this, but the save fields themselves were not traced.
 
 ## Screenshot: Screen.tga
 
@@ -2468,3 +2521,59 @@ The `saves` stage of `cmd/extract` converts every saved game folder in `saves/` 
 The stage writes 13 report lines to `temp/reports/pc/saves.txt`, and all 13 pass. Both archives have the expected layout, all nine GFF files parse, the variables decode, and the screenshot decodes.
 
 The `saves` stage of `cmd/verify` checks the outputs with independent tools. jq parses all nine GFF JSON files. ImageMagick's decoding of `Screen.png` equals its decoding of `Screen.tga`, and pngcheck accepts the PNG. The decoded variables, read with jq, are packed again into `ValBoolean` and `ValNumber`, and these bytes, the names and the strings must equal the fields of the source file. All four checks pass. A test in which one number in `GLOBALVARS.variables.json` was changed made the last check fail. This check confirms only that the JSON file holds every bit of the source; it cannot confirm the bit order of `ValBoolean`, because the same order is used to pack the bits again.
+
+# Xbox executable: default.xbe
+
+`dump/xbox/default.xbe` is the program of the Xbox build. It is an XBE file, the executable format of the original Xbox. Its code is not encrypted, unlike the code of the PC executable, so its routines that read the game files can be disassembled and read. Several sections of this document rely on it. The XBE format is documented publicly. The fields below are the ones that `cmd/xbe` uses, and each was checked on the four XBE files of the dump: `default.xbe`, `dashupdate.xbe`, `downloader.xbe` and `update.xbe`.
+
+The header names the game "Star Wars: KotOR" with title ID LA-003. The build path in the debug fields is `d:\SW\dev\game\swmain\Xbox_Release_DVD_SHIP\default.exe`.
+
+## XBE header
+
+The header is mapped into memory at the base address, so an address that points into the header minus the base address is a file offset. The table below lists the header fields that `cmd/xbe` reads.
+
+| Offset | Type      | Meaning                                                        | Evidence                                                                                              | Confidence |
+| ------ | --------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------- |
+| 0x000  | char[4]   | Signature "XBEH"                                               | Present in all four files.                                                                            | high       |
+| 0x004  | u8[256]   | RSA signature of the header                                    | The bytes look random. The signature lets the console check the file, but it does not hide the contents.  | medium     |
+| 0x104  | u32       | Base address (0x10000)                                         | 0x10000 in all four files. Header addresses minus this value land on valid strings and tables.        | high       |
+| 0x108  | u32       | Size of all headers                                            | 0xA8C in `default.xbe` and 0x2000 in the others. The first section starts after it.                   | high       |
+| 0x10C  | u32       | Size of the memory image                                       | Every section ends inside the image in all four files.                                                | high       |
+| 0x11C  | u32       | Number of sections                                             | 14 in `default.xbe`, 24 to 26 in the others. The section table parses fully.                          | high       |
+| 0x120  | u32       | Address of the section table                                   | See above.                                                                                            | high       |
+| 0x128  | u32       | Entry point, XOR-masked with 0xA8FC57AB                        | Unmasked, it lies inside `.text` in all four files, for example 0x151D9 in `default.xbe`.             | high       |
+| 0x14C  | u32       | Address of the debug path string                               | Points to the build path above.                                                                       | high       |
+| 0x158  | u32       | Address of the kernel import table, XOR-masked with 0x5B6D40B6 | Unmasked, it points to a zero-terminated list of ordinals from 1 to 360, with 106 to 141 entries.     | high       |
+
+The two masks are those of retail builds. Debug builds use 0x94859D4B and 0xEFB1F152 instead. `cmd/xbe` picks the pair that puts the entry point inside the image, and all four files are retail builds. Each entry of the kernel import table is a kernel export number with bit 31 set. The loader replaces each entry with the address of the kernel routine, and the code calls the kernel through these addresses.
+
+## Sections
+
+The section table has one 56-byte entry per section. The table below lists its fields.
+
+| Offset | Type     | Meaning                                | Evidence                                                                               | Confidence |
+| ------ | -------- | -------------------------------------- | -------------------------------------------------------------------------------------- | ---------- |
+| 0x00   | u32      | Flags                                  | `.text` has 0x16, the data sections have 0x6 or 0x7.                                   | medium     |
+| 0x04   | u32      | Virtual address                        | Code disassembles coherently at these addresses, and string addresses in it resolve.   | high       |
+| 0x08   | u32      | Virtual size                           | At least the raw size in every section.                                                | high       |
+| 0x0C   | u32      | File offset of the raw data            | Every section lies inside its file.                                                    | high       |
+| 0x10   | u32      | Size of the raw data                   | See above.                                                                             | high       |
+| 0x14   | u32      | Address of the section name            | Resolves to names such as `.text`, `D3D`, `DSOUND` and `.rdata`.                       | high       |
+| 0x18   | u32[3]   | Reference count and shared page counters | Not used by `cmd/xbe`.                                                               | low        |
+| 0x24   | u8[20]   | SHA-1 digest of the section            | Not checked.                                                                           | low        |
+
+The flags are a bit field. Other descriptions of the format define 0x1 as writable, 0x2 as preloaded, 0x4 as executable, 0x8 as an inserted file, 0x10 as a read-only head page and 0x20 as a read-only tail page. Only the executable bit was relied on.
+
+`default.xbe` has 14 sections. `.text` holds the game code at 0x11000 to 0x343B3C. The sections `D3D`, `D3DX`, `XMV`, `XGRPH`, `DSOUND`, `WMADEC`, `XPP` and `DOLBY` hold the code of Microsoft's Xbox libraries. `.rdata` from 0x3E5200 holds constant data and strings, and `.data` from 0x42FBC0 holds variables. The last three sections, `$$XTIMAGE`, `$$XSIMAGE` and `.XTLID`, probably hold the title image, the save image and a table of library IDs. Their content was not examined.
+
+## Disassembly
+
+`go run ./cmd/xbe` prints the header, the sections and the kernel imports of an XBE file and writes a flat memory image to `temp/xbe/default.img`. In this image every section lies at its virtual address minus the base address. objdump of binutils then disassembles the code as raw 32-bit x86 with the command below.
+
+```
+objdump -D -b binary -m i386 -M intel --adjust-vma=0x10000 --start-address=0x11000 --stop-address=0x343B3C temp/xbe/default.img
+```
+
+The routines of the game were found through the strings they use, such as the field labels of a GFF file, the keywords of the model text parser and the signatures of the archives. The addresses given as "Xbox code" in this document are addresses in this image. The disassembly is coherent, because string references resolve, calls land on routine entries, and the control flow of each routine that was read is consistent. No other disassembler is installed, so the output of objdump was not compared with an independent tool.
+
+The Xbox build shares the formats of the PC build, but a few structures differ. The mesh header of a model is 0x148 bytes in the Xbox engine instead of 0x14C (see "Mesh header"), and the Xbox engine loads up to six additional string tables for downloadable content. A statement that rests only on the Xbox code may therefore differ in the PC build. Each such statement says so.

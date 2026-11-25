@@ -59,7 +59,7 @@ type MdlEmitter struct {
 	BlastRadius           float32 `json:"blast_radius"`
 	BlastLength           float32 `json:"blast_length"`
 	BranchCount           int     `json:"branch_count"`
-	ControlPointSmoothing float32 `json:"control_point_smoothing"`
+	ControlPointSmoothing int     `json:"control_point_smoothing"`
 	GridX                 int     `json:"x_grid"`
 	GridY                 int     `json:"y_grid"`
 	SpawnType             int     `json:"spawn_type"`
@@ -190,7 +190,7 @@ func readEmitter(r *mdlReader, offset int) *MdlEmitter {
 		BlastRadius:           r.single(offset + 0x04),
 		BlastLength:           r.single(offset + 0x08),
 		BranchCount:           word(0x0c),
-		ControlPointSmoothing: r.single(offset + 0x10),
+		ControlPointSmoothing: word(0x10),
 		GridX:                 word(0x14),
 		GridY:                 word(0x18),
 		SpawnType:             word(0x1c),
