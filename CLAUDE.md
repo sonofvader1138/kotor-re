@@ -24,6 +24,7 @@ The following tools are installed:
 - assimp-utils
 - gltf_validator (Khronos glTF validator)
 - xz-utils
+- extract-xiso
 
 ## Rules
 
