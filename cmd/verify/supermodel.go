@@ -61,9 +61,7 @@ func animationNames(model sourceModel) []string {
 
 // expectedLinks follows the supermodel chain of a source model as the game does. An animation comes from the
 // nearest model of the chain that holds its name, compared without regard to case. The nodes are paired from
-// the roots down: child i of a model node takes the first child with the same node number among the
-// children of the paired supermodel node, searched from child i on with wrap-around. A model of the chain
-// that provides no animation gets no link.
+// the roots down as pairNodes describes. A model of the chain that provides no animation gets no link.
 func expectedLinks(model sourceModel, sources map[string]supermodelSource) []supermodelLink {
 	held := map[string]bool{}
 	for _, name := range animationNames(model) {
@@ -94,33 +92,13 @@ func expectedLinks(model sourceModel, sources map[string]supermodelSource) []sup
 			}
 		}
 
-		superNodes := super.tree(super.u32(sourceRootNode))
 		superIndex := map[int]int{}
-		for i, node := range superNodes {
+		for i, node := range super.tree(super.u32(sourceRootNode)) {
 			superIndex[node] = i + 1
 		}
-		children := func(m sourceModel, node int) []int {
-			var result []int
-			for i := range m.u32(node + sourceChildArray + 4) {
-				result = append(result, m.u32(m.u32(node+sourceChildArray)+4*i))
-			}
-			return result
+		for _, pair := range pairNodes(model, own[0], super, super.u32(sourceRootNode)) {
+			link.Nodes = append(link.Nodes, [2]int{ownIndex[pair[0]], superIndex[pair[1]]})
 		}
-		var pair func(node, other int)
-		pair = func(node, other int) {
-			link.Nodes = append(link.Nodes, [2]int{ownIndex[node], superIndex[other]})
-			candidates := children(super, other)
-			for i, child := range children(model, node) {
-				for k := range candidates {
-					candidate := candidates[(i+k)%len(candidates)]
-					if super.u16(candidate+sourceNodeNumber) == model.u16(child+sourceNodeNumber) {
-						pair(child, candidate)
-						break
-					}
-				}
-			}
-		}
-		pair(own[0], superNodes[0])
 
 		if len(link.Animations) > 0 {
 			links = append(links, link)

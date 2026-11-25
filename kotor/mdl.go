@@ -206,9 +206,8 @@ type MdlStats struct {
 
 	// Animations, AnimationNodes, Keys, Channels and Tracks count the animations, the nodes of their trees,
 	// the keys of the controllers that animate nodes of the model, the glTF channels and the other tracks.
-	// UnmatchedAnimationNodes counts animation nodes whose name is no node of the model tree, and
-	// ConstantChannels the animations that get a constant channel. DuplicateTracks counts the tracks that are
-	// dropped because an earlier animation node animates the same property of the same node.
+	// UnmatchedAnimationNodes counts animation nodes that the game pairs with no node of the model tree, and
+	// ConstantChannels the animations that get a constant channel.
 	Animations              int
 	AnimationNodes          int
 	Keys                    int
@@ -216,7 +215,6 @@ type MdlStats struct {
 	Tracks                  int
 	UnmatchedAnimationNodes int
 	ConstantChannels        int
-	DuplicateTracks         int
 
 	// ControllersMatching counts the position and orientation controllers of the model tree whose single
 	// key equals the position or rotation in the node header.
@@ -488,11 +486,11 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 	textures := map[string]bool{}
 	seen := map[int]bool{}
 
-	// targets maps each node number to the nodes of the model tree with that number, and namedNodes each name
+	// targets maps each glTF node of the model tree to what animations need of it, and namedNodes each name
 	// table index to the first glTF node with that name. locals and parents hold the transform
 	// of each glTF node relative to its parent, and the parent's index. glTF node 0 turns Z-up into Y-up and is
 	// the identity in model space.
-	targets := map[int][]mdlTarget{}
+	targets := map[int]mdlTarget{}
 	namedNodes := map[int]int{}
 	locals := []mdlTransform{identityTransform}
 	parents := []int{-1}
@@ -1092,7 +1090,7 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 		translation := vec3{pos[0], pos[1], pos[2]}
 		locals = append(locals, mdlTransform{rotation: [4]float64{rotation[1], rotation[2], rotation[3], rotation[0]}, translation: translation})
 		parents = append(parents, parentNode)
-		targets[number] = append(targets[number], mdlTarget{node: index, flags: flags, name: name, translation: translation})
+		targets[index] = mdlTarget{node: index, number: number, flags: flags, translation: translation}
 		if _, known := namedNodes[nameIndex]; !known {
 			namedNodes[nameIndex] = index
 		}
@@ -1215,7 +1213,7 @@ func ConvertMdl(mdl, mdx []byte, label, binUri string, texturePath func(string) 
 	}
 
 	if rootIndex >= 0 {
-		readAnimations(reader, doc, &stats, targets, names, mdlTarget{node: rootIndex, translation: locals[rootIndex].translation})
+		readAnimations(reader, doc, &stats, targets, rootIndex)
 	}
 
 	stats.Unclaimed, stats.Shared = reader.unclaimed()
@@ -1262,14 +1260,14 @@ func ReportMdl(label string, result MdlResult) string {
 	return fmt.Sprintf("%s nodes=%d meshes=%d hidden=%d verts=%d faces=%d mdl/mdx_mismatch=%d hdrnodes=%s "+
 		"normals_ok=%d/%d planes_ok=%d/%d adjacent_ok=%d/%d adjacent_outside=%d radius_ok=%d/%d area_ok=%d/%d "+
 		"normals_replaced=%d normals_omitted=%d controllers_ok=%d/%d animations=%d animation_nodes=%d keys=%d "+
-		"channels=%d tracks=%d unmatched_animation_nodes=%d constant_channels=%d duplicate_tracks=%d skins=%d bones=%d bind_ok=%d/%d "+
+		"channels=%d tracks=%d unmatched_animation_nodes=%d constant_channels=%d skins=%d bones=%d bind_ok=%d/%d "+
 		"weights_bad=%d aabb_ok=%d/%d unclaimed=%d shared=%d mdx_padding=%d mdx_unclaimed=%d %s",
 		label, stats.Nodes, stats.Meshes, stats.Hidden, stats.Verts, stats.Faces, stats.Mismatch, stats.HdrNodes,
 		stats.NormalsMatching, stats.NormalsChecked, stats.PlanesMatching, stats.PlanesChecked,
 		stats.AdjacentMatching, stats.AdjacentChecked, stats.AdjacentOutside, stats.RadiusMatching,
 		stats.RadiusChecked, stats.AreaMatching, stats.AreaChecked, stats.NormalsReplaced, stats.NormalsOmitted,
 		stats.ControllersMatching, stats.ControllersChecked, stats.Animations, stats.AnimationNodes, stats.Keys,
-		stats.Channels, stats.Tracks, stats.UnmatchedAnimationNodes, stats.ConstantChannels, stats.DuplicateTracks, stats.Skins, stats.Bones,
+		stats.Channels, stats.Tracks, stats.UnmatchedAnimationNodes, stats.ConstantChannels, stats.Skins, stats.Bones,
 		stats.BindMatching, stats.BindChecked, stats.WeightsBad, stats.AabbMatching, stats.AabbChecked, stats.Unclaimed, stats.Shared, stats.MdxPadding, stats.MdxUnclaimed,
 		Verdict(result.Errors[:min(5, len(result.Errors))]...))
 }

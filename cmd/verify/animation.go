@@ -119,6 +119,39 @@ func (m sourceModel) tree(root int) []int {
 	return nodes
 }
 
+// pairNodes pairs the tree of model below root with the tree of other below otherRoot, as the game pairs a
+// model with an animation (PC code, 0x483E92 to 0x483EEC). The roots are paired. Below a pair, child i of
+// the model node takes the first child of the other node, searched from child i on with wrap-around, that
+// has the same node number. Names play no part. It returns the pairs of node offsets in the order of the
+// walk.
+func pairNodes(model sourceModel, root int, other sourceModel, otherRoot int) [][2]int {
+	children := func(m sourceModel, node int) []int {
+		var result []int
+		for i := range m.u32(node + sourceChildArray + 4) {
+			result = append(result, m.u32(m.u32(node+sourceChildArray)+4*i))
+		}
+		return result
+	}
+
+	var pairs [][2]int
+	var pair func(node, match int)
+	pair = func(node, match int) {
+		pairs = append(pairs, [2]int{node, match})
+		candidates := children(other, match)
+		for i, child := range children(model, node) {
+			for k := range candidates {
+				candidate := candidates[(i+k)%len(candidates)]
+				if other.u16(candidate+sourceNodeNumber) == model.u16(child+sourceNodeNumber) {
+					pair(child, candidate)
+					break
+				}
+			}
+		}
+	}
+	pair(root, otherRoot)
+	return pairs
+}
+
 // jqLines runs a jq program on a file and returns its output lines.
 func jqLines(program, path string) ([]string, string) {
 	result := kotor.Exec("jq", []string{"-r", program, path}, nil)
@@ -260,9 +293,8 @@ func sourceControllers(m sourceModel, offset int) []sourceTrack {
 }
 
 // checkAnimations compares the animations of a model glTF file with the source. path is the converted file
-// without extensions. Each animation node animates the model node with the same node number and name. Its
-// position, orientation and scale controllers must be channels, in node and controller order, keeping only
-// the first channel per node and path. The input of each channel and track must equal the source key times
+// without extensions. Each animation node animates the model nodes that pairNodes pairs with it. Its
+// position, orientation and scale controllers must be channels, in node and controller order. The input of each channel and track must equal the source key times
 // byte for byte. A translation must be the rest position plus the stored offset, a rotation the unpacked or
 // stored quaternion, normalized, and a scale the stored scale on all three axes. A Bezier position must be a
 // cubic spline whose tangents are three times the control offsets divided by the key interval. Other
@@ -281,17 +313,9 @@ func checkAnimations(path string, mdl []byte) string {
 
 	model := newSourceModel(mdl)
 	geometry := model.tree(model.u32(sourceRootNode))
-	glTfNode := func(number int, name string) int {
-		found := -1
-		for i, node := range geometry {
-			if model.u16(node+sourceNodeNumber) == number && strings.EqualFold(model.name(node), name) {
-				if found >= 0 {
-					return -1
-				}
-				found = i + 1
-			}
-		}
-		return found
+	glTfIndex := map[int]int{}
+	for i, node := range geometry {
+		glTfIndex[node] = i + 1
 	}
 
 	offsets := model.u32(sourceAnimations)
@@ -316,25 +340,21 @@ func checkAnimations(path string, mdl []byte) string {
 		var channels []sourceTrack
 		var paths []channel
 		var tracks []sourceTrack
+		pairs := pairNodes(model, geometry[0], model, model.u32(header+sourceRootNode))
 		for _, node := range model.tree(model.u32(header + sourceRootNode)) {
-			target := glTfNode(model.u16(node+sourceNodeNumber), model.name(node))
-			if target < 0 {
-				continue
-			}
-			for _, track := range sourceControllers(model, node) {
-				track.node = target
-				kind := map[int]string{keyPosition: "translation", keyOrientation: "rotation", keyScale: "scale"}[track.kind]
-				if kind == "" {
-					tracks = append(tracks, track)
+			for _, pair := range pairs {
+				if pair[1] != node {
 					continue
 				}
-				known := false
-				for _, other := range paths {
-					known = known || other == channel{target, kind}
-				}
-				if !known {
+				for _, track := range sourceControllers(model, node) {
+					track.node = glTfIndex[pair[0]]
+					kind := map[int]string{keyPosition: "translation", keyOrientation: "rotation", keyScale: "scale"}[track.kind]
+					if kind == "" {
+						tracks = append(tracks, track)
+						continue
+					}
 					channels = append(channels, track)
-					paths = append(paths, channel{target, kind})
+					paths = append(paths, channel{track.node, kind})
 				}
 			}
 		}

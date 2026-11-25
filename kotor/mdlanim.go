@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"math"
 	"slices"
-	"strings"
 )
 
 // Controller types that every node class understands.
@@ -193,28 +192,13 @@ type MdlAnimationExtras struct {
 	ConstantChannel bool       `json:"constant_channel,omitempty"`
 }
 
-// mdlTarget is a node of the model tree that animations can address: its glTF node, its MDL flags, its name
-// and its rest translation.
+// mdlTarget is a node of the model tree that animations can address: its glTF node, its node number, its MDL
+// flags and its rest translation.
 type mdlTarget struct {
 	node        int
+	number      int
 	flags       int
-	name        string
 	translation vec3
-}
-
-// findTarget returns the node of the model tree with the given node number and name. Names are compared
-// without regard to case.
-func findTarget(targets map[int][]mdlTarget, number int, name string) (mdlTarget, bool) {
-	var found []mdlTarget
-	for _, candidate := range targets[number] {
-		if strings.EqualFold(candidate.name, name) {
-			found = append(found, candidate)
-		}
-	}
-	if len(found) != 1 {
-		return mdlTarget{}, false
-	}
-	return found[0], true
 }
 
 // Fields of the animation header, which starts with a 0x50-byte geometry header like the model header.
@@ -229,10 +213,10 @@ const (
 var animationClassAddresses = [2]int{0x004134f0, 0x0043ece0}
 
 // readAnimations decodes the animations of the model and adds them to doc as glTF animations. targets maps
-// each node number to the nodes of the model tree with that number, names gives the name table, and root is
-// the root node of the model tree. An animation node animates the model node with the same node number and
-// name.
-func readAnimations(r *mdlReader, doc *Gltf, stats *MdlStats, targets map[int][]mdlTarget, names []string, root mdlTarget) {
+// each glTF node of the model tree to its node number, flags and rest translation, and root is the glTF node
+// of the root of the model tree. The children of the model nodes are those of doc. Animation nodes are paired
+// with model nodes as the game pairs them (see pairAnimationNodes).
+func readAnimations(r *mdlReader, doc *Gltf, stats *MdlStats, targets map[int]mdlTarget, root int) {
 	const (
 		animationArray  = 0x58
 		reservedStart   = 0x30
@@ -270,26 +254,27 @@ func readAnimations(r *mdlReader, doc *Gltf, stats *MdlStats, targets map[int][]
 		}
 
 		animation := gltfAnimation{Name: name, Channels: []gltfChannel{}, Samplers: []gltfSampler{}, Extras: extras}
-		// When two animation nodes animate the same node, the first in tree order is kept.
 		channel := func(node int, path string, interpolation string, times, values []float32, width int) {
-			if slices.ContainsFunc(animation.Channels, func(other gltfChannel) bool {
-				return other.Target == gltfTarget{Node: node, Path: path}
-			}) {
-				stats.DuplicateTracks++
-				return
-			}
 			input := gltfFloats(doc, times, 1, true, gltfNoTarget)
 			output := gltfFloats(doc, values, width, false, gltfNoTarget)
 			animation.Samplers = append(animation.Samplers, gltfSampler{Input: input, Interpolation: interpolation, Output: output})
 			animation.Channels = append(animation.Channels, gltfChannel{Sampler: len(animation.Samplers) - 1, Target: gltfTarget{Node: node, Path: path}})
 		}
 
+		// The animation tree in depth-first order, with the controllers, the node number and the children of
+		// each node.
+		type animationNode struct {
+			controllers []mdlController
+			number      int
+			children    []int
+		}
+		var nodes []animationNode
 		seen := map[int]bool{}
-		var walk func(at, parent, depth int)
-		walk = func(at, parent, depth int) {
+		var walk func(at, parent, depth int) int
+		walk = func(at, parent, depth int) int {
 			if seen[at] || depth > maxNodeDepth {
 				r.problem("animation node loop in " + name)
-				return
+				return -1
 			}
 			seen[at] = true
 			stats.AnimationNodes++
@@ -297,7 +282,6 @@ func readAnimations(r *mdlReader, doc *Gltf, stats *MdlStats, targets map[int][]
 
 			flags, _ := r.u16(at)
 			number, _ := r.u16(at + 2)
-			nameIndex, _ := r.u16(at + 4)
 			owner, _ := r.u32(at + nodeOwnerField)
 			parentOffset, _ := r.u32(at + nodeParentField)
 			pose, _ := r.f32(at+0x10, 7)
@@ -305,107 +289,131 @@ func readAnimations(r *mdlReader, doc *Gltf, stats *MdlStats, targets map[int][]
 				r.problem("unexpected animation node header in " + name)
 			}
 
-			controllers := readControllers(r, at, name)
-			nodeName := ""
-			if nameIndex < len(names) {
-				nodeName = names[nameIndex]
-			}
-			target, known := findTarget(targets, number, nodeName)
-			if !known {
-				stats.UnmatchedAnimationNodes++
-			}
-			for _, controller := range controllers {
-				if !known {
-					break
-				}
-				stats.Keys += len(controller.times)
-				times := make([]float32, len(controller.times))
-				for k, time := range controller.times {
-					times[k] = float32(time)
-				}
-
-				var values []float32
-				switch controller.kind {
-				case controllerPosition:
-					// A position key is an offset from the rest position. A Bezier key stores control
-					// offsets at about one third of the way to its neighbours, which become the tangents of
-					// a glTF cubic spline.
-					interpolation := "LINEAR"
-					cubic := controller.bezier && len(times) > 1
-					if cubic {
-						interpolation = "CUBICSPLINE"
-					}
-					for k, row := range controller.rows {
-						var value, incoming, outgoing [3]float32
-						for axis := range 3 {
-							value[axis] = float32(target.translation[axis] + row[axis])
-							if cubic && k > 0 {
-								incoming[axis] = float32(-bezierParts * row[3+axis] / (controller.times[k] - controller.times[k-1]))
-							}
-							if cubic && k < len(times)-1 {
-								outgoing[axis] = float32(bezierParts * row[6+axis] / (controller.times[k+1] - controller.times[k]))
-							}
-						}
-						if cubic {
-							values = append(values, incoming[:]...)
-						}
-						values = append(values, value[:]...)
-						if cubic {
-							values = append(values, outgoing[:]...)
-						}
-					}
-					channel(target.node, "translation", interpolation, times, values, 3)
-				case controllerOrientation:
-					for _, row := range controller.rows {
-						length := math.Sqrt(row[0]*row[0] + row[1]*row[1] + row[2]*row[2] + row[3]*row[3])
-						for axis := range 4 {
-							values = append(values, float32(row[axis]/length))
-						}
-					}
-					channel(target.node, "rotation", "LINEAR", times, values, 4)
-				case controllerScale:
-					for _, row := range controller.rows {
-						values = append(values, float32(row[0]), float32(row[0]), float32(row[0]))
-					}
-					channel(target.node, "scale", "LINEAR", times, values, 3)
-				default:
-					for _, row := range controller.rows {
-						for _, value := range row {
-							values = append(values, float32(value))
-						}
-					}
-					interpolation := "LINEAR"
-					if controller.bezier {
-						interpolation = "BEZIER"
-					}
-					extras.Tracks = append(extras.Tracks, MdlTrack{
-						Node:          target.node,
-						Controller:    controllerName(target.flags, controller.kind),
-						Interpolation: interpolation,
-						Width:         len(controller.rows[0]),
-						Input:         gltfFloats(doc, times, 1, true, gltfNoTarget),
-						Output:        gltfFloats(doc, values, 1, false, gltfNoTarget),
-					})
-				}
-				if (controller.kind == controllerOrientation || controller.kind == controllerScale) && controller.bezier {
-					r.problem(fmt.Sprintf("Bezier keys for controller %d in %s", controller.kind, name))
-				}
-			}
+			index := len(nodes)
+			nodes = append(nodes, animationNode{controllers: readControllers(r, at, name), number: number})
 
 			children, childCount := r.array(at+nodeChildArray, 4, "animation children")
 			for c := range childCount {
 				child, _ := r.u32(children + 4*c)
-				walk(child, at, depth+1)
+				if childIndex := walk(child, at, depth+1); childIndex >= 0 {
+					nodes[index].children = append(nodes[index].children, childIndex)
+				}
 			}
+			return index
 		}
 		treeRoot, _ := r.u32(offset + 0x28)
 		walk(treeRoot, 0, 0)
 
+		// The game pairs the two roots. Below a pair, child i of the model node is paired with the first child
+		// of the animation node, searched from child i on with wrap-around, that has the same node number
+		// (PC code, 0x483E92 to 0x483EEC). Names play no part, and the children of an unpaired model node stay
+		// unpaired.
+		paired := make([][]mdlTarget, len(nodes))
+		var pair func(own, other int)
+		pair = func(own, other int) {
+			paired[other] = append(paired[other], targets[own])
+			candidates := nodes[other].children
+			for i, child := range doc.Nodes[own].Children {
+				for k := range candidates {
+					candidate := candidates[(i+k)%len(candidates)]
+					if nodes[candidate].number == targets[child].number {
+						pair(child, candidate)
+						break
+					}
+				}
+			}
+		}
+		if len(nodes) > 0 {
+			pair(root, 0)
+		}
+
+		for n, node := range nodes {
+			if len(paired[n]) == 0 {
+				stats.UnmatchedAnimationNodes++
+			}
+			for _, target := range paired[n] {
+				for _, controller := range node.controllers {
+					stats.Keys += len(controller.times)
+					times := make([]float32, len(controller.times))
+					for k, time := range controller.times {
+						times[k] = float32(time)
+					}
+
+					var values []float32
+					switch controller.kind {
+					case controllerPosition:
+						// A position key is an offset from the rest position of the model node, which the game
+						// adds to the key (PC code, 0x483330). A Bezier key stores control offsets at about one
+						// third of the way to its neighbours, which become the tangents of a glTF cubic spline.
+						interpolation := "LINEAR"
+						cubic := controller.bezier && len(times) > 1
+						if cubic {
+							interpolation = "CUBICSPLINE"
+						}
+						for k, row := range controller.rows {
+							var value, incoming, outgoing [3]float32
+							for axis := range 3 {
+								value[axis] = float32(target.translation[axis] + row[axis])
+								if cubic && k > 0 {
+									incoming[axis] = float32(-bezierParts * row[3+axis] / (controller.times[k] - controller.times[k-1]))
+								}
+								if cubic && k < len(times)-1 {
+									outgoing[axis] = float32(bezierParts * row[6+axis] / (controller.times[k+1] - controller.times[k]))
+								}
+							}
+							if cubic {
+								values = append(values, incoming[:]...)
+							}
+							values = append(values, value[:]...)
+							if cubic {
+								values = append(values, outgoing[:]...)
+							}
+						}
+						channel(target.node, "translation", interpolation, times, values, 3)
+					case controllerOrientation:
+						for _, row := range controller.rows {
+							length := math.Sqrt(row[0]*row[0] + row[1]*row[1] + row[2]*row[2] + row[3]*row[3])
+							for axis := range 4 {
+								values = append(values, float32(row[axis]/length))
+							}
+						}
+						channel(target.node, "rotation", "LINEAR", times, values, 4)
+					case controllerScale:
+						for _, row := range controller.rows {
+							values = append(values, float32(row[0]), float32(row[0]), float32(row[0]))
+						}
+						channel(target.node, "scale", "LINEAR", times, values, 3)
+					default:
+						for _, row := range controller.rows {
+							for _, value := range row {
+								values = append(values, float32(value))
+							}
+						}
+						interpolation := "LINEAR"
+						if controller.bezier {
+							interpolation = "BEZIER"
+						}
+						extras.Tracks = append(extras.Tracks, MdlTrack{
+							Node:          target.node,
+							Controller:    controllerName(target.flags, controller.kind),
+							Interpolation: interpolation,
+							Width:         len(controller.rows[0]),
+							Input:         gltfFloats(doc, times, 1, true, gltfNoTarget),
+							Output:        gltfFloats(doc, values, 1, false, gltfNoTarget),
+						})
+					}
+					if (controller.kind == controllerOrientation || controller.kind == controllerScale) && controller.bezier {
+						r.problem(fmt.Sprintf("Bezier keys for controller %d in %s", controller.kind, name))
+					}
+				}
+			}
+		}
+
 		if len(animation.Channels) == 0 {
 			extras.ConstantChannel = true
 			stats.ConstantChannels++
-			rest := root.translation
-			channel(root.node, "translation", "LINEAR", []float32{0}, []float32{float32(rest[0]), float32(rest[1]), float32(rest[2])}, 3)
+			rest := targets[root].translation
+			channel(root, "translation", "LINEAR", []float32{0}, []float32{float32(rest[0]), float32(rest[1]), float32(rest[2])}, 3)
 		}
 		stats.Animations++
 		stats.Channels += len(animation.Channels)
