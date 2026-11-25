@@ -790,37 +790,53 @@ The meaning of each slot follows from two independent sources: the texts of the 
 | 12–13 | Pain grunts                             | `hit` in 177 of 184 uses                                                    | "Pain Grunt 1 - Do not translate this text"     | high       |
 | 14    | Low health                              | `low` in 11 of 14 uses                                                      | "Can't take much more of this!"                 | medium     |
 | 15    | Death                                   | `dead` in 86 of 92 uses                                                     | "Death - Do not translate this text"            | high       |
-| 16    | Critical hit                            | `crit` in 11 of 14 uses                                                     | "Take that!"                                    | medium     |
+| 16    | Critical hit                            | `crit` in 11 of 14 uses                                                     | "Take that!"                                    | high       |
 | 17    | Target is immune                        | `tia` in 11 of 13 uses                                                      | "I am doing no damage!"                         | medium     |
-| 18    | Mine laid; in eight files, death        | `lmin` in 11 uses, `die` or `DIE` in 8                                      | "Mine successfully laid.", "Player Death Sound" | medium     |
+| 18    | Mine laid; in eight files, death        | `lmin` in 11 uses, `die` or `DIE` in 8                                      | "Mine successfully laid.", "Player Death Sound" | high       |
 | 19    | Mine disarmed                           | `dmin` in 12 of 13 uses                                                     | "Disarmed."                                     | medium     |
-| 20    | Stealth begins                          | `stlh` in 11 of 12 uses                                                     | "I shall move unseen."                          | medium     |
+| 20    | Stealth begins                          | `stlh` in 11 of 12 uses                                                     | "I shall move unseen."                          | high       |
 | 21    | Search begins                           | `srch` in 12 of 13 uses                                                     | "I shall be attentive."                         | medium     |
-| 22    | Lock picking begins                     | `block` in 12 of 13 uses                                                    | "Affirmative."                                  | medium     |
-| 23    | Lock picking fails                      | `flock` in 12 of 13 uses                                                    | "Damn!"                                         | medium     |
-| 24    | Lock picking succeeds                   | `slock` in 12 of 13 uses                                                    | "Opened."                                       | medium     |
+| 22    | Lock picking begins                     | `block` in 12 of 13 uses                                                    | "Affirmative."                                  | high       |
+| 23    | Lock picking fails                      | `flock` in 12 of 13 uses                                                    | "Damn!"                                         | high       |
+| 24    | Lock picking succeeds                   | `slock` in 12 of 13 uses                                                    | "Opened."                                       | high       |
 | 25    | Separated from the party                | `sprty` in 12 of 13 uses                                                    | "Hang back here for a minute."                  | medium     |
 | 26    | Rejoins the party                       | `rprty` in all 13 uses                                                      | "Hey! Back again!"                              | medium     |
-| 27    | Poisoned                                | `pois` in all 13 uses                                                       | "Agh. I think I've been poisoned..."            | medium     |
+| 27    | Poisoned                                | `pois` in all 13 uses                                                       | "Agh. I think I've been poisoned..."            | high       |
 | 28–48 | Never read by the engine                | Empty in all files except slot 33, which holds a `slct` sound in two files. | none                                            | high       |
 
-The death sound in slot 18 occurs in the eight files with 49 slots: `darkjedi`, `drdassassin`, `drdmkone`, `drdprobe`, `katarn`, `kinrath`, `player` and `sithtroop`. In each of them only slot 18 is used. The engine has a single slot reader for all files, so it reads slot 18 of these files for the same event as in the other files, which the suffixes name as "mine laid". The death sound of these eight files therefore probably plays when a mine is laid, not at death. This was not tested in the game. The nine extra slots of these files are never read.
+The death sound in slot 18 occurs in the eight files with 49 slots: `darkjedi`, `drdassassin`, `drdmkone`, `drdprobe`, `katarn`, `kinrath`, `player` and `sithtroop`. In each of them only slot 18 is used. The engine has a single slot reader for all files, so it reads slot 18 of these files for the same event as in the other files. The code plays slot 18 only when a creature succeeds in laying a mine (see below). The death sound of these eight files therefore plays when a mine is laid, not at death. This was not tested in the game. The nine extra slots of these files are never read.
 
 ### How the engine reads a sound set
 
 The engine reads a slot with one routine (PC code, 0x678820, and Xbox code, 0x92990, which is identical). It takes a slot number from 1 to 28, which is the slot index of the table above plus 1, and returns nothing for any other number. For a valid number it reads the u32 at the file offset given at 0x08 plus 4 × (number − 1). It ignores the value 0xFFFFFFFF and otherwise passes the string number to the string table. Slots 28 to 48 are therefore never read, and only the first 28 slots of a file have a meaning. The routine does not check the slot count of the file.
 
-A creature keeps its sound set at offset 0x36C of its statistics object and reloads it when its sound set number at 0x2FC changes (PC code, 0x60B7C0). The number is a row of `soundset.2da`, whose column RESREF names the SSF file. The loader of that table also reads the columns STRREF and GENDER (PC code, 0x678C10). All sounds of a sound set are played through one routine (PC code, 0x611470), whose first argument is the slot number. The callers below pass constant slot numbers, and each agrees with the meaning in the table above.
+A creature keeps its sound set at offset 0x36C of its statistics object and reloads it when its sound set number at 0x2FC changes (PC code, 0x60B7C0). The number is a row of `soundset.2da`, whose column RESREF names the SSF file. The loader of that table also reads the columns STRREF and GENDER (PC code, 0x678C10). All sounds of a sound set are played through one routine (PC code, 0x611470), whose first argument is the slot number. It is the only caller of the slot reader, through the wrapper at 0x60B8A0, so every slot that the game plays passes through it. The playback routine plays no sound for a dead creature, except slot number 16 (PC code, 0x611536). Slot index 15, the death cry, is the only slot a dead creature can play.
 
-| Caller (PC code) | Slot numbers passed | Slot indexes | Meaning in the table |
-| ---------------- | ------------------- | ------------ | -------------------- |
-| 0x5F4D60 | 7, 8 or 9, one chosen at random | 6 to 8 | Responses when selected |
-| 0x618720 | 10, 11 or 12, one chosen at random | 9 to 11 | Attack grunts |
-| 0x6180D7 | 13 or 14, one chosen at random | 12 and 13 | Pain grunts |
-| 0x613930 | 21 | 20 | Stealth begins (the caller was not identified further) |
-| 0x519C20 | 24 | 23 | Lock picking fails (the caller was not identified further) |
+The game runs as a server and a client in one process, even in single-player play. The server decides when a creature speaks and sends the slot number to the client in a network message named "VoiceChat". The message has major number 26 and minor number 1 (PC code, dispatcher at 0x66A6E9 and its jump table at 0x66AC34). Its body is an object identifier followed by the slot number as one byte. The server builds it in one routine (PC code, 0x569EC0), and the client passes the byte to the playback routine (PC code, 0x651BA0). The server sends it from two routines. The routine at 0x4F2520 sends a given slot number to every player near the creature. The routine at 0x4EC8E0 chooses one of the slot numbers 1 to 5 at random and sends it to the first player if that player is near the creature. Neither routine is called through a pointer.
 
-The playback routine plays no sound for a dead creature, except slot number 16 (PC code, 0x611536). Slot index 15, the death cry, is the only slot a dead creature can play. Other slot numbers reach the playback routine from a network message named "VoiceChat", which carries the number as one byte (PC code, 0x651BA0). Their senders were not traced.
+The table below lists every call that leads to the playback routine, either directly on the client or through the "VoiceChat" message from the server. Each event was identified from the code around the call, and each agrees with the meaning in the slot table above. The table lists every caller of the playback routine and of both server routines.
+
+| Caller (PC code) | Path | Slot numbers passed | Slot indexes | Event in the code |
+| ---------------- | ---- | ------------------- | ------------ | ----------------- |
+| 0x4F2680 | Message | 1 to 5, one chosen at random | 0 to 4 | The creature enters combat. The sound plays with a chance of 3 in 10. |
+| 0x4FE15B | Message | 1 to 5, one chosen at random | 0 to 4 | A combat routine, with a chance of 3 in 4 or 1 in 10 depending on the creature's state. The event was not identified further. |
+| 0x5F4D60 | Direct | 7, 8 or 9, one chosen at random | 6 to 8 | The creature is selected. |
+| 0x618720 | Direct | 10, 11 or 12, one chosen at random | 9 to 11 | The creature attacks. |
+| 0x651C10 | Direct | 10 | 9 | A client message handler, called from 0x663291. The message was not identified. |
+| 0x6180D7 | Direct | 13 or 14, one chosen at random | 12 and 13 | The creature is hit. |
+| 0x4E104A | Message | 16 | 15 | The creature dies. The routine also reads the field DestroyObjectDelay. |
+| 0x5BB544 | Message | 17 | 16 | An attack hits with attack result 2. The same flag makes the damage routine (0x5A9050) apply the critical multiplier and log "Critical x%d". |
+| 0x51A9FA | Message | 19 or 24 | 18 or 23 | The creature tries to set a trap. Slot 19 is sent when the skill roll reaches the difficulty, and slot 24 when it does not. The routine reads the trap fields SetDC, DetectDCMod, DisarmDCMod and TrapScript. |
+| 0x613930 | Direct | 21 | 20 | Stealth begins. The caller was not identified further. |
+| 0x57DDD8 | Message | 23 | 22 | The lock-picking action begins. |
+| 0x57E3EF | Message | 24 | 23 | The lock-picking action fails on a path where the skill roll is not made. The condition was not identified. |
+| 0x57E679 | Message | 24 or 25 | 23 or 24 | The lock-picking action compares the skill roll with OpenLockDC, read from offset 0x274 of a door or 0x2BF of a placeable. Slot 25 is sent on success and slot 24 on failure. |
+| 0x519C20 | Direct | 24 | 23 | A failure. The caller was not identified further. |
+| 0x4DB625 | Message | 28 | 27 | A poison takes effect. The routine reads the `poison.2da` columns DC_SAVE, DURATION and PERIOD. |
+
+The lock-picking action is action number 38 in the action switch at 0x57F724, and setting a trap is action number 29. Slot index 23 is therefore a general failure line, which the lock-picking and the trap-setting actions share.
+
+No code in the PC build passes the slot numbers 6, 15, 18, 20, 22, 26 or 27. The slot indexes 5 (the sixth battle cry), 14 (low health), 17 (target is immune), 19 (mine disarmed), 21 (search begins), 25 (separated from the party) and 26 (rejoins the party) are therefore never played. Their meanings rest on the sound names and texts alone. Thirty of the 105 files fill all six battle-cry slots, but the sixth is never chosen. Whether the Xbox build plays these slots was not checked.
 
 ## WAV sounds
 
