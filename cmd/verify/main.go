@@ -1092,8 +1092,8 @@ func movieStreams(probe kotor.ExecResult) (*probeStream, *probeStream, string) {
 
 // sourceMovie returns the facts of a source movie. A Bink movie gives them in its header, and its audio
 // duration follows from the decoded sample bytes that the header declares. For an XMV movie, ffprobe reads
-// them from the source, counting the decoded video frames, and the audio duration follows from the samples
-// that ffmpeg decodes.
+// them from the source, counting the decoded video frames, and the audio duration follows from the number of
+// Xbox ADPCM blocks.
 func sourceMovie(path string) (movieFacts, string) {
 	if kotor.Build.Movie == ".bik" {
 		movie := kotor.ParseBink(kotor.ReadFile(path))
@@ -1121,15 +1121,17 @@ func sourceMovie(path string) (movieFacts, string) {
 	}
 	facts := movieFacts{width: *video.Width, height: *video.Height, frames: int(optionalNumber(video.NbReadFrames))}
 	if sound != nil && sound.Channels != nil {
-		// ffprobe estimates the stream duration of an XMV movie from its bit rate, so the audio is decoded and
-		// its samples are counted instead.
+		// ffprobe estimates the stream duration of an XMV movie from its bit rate, and ffmpeg decodes its Xbox
+		// ADPCM audio with 65 samples per block. ffmpeg therefore copies the raw audio blocks out, and the
+		// duration follows from 64 samples per block of 36 bytes per channel.
 		facts.sampleRate = int(optionalNumber(sound.SampleRate))
 		facts.channels = *sound.Channels
-		decoded := kotor.Exec("ffmpeg", []string{"-v", "quiet", "-i", path, "-map", "0:a", "-f", "s16le", "-"}, nil)
-		if facts.sampleRate == 0 || facts.channels == 0 || len(decoded.Stdout) == 0 {
-			return movieFacts{}, "source audio does not decode"
+		raw := kotor.Exec("ffmpeg", []string{"-v", "quiet", "-i", path, "-map", "0:a", "-c:a", "copy", "-f", "data", "-"}, nil)
+		if facts.sampleRate == 0 || facts.channels == 0 || len(raw.Stdout) == 0 {
+			return movieFacts{}, "source audio does not demux"
 		}
-		facts.durationS = float64(len(decoded.Stdout)) / float64(sampleBytes*facts.channels*facts.sampleRate)
+		blocks := len(raw.Stdout) / (xboxBlockBytes * facts.channels)
+		facts.durationS = float64(blocks*xboxBlockSamples) / float64(facts.sampleRate)
 	}
 	return facts, ""
 }
@@ -1579,6 +1581,7 @@ func isImaAdpcm(wav []byte) bool {
 // Xbox ADPCM blocks yield 64 samples per channel, but ffmpeg decodes them as IMA ADPCM blocks of 65 samples,
 // the 65th from the last nibble, which the Xbox format drops.
 const (
+	xboxBlockBytes     = 36
 	xboxBlockSamples   = 64
 	ffmpegBlockSamples = xboxBlockSamples + 1
 	sampleBytes        = 2

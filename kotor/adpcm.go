@@ -100,6 +100,41 @@ func widenPcm8(data []byte, channels, rate int) AdpcmDecoded {
 	return AdpcmDecoded{pcmWav(pcm, channels, rate, len(pcm)*pcmBytesPerSample), info, ""}
 }
 
+// Xbox ADPCM blocks hold 36 bytes per channel and yield 64 samples per channel. The fmt chunk of an Xbox
+// ADPCM WAV file is 20 bytes long: the 16 bytes of every fmt chunk, then a u16 extra size of 2 and the u16
+// samples per block.
+const (
+	xboxBlockBytes      = 36
+	xboxBlockSamples    = 64
+	xboxBitsPerSample   = 4
+	xboxFmtChunkSize    = 20
+	xboxFmtExtraSize    = 2
+	xboxWavHeaderLength = RiffHeaderSize + ChunkHeaderSize + xboxFmtChunkSize + ChunkHeaderSize
+)
+
+// XboxAdpcmWav wraps raw Xbox ADPCM blocks, such as the audio packets of an XMV movie, in a WAV header of
+// format 0x69, so that DecodeAdpcm can decode them.
+func XboxAdpcmWav(blocks []byte, channels, rate int) []byte {
+	out := make([]byte, xboxWavHeaderLength, xboxWavHeaderLength+len(blocks))
+	blockAlign := xboxBlockBytes * channels
+	copy(out[0:], "RIFF")
+	binary.LittleEndian.PutUint32(out[4:], uint32(xboxWavHeaderLength-ChunkHeaderSize+len(blocks)))
+	copy(out[8:], "WAVE")
+	copy(out[12:], "fmt ")
+	binary.LittleEndian.PutUint32(out[16:], xboxFmtChunkSize)
+	binary.LittleEndian.PutUint16(out[20:], formatXboxAdpcm)
+	binary.LittleEndian.PutUint16(out[22:], uint16(channels))
+	binary.LittleEndian.PutUint32(out[24:], uint32(rate))
+	binary.LittleEndian.PutUint32(out[28:], uint32(rate*blockAlign/xboxBlockSamples))
+	binary.LittleEndian.PutUint16(out[32:], uint16(blockAlign))
+	binary.LittleEndian.PutUint16(out[34:], xboxBitsPerSample)
+	binary.LittleEndian.PutUint16(out[36:], xboxFmtExtraSize)
+	binary.LittleEndian.PutUint16(out[38:], xboxBlockSamples)
+	copy(out[40:], "data")
+	binary.LittleEndian.PutUint32(out[44:], uint32(len(blocks)))
+	return append(out, blocks...)
+}
+
 // AdpcmDecoded holds the converted file, or nil Out when Err explains why there is none.
 type AdpcmDecoded struct {
 	Out  []byte

@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -616,8 +617,46 @@ func convertAudio(summary *kotor.Summary, stage, folder string) {
 //
 // ffmpeg's XMV demuxer ends every XMV movie of more than one packet with the message xmvEndError, after it has
 // read the last packet. The packet chain of every movie ends exactly at the end of its file, and the converted
-// movies hold every video frame, so this message alone is not a failure.
+// movies hold every video frame, so this message alone is not a failure. The XMV video timestamps count
+// milliseconds, so the frames keep their timestamps ("-fps_mode passthrough") instead of being repeated to a
+// constant rate of 1,000 frames per second. The encoder and the MP4 track also keep the time base of
+// milliseconds, because a guessed frame rate of 30000/1001 shifts the timestamps by up to one frame.
 const xmvEndError = ": Input/output error"
+
+// xmvTimescale is the number of MP4 time units per second of a converted XMV movie.
+const xmvTimescale = "1000"
+
+// The XMV file header holds the u16 number of audio tracks at 0x20, and the first track's u16 format tag,
+// u16 channel count and u32 sample rate from 0x24. Every movie has one track of Xbox ADPCM (format 0x69).
+const (
+	xmvTrackCount   = 0x20
+	xmvTrackFormat  = 0x24
+	xmvXboxAdpcm    = 0x69
+	xmvHeaderLength = 0x2c
+)
+
+// xmvAudio returns the audio of an XMV movie as a 16-bit PCM WAV file, its report line and an error text.
+// ffmpeg decodes Xbox ADPCM with 65 samples per block instead of 64, so ffmpeg only copies the raw blocks
+// out of the movie and kotor.DecodeAdpcm decodes them.
+func xmvAudio(path string) ([]byte, string, string) {
+	header := kotor.Slice(kotor.ReadFile(path), 0, xmvHeaderLength)
+	if len(header) < xmvHeaderLength || binary.LittleEndian.Uint16(header[xmvTrackCount:]) != 1 ||
+		binary.LittleEndian.Uint16(header[xmvTrackFormat:]) != xmvXboxAdpcm {
+		return nil, "", "not one Xbox ADPCM audio track"
+	}
+	channels := int(binary.LittleEndian.Uint16(header[xmvTrackFormat+2:]))
+	rate := int(binary.LittleEndian.Uint32(header[xmvTrackFormat+4:]))
+
+	result := kotor.Exec("ffmpeg", []string{"-v", "quiet", "-i", path, "-map", "0:a", "-c:a", "copy", "-f", "data", "-"}, nil)
+	if result.Status != 0 || len(result.Stdout) == 0 {
+		return nil, "", "ffmpeg: no audio packets"
+	}
+	decoded := kotor.DecodeAdpcm(kotor.XboxAdpcmWav(result.Stdout, channels, rate))
+	if decoded.Err != "" {
+		return nil, "", "audio: " + decoded.Err
+	}
+	return decoded.Out, filepath.Base(path) + " xmv " + decoded.Info + " PASS", ""
+}
 
 const (
 	cpusPerMovie      = 3
@@ -647,6 +686,19 @@ func convertMovies(summary *kotor.Summary) {
 		inFile := filepath.Join(src, file)
 		outFile := filepath.Join(out, name+".mp4")
 		line := file + " xmv PASS"
+		inputs := []string{"-i", inFile}
+		maps := []string{"-map", "0:v", "-map", "0:a?"}
+		var audio []byte
+		if kotor.Build.Movie == ".xmv" {
+			var problem string
+			audio, line, problem = xmvAudio(inFile)
+			if problem != "" {
+				report[i] = name + ".mp4 FAIL: " + problem
+				return
+			}
+			inputs = append(inputs, "-f", "wav", "-i", "pipe:0")
+			maps = []string{"-map", "0:v", "-map", "1:a", "-fps_mode", "passthrough", "-enc_time_base", "-1", "-video_track_timescale", xmvTimescale}
+		}
 		if kotor.Build.Movie == ".bik" {
 			movie := kotor.ParseBink(kotor.ReadFile(inFile))
 			line = kotor.ReportBink(file, movie)
@@ -656,13 +708,12 @@ func convertMovies(summary *kotor.Summary) {
 			}
 		}
 
-		result := kotor.Exec("ffmpeg", []string{
-			"-v", "error", "-y", "-i", inFile,
-			"-map", "0:v", "-map", "0:a?",
+		args := slices.Concat([]string{"-v", "error", "-y"}, inputs, maps, []string{
 			"-c:v", "libx264", "-preset", "slow", "-crf", movieCrf, "-pix_fmt", "yuv420p",
 			"-c:a", "aac", "-b:a", movieAudioBitrate,
 			"-movflags", "+faststart", outFile,
-		}, nil)
+		})
+		result := kotor.Exec("ffmpeg", args, audio)
 		stderr := strings.TrimSpace(result.Stderr)
 		if kotor.Build.Movie == ".xmv" {
 			stderr = strings.TrimSpace(strings.TrimSuffix(stderr, inFile+xmvEndError))
